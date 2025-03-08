@@ -83,26 +83,26 @@ button:hover {
 }
 
 #app {
-    height: 100vh;
+    max-width: 1280px;
+    margin: 0 auto;
     text-align: center;
 }
 
 #logo {
-    display: block;
-    width: 50%;
-    height: 50%;
-    margin: auto;
-    padding: 10% 0 0;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-origin: content-box;
+    height: 6em;
+    padding: 1.5em;
+    will-change: filter;
+    transition: filter 300ms;
+}
+
+#logo:hover {
+    filter: drop-shadow(0 0 2em #646cffaa);
 }
 
 .result {
     height: 20px;
     line-height: 20px;
-    margin: 1.5rem auto;
+    margin: 1.5em auto;
 }
 
 .input-box .btn {
