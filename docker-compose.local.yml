@@ -118,18 +118,18 @@ services:
       - ./clickhouse-init:/docker-entrypoint-initdb.d
 
   neobase-example-mysql:
-  #   image: mysql:latest
-  #   container_name: neobase-example-mysql
-  #   restart: always
-  #   ports:
-  #     - 3306:3306
-  #   environment:
-  #     MYSQL_USER: mysql
-  #     MYSQL_PASSWORD: mysql
-  #     MYSQL_ROOT_PASSWORD: root
-  #     MYSQL_DATABASE: testdb
-  #   volumes:
-  #     - mysql-data:/var/lib/mysql
+    image: mysql:latest
+    container_name: neobase-example-mysql
+    restart: always
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: testdb
+    volumes:
+      - mysql-data:/var/lib/mysql
 
 volumes:
   neobase-mongodb-data:
