@@ -1,0 +1,143 @@
+services:
+  neobase-mongodb:
+    image: mongo:latest
+    container_name: neobase-mongodb
+    restart: always
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: neobase
+      MONGO_INITDB_ROOT_PASSWORD: neobase
+    volumes:
+      - neobase-mongodb-data:/data/db
+    networks:
+      - neobase-network
+
+  neobase-redis:
+    image: redis:latest
+    container_name: neobase-redis
+    restart: always
+    command: >
+      redis-server 
+      --requirepass default
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --stop-writes-on-bgsave-error no
+    ports:
+      - 6379:6379
+    volumes:
+      - neobase-redis-data:/data
+    networks:
+      - neobase-network
+
+  neobase-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: neobase-backend
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      - IS_DOCKER=true
+      - PORT=3000
+      - ENVIRONMENT=DEVELOPMENT
+      - CORS_ALLOWED_ORIGIN=http://localhost:5173
+      - MAX_CHATS_PER_USER=1
+      - NEOBASE_ADMIN_USERNAME=admin
+      - NEOBASE_ADMIN_PASSWORD=admin123
+      - SCHEMA_ENCRYPTION_KEY=f9e34567890123456789012345678901
+      - JWT_SECRET=local_development_secret
+      - USER_JWT_EXPIRATION_MILLISECONDS=600000
+      - USER_JWT_REFRESH_EXPIRATION_MILLISECONDS=864000000
+      - NEOBASE_MONGODB_URI=mongodb://neobase:neobase@neobase-mongodb:27017/neobase?authSource=admin
+      - NEOBASE_MONGODB_NAME=neobase
+      - NEOBASE_REDIS_HOST=neobase-redis
+      - NEOBASE_REDIS_PORT=6379
+      - NEOBASE_REDIS_USERNAME=
+      - NEOBASE_REDIS_PASSWORD=default
+      - DEFAULT_LLM_CLIENT=openai
+      - OPENAI_API_KEY=your-openai-api-key-here
+      - OPENAI_MODEL=gpt-4
+      - OPENAI_MAX_COMPLETION_TOKENS=3072
+      - OPENAI_TEMPERATURE=1
+      - GEMINI_API_KEY=your-gemini-api-key-here
+      - GEMINI_MODEL=gemini-2.0-flash
+      - GEMINI_MAX_COMPLETION_TOKENS=3072
+      - GEMINI_TEMPERATURE=1
+    depends_on:
+      - neobase-mongodb
+      - neobase-redis
+    networks:
+      - neobase-network
+
+  neobase-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: neobase-client
+    environment:
+      - VITE_FRONTEND_BASE_URL=http://localhost:5173
+      - VITE_API_URL=http://localhost:3000/api
+      - VITE_ENVIRONMENT=DEVELOPMENT
+    restart: always
+    ports:
+      - 5173:5173
+    depends_on:
+      - neobase-backend
+    networks:
+      - neobase-network
+
+  neobase-example-postgres:
+    image: postgres:latest
+    container_name: neobase-example-postgres
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  neobase-example-clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: neobase-example-clickhouse
+    restart: always
+    ports:
+      - 8123:8123
+      - 9000:9000
+    environment:
+      - CLICKHOUSE_DB=testdb
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse-init:/docker-entrypoint-initdb.d
+
+  neobase-example-mysql:
+  #   image: mysql:latest
+  #   container_name: neobase-example-mysql
+  #   restart: always
+  #   ports:
+  #     - 3306:3306
+  #   environment:
+  #     MYSQL_USER: mysql
+  #     MYSQL_PASSWORD: mysql
+  #     MYSQL_ROOT_PASSWORD: root
+  #     MYSQL_DATABASE: testdb
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+
+volumes:
+  neobase-mongodb-data:
+  neobase-redis-data:
+  postgres-data:
+  clickhouse-data:
+  mysql-data:
+
+networks:
+  neobase-network:
+    driver: bridge
