@@ -1,0 +1,29 @@
+version: '3'
+services:
+  neobase-backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env
+    networks:
+      - dokploy-network
+
+  neobase-client:
+    build:
+      context: ../client
+      dockerfile: Dockerfile
+      args: # These are the environment variables for the client
+        - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL}
+        - VITE_API_URL=${VITE_API_URL}
+        - VITE_ENVIRONMENT=${VITE_ENVIRONMENT}
+    restart: always
+    depends_on:
+      - neobase-backend
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
