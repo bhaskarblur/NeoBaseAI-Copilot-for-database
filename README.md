@@ -35,10 +35,10 @@
 ## Supported LLM Clients
 - OpenAI (Any chat completion model)
 - Google Gemini (Any chat completion model)
+- Ollama (Any chat completion model)
 
 ## Planned to be supported LLM Clients
 - Anthropic (Claude 3.5 Sonnet)
-- Ollama (Any chat completion model)
 
 ## Tech Stack
 
@@ -84,7 +84,7 @@ Read ([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/blob/main/SETUP.md))
 
 ## Contributing
 
-We welcome contributions! Here’s how you can help:
+We welcome contributions! Here's how you can help:
 
 1. Fork the repository.
 2. Create a new branch (`git checkout -b feature/your-feature`).
