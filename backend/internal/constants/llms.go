@@ -3,6 +3,7 @@ package constants
 const (
 	OpenAI = "openai"
 	Gemini = "gemini"
+	Ollama = "ollama"
 )
 
 func GetLLMResponseSchema(provider string, dbType string) interface{} {
@@ -37,7 +38,15 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 		default:
 			return GeminiPostgresLLMResponseSchema
 		}
+	case Ollama:
+		switch dbType {
+		case DatabaseTypePostgreSQL:
+			return OllamaPostgreSQLLLMResponseSchema
+		default:
+			return OllamaPostgreSQLLLMResponseSchema
+		}
 	}
+
 	return ""
 }
 

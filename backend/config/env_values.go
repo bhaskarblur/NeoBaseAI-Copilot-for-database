@@ -52,6 +52,12 @@ type Environment struct {
 	GeminiModel               string
 	GeminiMaxCompletionTokens int
 	GeminiTemperature         float64
+
+	// Ollama configs
+	OllamaAPIKey              string
+	OllamaModel               string
+	OllamaMaxCompletionTokens int
+	OllamaTemperature         float64
 }
 
 var Env Environment
@@ -112,6 +118,12 @@ func LoadEnv() error {
 	Env.GeminiModel = getEnvWithDefault("GEMINI_MODEL", constants.GeminiModel)
 	Env.GeminiMaxCompletionTokens = getIntEnvWithDefault("GEMINI_MAX_COMPLETION_TOKENS", constants.GeminiMaxCompletionTokens)
 	Env.GeminiTemperature = getFloatEnvWithDefault("GEMINI_TEMPERATURE", constants.GeminiTemperature)
+
+	// Ollama configs
+	Env.OllamaAPIKey = getRequiredEnv("OLLAMA_API_KEY", "")
+	Env.OllamaModel = getEnvWithDefault("OLLAMA_MODEL", constants.OllamaModel)
+	Env.OllamaMaxCompletionTokens = getIntEnvWithDefault("OLLAMA_MAX_COMPLETION_TOKENS", constants.OllamaMaxCompletionTokens)
+	Env.OllamaTemperature = getFloatEnvWithDefault("OLLAMA_TEMPERATURE", constants.OllamaTemperature)
 
 	return validateConfig()
 }

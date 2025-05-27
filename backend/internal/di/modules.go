@@ -188,6 +188,45 @@ func Initialize() {
 			if err != nil {
 				log.Printf("Warning: Failed to register Gemini client: %v", err)
 			}
+		case constants.Ollama:
+			// Register default Ollama client
+			err := manager.RegisterClient(constants.Ollama, llm.Config{
+				Provider:            constants.Ollama,
+				Model:               config.Env.OllamaModel,
+				APIKey:              config.Env.OllamaAPIKey, // This will store the Ollama API URL
+				MaxCompletionTokens: config.Env.OllamaMaxCompletionTokens,
+				Temperature:         config.Env.OllamaTemperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypePostgreSQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeYugabyteDB),
+					},
+					{
+						DBType:       constants.DatabaseTypeMySQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeMySQL),
+					},
+					{
+						DBType:       constants.DatabaseTypeClickhouse,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeClickhouse),
+					},
+					{
+						DBType:       constants.DatabaseTypeMongoDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeMongoDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeMongoDB),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register Ollama client: %v", err)
+			}
 		}
 		return manager
 	}); err != nil {
