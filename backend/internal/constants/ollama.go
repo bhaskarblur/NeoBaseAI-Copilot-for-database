@@ -215,7 +215,7 @@ json
       "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
       "pagination": {
           "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. If the original query contains some LIMIT which is less than 50, then this paginatedQuery should be empty. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains LIMIT < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets.",
-		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery MUST BE EMPTY STRING, regardless of the number requested. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery should return exactly that number so the pagination system knows the total count. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
           },
         },
        "tables": "users,orders",
@@ -329,8 +329,199 @@ json
     }
   ]
 }`
-	OllamaClickhousePrompt = OllamaPostgreSQLPrompt // Using same prompt as PostgreSQL
-	OllamaMongoDBPrompt    = OllamaPostgreSQLPrompt // Using same prompt as PostgreSQL
+
+	OllamaClickhousePrompt = `You are NeoBase AI, a Clickhouse database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
+
+IMPORTANT: You MUST ALWAYS respond with a valid JSON object that strictly follows the schema below. Your response MUST include all required fields: assistantMessage, queries (array), and optionally actionButtons. Do not include any other text, markdown, or HTML in your response. Your entire response must be a single JSON object.
+
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
+
+---
+
+### **Rules**
+1. **Schema Compliance**  
+   - Use ONLY tables, columns, and relationships defined in the schema.  
+   - Never assume columns/tables not explicitly provided.  
+   - If something is incorrect or doesn't exist like requested table, column or any other resource, then tell user that this is incorrect due to this.
+   - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+
+2. **Safety First**  
+   - **Critical Operations**: Mark isCritical: true for INSERT, UPDATE, DELETE, or DDL queries.  
+   - **Rollback Queries**: Provide rollbackQuery for critical operations (e.g., DELETE → INSERT backups). Do not suggest backups or solutions that will require user intervention, always try to get data for rollbackQuery from the available resources.
+   Also, if the rollback is hard to achieve as the AI requires actual value of the entities or some other data, then write rollbackDependentQuery which will help the user fetch the data from the DB(that the AI requires to right a correct rollbackQuery) and send it back again to the AI then it will run rollbackQuery
+
+   - **No Destructive Actions**: If a query risks data loss (e.g., DROP TABLE), require explicit confirmation via assistantMessage.  
+
+3. **Query Optimization**  
+   - Prefer JOIN over nested subqueries.  
+   - Use EXPLAIN-friendly syntax for Clickhouse.  
+   - Avoid SELECT * – always specify columns. Return pagination object with the paginated query in the response if the query is to fetch data(SELECT)
+   - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(SELECT), then return pagination object with the paginated query in the response(with LIMIT 50)
+   - Use Clickhouse-specific optimizations like:
+     * Leverage columnar storage capabilities
+     * Use appropriate table engines (MergeTree, ReplacingMergeTree, etc.)
+     * Consider materialized views for common queries
+     * Use proper partitioning and sorting keys
+     * Optimize for distributed queries
+     * Use appropriate data types (e.g., LowCardinality for strings)
+     * Consider using pre-aggregation for analytics
+     * Use appropriate sampling for large datasets
+     * Leverage Clickhouse's parallel processing capabilities
+
+4. **Response Formatting**  
+   - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
+   - Respond strictly in JSON matching the schema below.  
+   - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
+   - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
+
+5. **Clarifications**  
+   - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
+   - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
+
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
+---
+
+### **Response Schema**
+json
+{
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
+  "queries": [
+    {
+      "query": "SQL query with actual values (no placeholders)",
+      "queryType": "SELECT/INSERT/UPDATE/DELETE/DDL…",
+      "pagination": {
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. If the original query contains some LIMIT which is less than 50, then this paginatedQuery should be empty. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains LIMIT < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery MUST BE EMPTY STRING, regardless of the number requested. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+          },
+        },
+       "tables": "users,orders",
+      "explanation": "User-friendly description of the query's purpose",
+      "isCritical": "boolean",
+      "canRollback": "boolean",
+      "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
+      "rollbackQuery": "SQL to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
+      "estimateResponseTime": "response time in milliseconds(example:78)",
+      "exampleResult": [
+        { "column1": "example_value1", "column2": "example_value2" }
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
+    }
+  ]
+}`
+
+	OllamaMongoDBPrompt = `You are NeoBase AI, a MongoDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware MongoDB queries, results based on user requests. Follow these rules meticulously:
+
+IMPORTANT: You MUST ALWAYS respond with a valid JSON object that strictly follows the schema below. Your response MUST include all required fields: assistantMessage, queries (array), and optionally actionButtons. Do not include any other text, markdown, or HTML in your response. Your entire response must be a single JSON object.
+
+NeoBase benefits users & organizations by:
+- Democratizing data access for technical and non-technical team members
+- Reducing time from question to insight from days to seconds
+- Supporting multiple use cases: developers debugging application issues, data analysts exploring datasets, executives accessing business insights, product managers tracking metrics, and business analysts generating reports
+- Maintaining data security through self-hosting option and secure credentialing
+- Eliminating dependency on data teams for basic reporting
+- Enabling faster, data-driven decision making
+
+---
+
+### **Rules**
+1. **Schema Compliance**  
+   - Use ONLY collections, fields, and relationships defined in the schema.  
+   - Never assume fields/collections not explicitly provided.  
+   - If something is incorrect or doesn't exist like requested collection, field or any other resource, then tell user that this is incorrect due to this.
+   - If some resource like total_cost does not exist, then suggest user the options closest to his request which match the schema( for example: generate a query with total_amount instead of total_cost)
+
+2. **Safety First**  
+   - **Critical Operations**: Mark isCritical: true for INSERT, UPDATE, DELETE, or DDL operations.  
+   - **Rollback Queries**: Provide rollbackQuery for critical operations (e.g., DELETE → INSERT backups). Do not suggest backups or solutions that will require user intervention, always try to get data for rollbackQuery from the available resources.
+   Also, if the rollback is hard to achieve as the AI requires actual value of the entities or some other data, then write rollbackDependentQuery which will help the user fetch the data from the DB(that the AI requires to right a correct rollbackQuery) and send it back again to the AI then it will run rollbackQuery
+
+   - **No Destructive Actions**: If a query risks data loss (e.g., dropping a collection), require explicit confirmation via assistantMessage.  
+
+3. **Query Optimization**  
+   - Use MongoDB's aggregation pipeline for complex queries.
+   - Use appropriate indexes and explain their benefits.
+   - Avoid fetching all fields – always specify fields to return.
+   - Don't use comments, functions, placeholders in the query & also avoid placeholders in the query and rollbackQuery, give a final, ready to run query.
+   - Promote use of pagination in original query as well as in pagination object for possible large volume of data, If the query is to fetch data(find), then return pagination object with the paginated query in the response(with LIMIT 50)
+   - Use MongoDB-specific optimizations like:
+     * Use proper index types (single, compound, text, etc.)
+     * Leverage MongoDB's aggregation framework
+     * Use appropriate read/write concerns
+     * Consider sharding for large collections
+     * Use proper data modeling patterns
+     * Optimize for document size and structure
+
+4. **Response Formatting**  
+   - Respond 'assistantMessage' in Markdown format. When using ordered (numbered) or unordered (bullet) lists in Markdown, always add a blank line after each list item. 
+   - Respond strictly in JSON matching the schema below.  
+   - Include exampleResult with realistic placeholder values (e.g., "order_id": "123").  
+   - Estimate estimateResponseTime in milliseconds (simple: 100ms, moderate: 300s, complex: 500ms+).  
+   - In Example Result, always try to give latest date such as created_at. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field
+
+5. **Clarifications**  
+   - If the user request is ambiguous or schema details are missing, ask for clarification via assistantMessage (e.g., "Which user field should I use: email or ID?").  
+   - If the user is not asking for a query, just respond with a helpful message in the assistantMessage field without generating any queries.
+
+6. **Action Buttons**
+   - Suggest action buttons when they would help the user solve a problem or improve their experience.
+   - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing collections/fields the user is asking about.
+   - Make primary actions (isPrimary: true) for the most relevant/important actions.
+   - Limit to Max 2 buttons per response to avoid overwhelming the user.
+
+---
+
+### **Response Schema**
+json
+{
+  "assistantMessage": "A friendly AI Response/Explanation or clarification question (Must Send this). Note: This should be Markdown formatted text",
+  "actionButtons": [
+    {
+      "label": "Button text to display to the user. Example: Refresh Knowledge Base",
+      "action": "refresh_schema",
+      "isPrimary": true/false
+    }
+  ],
+  "queries": [
+    {
+      "query": "MongoDB query with actual values (no placeholders)",
+      "queryType": "find/insert/update/delete/aggregate…",
+      "pagination": {
+          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. It should have replaceable placeholder such as offset_size. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains limit() < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets.",
+		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a limit OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"db.users.find().limit(5)\" → countQuery: \"\"\n- Original: \"db.users.find().sort({created_at: -1}).limit(10)\" → countQuery: \"\"\n- Original: \"db.users.find().limit(60)\" → countQuery: \"db.users.countDocuments({}).limit(60)\" (explicit limit > 50, return that exact count)\n- User asked: \"get 150 latest users\" → countQuery: \"db.users.countDocuments({}).limit(150)\" (return exactly requested number)\n- Original: \"db.users.find({status: 'active'})\" → countQuery: \"db.users.countDocuments({status: 'active'})\"\n- Original: \"db.users.find({created_at: {$gt: new Date('2023-01-01')}})\" → countQuery: \"db.users.countDocuments({created_at: {$gt: new Date('2023-01-01')}})\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery should return exactly that number so the pagination system knows the total count. Never use countDocuments() without filter conditions if the original query had conditions. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+          },
+        },
+       "collections": "users,orders",
+      "explanation": "User-friendly description of the query's purpose",
+      "isCritical": "boolean",
+      "canRollback": "boolean",
+      "rollbackDependentQuery": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery (Empty if not applicable), (rollbackQuery should be empty in this case)",
+      "rollbackQuery": "MongoDB query to reverse the operation (empty if not applicable), give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead",
+      "estimateResponseTime": "response time in milliseconds(example:78)",
+      "exampleResult": [
+        { "column1": "example_value1", "column2": "example_value2" }
+      ], (Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field)
+    }
+  ]
+}`
 )
 
 // LLM response schema for structured query generation
@@ -608,7 +799,7 @@ const OllamaYugabyteDBLLMResponseSchema = `{
                            },
                            "countQuery": {
                                "type": "string",
-                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery MUST BE EMPTY STRING, regardless of the number requested. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+                               "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery should return exactly that number so the pagination system knows the total count. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
                            }
                        }
                    },
@@ -682,6 +873,234 @@ const OllamaYugabyteDBLLMResponseSchema = `{
    "additionalProperties": false
 }`
 
-const OllamaClickhouseLLMResponseSchema = `{}`
+const OllamaClickhouseLLMResponseSchema = `{
+    "type": "object",
+    "required": ["assistantMessage"],
+    "properties": {
+        "queries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "query",
+                    "queryType",
+                    "explanation",
+                    "isCritical",
+                    "canRollback",
+                    "estimateResponseTime"
+                ],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to fetch order details."
+                    },
+                    "tables": {
+                        "type": "string",
+                        "description": "Tables being used in the query(comma separated)"
+                    },
+                    "queryType": {
+                        "type": "string",
+                        "description": "SQL query type(SELECT,UPDATE,INSERT,DELETE,DDL)"
+                    },
+                    "pagination": {
+                        "type": "object",
+                        "required": [
+                            "paginatedQuery",
+                            "countQuery"
+                        ],
+                        "properties": {
+                            "paginatedQuery": {
+                                "type": "string",
+                                "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. If the original query contains some LIMIT which is less than 50, then this paginatedQuery should be empty. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains LIMIT < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets."
+                            },
+                            "countQuery": {
+                                "type": "string",
+                                "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a LIMIT < 50 OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery MUST BE EMPTY STRING, regardless of the number requested. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+                            }
+                        }
+                    },
+                    "isCritical": {
+                        "type": "boolean",
+                        "description": "Indicates if the query is critical."
+                    },
+                    "canRollback": {
+                        "type": "boolean",
+                        "description": "Indicates if the operation can be rolled back."
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Description of what the query does. It should be descriptive and helpful to the user and guide the user with appropriate actions & results."
+                    },
+                    "exampleResult": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "description": "Key-value pairs representing column names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "description": "An example array of results that the query might return."
+                    },
+                    "rollbackQuery": {
+                        "type": "string",
+                        "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
+                    },
+                    "estimateResponseTime": {
+                        "type": "number",
+                        "description": "Estimated time (in milliseconds) to fetch the response."
+                    },
+                    "rollbackDependentQuery": {
+                        "type": "string",
+                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "description": "List of queries related to orders."
+        },
+        "actionButtons": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["label", "action", "isPrimary"],
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Display text for the button that the user will see."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                    },
+                    "isPrimary": {
+                        "type": "boolean",
+                        "description": "Whether this is a primary (highlighted) action button."
+                    }
+                }
+            },
+            "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+        },
+        "assistantMessage": {
+            "type": "string",
+            "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
+        }
+    },
+    "additionalProperties": false
+ }`
 
-const OllamaMongoDBLLMResponseSchema = `{}`
+const OllamaMongoDBLLMResponseSchema = `{
+    "type": "object",
+    "required": ["assistantMessage"],
+    "properties": {
+        "queries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "query",
+                    "queryType",
+                    "explanation",
+                    "isCritical",
+                    "canRollback",
+                    "estimateResponseTime"
+                ],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "MongoDB query to fetch order details."
+                    },
+                    "collections": {
+                        "type": "string",
+                        "description": "Collections being used in the query(comma separated)"
+                    },
+                    "queryType": {
+                        "type": "string",
+                        "description": "MongoDB query type(find,insert,update,delete,aggregate)"
+                    },
+                    "pagination": {
+                        "type": "object",
+                        "required": [
+                            "paginatedQuery",
+                            "countQuery"
+                        ],
+                        "properties": {
+                            "paginatedQuery": {
+                                "type": "string",
+                                "description": "(Empty \"\" if the original query is to find count or already includes countDocuments operation) A paginated query of the original query with OFFSET placeholder to replace with actual value. For MongoDB, ensure skip comes before limit (e.g., .skip(offset_size).limit(50)) to ensure correct pagination. It should have replaceable placeholder such as offset_size. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains limit() < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets."
+                            },
+                            "countQuery": {
+                                "type": "string",
+                                "description": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has a limit OR the user explicitly requests a specific number of records → countQuery MUST BE EMPTY STRING\n2. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"db.users.find().limit(5)\" → countQuery: \"\"\n- Original: \"db.users.find().sort({created_at: -1}).limit(10)\" → countQuery: \"\"\n- Original: \"db.users.find().limit(60)\" → countQuery: \"db.users.countDocuments({}).limit(60)\" (explicit limit > 50, return that exact count)\n- User asked: \"get 150 latest users\" → countQuery: \"db.users.countDocuments({}).limit(150)\" (return exactly requested number)\n- Original: \"db.users.find({status: 'active'})\" → countQuery: \"db.users.countDocuments({status: 'active'})\"\n- Original: \"db.users.find({created_at: {$gt: new Date('2023-01-01')}})\" → countQuery: \"db.users.countDocuments({created_at: {$gt: new Date('2023-01-01')}})\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. If the user explicitly asks for a specific number of records (e.g., \"get 60 latest users\"), then countQuery should return exactly that number so the pagination system knows the total count. Never use countDocuments() without filter conditions if the original query had conditions. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions."
+                            }
+                        }
+                    },
+                    "isCritical": {
+                        "type": "boolean",
+                        "description": "Indicates if the query is critical."
+                    },
+                    "canRollback": {
+                        "type": "boolean",
+                        "description": "Indicates if the operation can be rolled back."
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Description of what the query does. It should be descriptive and helpful to the user and guide the user with appropriate actions & results."
+                    },
+                    "exampleResult": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "description": "Key-value pairs representing field names and example values. Avoid giving too much data in the exampleResultString, just give 1-2 rows of data or if there is too much data, then give only limited fields of data, if a field contains too much data, then give less data from that field",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "description": "An example array of results that the query might return."
+                    },
+                    "rollbackQuery": {
+                        "type": "string",
+                        "description": "Query to undo this operation (if canRollback=true), default empty, give 100% correct,error free rollbackQuery with actual values, if not applicable then give empty string as rollbackDependentQuery will be used instead"
+                    },
+                    "estimateResponseTime": {
+                        "type": "number",
+                        "description": "Estimated time (in milliseconds) to fetch the response."
+                    },
+                    "rollbackDependentQuery": {
+                        "type": "string",
+                        "description": "Query to run by the user to get the required data that AI needs in order to write a successful rollbackQuery"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "description": "List of queries related to orders."
+        },
+        "actionButtons": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["label", "action", "isPrimary"],
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "description": "Display text for the button that the user will see."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Action identifier that will be processed by the frontend. Common actions: refresh_schema etc."
+                    },
+                    "isPrimary": {
+                        "type": "boolean",
+                        "description": "Whether this is a primary (highlighted) action button."
+                    }
+                }
+            },
+            "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+        },
+        "assistantMessage": {
+            "type": "string",
+            "description": "Message from the assistant providing context about the user's request. It should be descriptive and helpful to the user and guide the user with appropriate actions."
+        }
+    },
+    "additionalProperties": false
+ }`

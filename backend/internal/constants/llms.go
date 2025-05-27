@@ -46,6 +46,10 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 			return OllamaYugabyteDBLLMResponseSchema
 		case DatabaseTypeMySQL:
 			return OllamaMySQLLLMResponseSchema
+		case DatabaseTypeClickhouse:
+			return OllamaClickhouseLLMResponseSchema
+		case DatabaseTypeMongoDB:
+			return OllamaMongoDBLLMResponseSchema
 		default:
 			return OllamaPostgreSQLLLMResponseSchema
 		}
