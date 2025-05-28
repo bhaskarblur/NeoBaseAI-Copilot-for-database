@@ -91,6 +91,21 @@ func GetSystemPrompt(provider string, dbType string) string {
 		default:
 			return GeminiPostgreSQLPrompt // Default to PostgreSQL
 		}
+	case Ollama:
+		switch dbType {
+		case DatabaseTypePostgreSQL:
+			return OllamaPostgreSQLPrompt
+		case DatabaseTypeYugabyteDB:
+			return OllamaYugabyteDBPrompt
+		case DatabaseTypeMySQL:
+			return OllamaMySQLPrompt
+		case DatabaseTypeClickhouse:
+			return OllamaClickhousePrompt
+		case DatabaseTypeMongoDB:
+			return OllamaMongoDBPrompt
+		default:
+			return OllamaPostgreSQLPrompt
+		}
 	}
 	return ""
 }
