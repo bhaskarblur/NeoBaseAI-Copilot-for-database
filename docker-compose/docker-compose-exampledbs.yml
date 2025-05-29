@@ -3,6 +3,8 @@ services:
     image: postgres:latest
     container_name: neobase-example-postgres
     restart: always
+    ports:
+      - 5432:5432
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -16,6 +18,9 @@ services:
     image: clickhouse/clickhouse-server:latest
     container_name: neobase-example-clickhouse
     restart: always
+    ports:
+      - 8123:8123
+      - 9000:9000
     environment:
       - CLICKHOUSE_DB=testdb
       - CLICKHOUSE_USER=clickhouse
@@ -46,6 +51,8 @@ services:
     image: mongo:latest
     container_name: neobase-example-mongodb
     restart: always
+    ports:
+      - 27017:27017
     environment:
       MONGO_INITDB_ROOT_USERNAME: example_user
       MONGO_INITDB_ROOT_PASSWORD: example_password
