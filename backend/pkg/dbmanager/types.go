@@ -45,6 +45,7 @@ type ConnectionConfig struct {
 	Username *string `json:"username"`
 	Password *string `json:"password"`
 	Database string  `json:"database"`
+	AuthDatabase *string `json:"auth_database"` // Database to authenticate against (for MongoDB)
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`

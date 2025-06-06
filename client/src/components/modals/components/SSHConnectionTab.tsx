@@ -12,6 +12,7 @@ interface FormErrors {
   ssh_port?: string;
   ssh_username?: string;
   ssh_private_key?: string;
+  auth_database?: string;
 }
 
 interface SSHConnectionTabProps {
@@ -276,6 +277,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                       let host = '';
                       let port = srvFormat ? '27017' : ''; // Default for SRV format
                       let database = 'test'; // Default database name
+                      let authDatabase = 'admin'; // Default auth database
                       
                       // Check if there's a / after the host[:port] part
                       const pathIndex = hostPart.indexOf('/');
@@ -283,10 +285,14 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                         const hostPortPart = hostPart.substring(0, pathIndex);
                         const pathPart = hostPart.substring(pathIndex + 1);
                         
-                        // Extract database name (everything before ? or end of string)
-                        const dbEndIndex = pathPart.indexOf('?');
-                        if (dbEndIndex !== -1) {
-                          database = pathPart.substring(0, dbEndIndex);
+                        // Extract database name and query parameters
+                        const queryIndex = pathPart.indexOf('?');
+                        if (queryIndex !== -1) {
+                          database = pathPart.substring(0, queryIndex);
+                          const queryParams = new URLSearchParams(pathPart.substring(queryIndex + 1));
+                          if (queryParams.has('authSource')) {
+                            authDatabase = queryParams.get('authSource') || 'admin';
+                          }
                         } else {
                           database = pathPart;
                         }
@@ -311,7 +317,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                       }
                       
                       if (host) {
-                        console.log("MongoDB URI parsed successfully", { username, host, port, database });
+                        console.log("MongoDB URI parsed successfully", { username, host, port, database, authDatabase });
                         
                         // Update formData through parent component
                         const newFormData = {
@@ -319,6 +325,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                           host: host,
                           port: port || (srvFormat ? '27017' : formData.port),
                           database: database || 'test',
+                          auth_database: authDatabase,
                           username: username || formData.username,
                           password: password || formData.password
                         };
@@ -331,6 +338,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                         handleChange(mockEvent('host', newFormData.host));
                         handleChange(mockEvent('port', newFormData.port));
                         handleChange(mockEvent('database', newFormData.database));
+                        handleChange(mockEvent('auth_database', newFormData.auth_database));
                         handleChange(mockEvent('username', newFormData.username));
                         if (password) {
                           handleChange(mockEvent('password', password));
@@ -449,6 +457,31 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
               <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
             </div>
 
+            {/* MongoDB Authentication Database Field - Only show when MongoDB is selected */}
+            {formData.type === 'mongodb' && (
+              <div className="mb-6">
+                <label className="block font-bold mb-2">Authentication Database</label>
+                <p className="text-gray-600 text-sm mb-2">The database to authenticate against (usually 'admin' for MongoDB)</p>
+                <input
+                  type="text"
+                  name="auth_database"
+                  value={formData.auth_database || 'admin'}
+                  onChange={handleChange}
+                  onBlur={handleFieldBlur}
+                  className={`neo-input w-full ${errors.auth_database && touched.auth_database ? 'border-red-500' : ''}`}
+                  placeholder="e.g., admin"
+                />
+                {errors.auth_database && touched.auth_database && (
+                  <div className="flex items-center gap-1 mt-1 text-red-500 text-sm">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>{errors.auth_database}</span>
+                  </div>
+                )}
+                <p className="text-gray-500 text-xs mt-2">
+                  This is the database where your user credentials are stored. For MongoDB Atlas, this is usually 'admin'.
+                </p>
+              </div>
+            )}
 
           </div>
         </div>

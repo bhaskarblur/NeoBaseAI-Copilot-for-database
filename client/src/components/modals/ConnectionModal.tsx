@@ -77,6 +77,7 @@ export default function ConnectionModal({
     username: initialData?.connection.username || '',
     password: '',  // Password is never sent back from server
     database: initialData?.connection.database || '',
+    auth_database: initialData?.connection.auth_database || 'admin',  // Default to 'admin' for MongoDB
     use_ssl: initialData?.connection.use_ssl || false,
     ssl_mode: initialData?.connection.ssl_mode || 'disable',
     ssl_cert_url: initialData?.connection.ssl_cert_url || '',
@@ -154,8 +155,9 @@ export default function ConnectionModal({
           const srv = connection.host.includes('.mongodb.net') ? '+srv' : '';
           const portPart = srv ? '' : `:${connection.port || '27017'}`;
           const dbPart = connection.database ? `/${connection.database}` : '';
+          const authSource = connection.auth_database ? `?authSource=${connection.auth_database}` : '';
           
-          return `mongodb${srv}://${auth}${connection.host}${portPart}${dbPart}`;
+          return `mongodb${srv}://${auth}${connection.host}${portPart}${dbPart}${authSource}`;
         };
 
         const mongoUri = formatMongoURI(initialData.connection);

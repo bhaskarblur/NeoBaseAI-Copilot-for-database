@@ -166,6 +166,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
+		AuthDatabase:   req.Connection.AuthDatabase,
 		SSLMode:        req.Connection.SSLMode,
 		UseSSL:         req.Connection.UseSSL,
 		SSLCertURL:     req.Connection.SSLCertURL,
@@ -189,6 +190,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
+		AuthDatabase:   req.Connection.AuthDatabase,
 		SSLMode:        req.Connection.SSLMode,
 		UseSSL:         req.Connection.UseSSL,
 		SSLCertURL:     req.Connection.SSLCertURL,
@@ -256,6 +258,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
+		AuthDatabase:   req.Connection.AuthDatabase,
 		IsExampleDB:    true, // default is true, if false, then the database is a user's own database
 		UseSSL:         req.Connection.UseSSL,
 		SSLMode:        req.Connection.SSLMode,
@@ -340,6 +343,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			Username:       &req.Connection.Username,
 			Password:       req.Connection.Password,
 			Database:       req.Connection.Database,
+			AuthDatabase:   req.Connection.AuthDatabase,
 			UseSSL:         req.Connection.UseSSL,
 			SSLMode:        req.Connection.SSLMode,
 			SSLCertURL:     req.Connection.SSLCertURL,
@@ -358,6 +362,7 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			Username:       &req.Connection.Username,
 			Password:       req.Connection.Password,
 			Database:       req.Connection.Database,
+			AuthDatabase:   req.Connection.AuthDatabase,
 			UseSSL:         req.Connection.UseSSL,
 			SSLMode:        req.Connection.SSLMode,
 			SSLCertURL:     req.Connection.SSLCertURL,
@@ -1465,12 +1470,13 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 
 			// Connection not found, try to connect with proper config
 			connectErr := s.dbManager.Connect(chatID, userID, "", dbmanager.ConnectionConfig{
-				Type:     chat.Connection.Type,
-				Host:     chat.Connection.Host,
-				Port:     chat.Connection.Port,
-				Username: chat.Connection.Username,
-				Password: chat.Connection.Password,
-				Database: chat.Connection.Database,
+				Type:         chat.Connection.Type,
+				Host:         chat.Connection.Host,
+				Port:         chat.Connection.Port,
+				Username:     chat.Connection.Username,
+				Password:     chat.Connection.Password,
+				Database:     chat.Connection.Database,
+				AuthDatabase: chat.Connection.AuthDatabase,
 			})
 			if connectErr != nil {
 				log.Printf("ChatService -> GetAllTables -> Failed to connect: %v", connectErr)

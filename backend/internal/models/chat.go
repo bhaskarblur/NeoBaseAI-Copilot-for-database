@@ -16,6 +16,7 @@ type Connection struct {
 	Username    *string `bson:"username" json:"username"`
 	Password    *string `bson:"password" json:"-"` // Hide in JSON
 	Database    string  `bson:"database" json:"database"`
+	AuthDatabase *string `bson:"auth_database" json:"auth_database"` // Database to authenticate against
 	IsExampleDB bool    `bson:"is_example_db" json:"is_example_db"` // default is false, if true, then the database is an example database configs setup from environment variables
 
 	// SSL/TLS Configuration

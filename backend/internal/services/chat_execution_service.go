@@ -585,6 +585,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		Username:       chat.Connection.Username,
 		Password:       chat.Connection.Password,
 		Database:       chat.Connection.Database,
+		AuthDatabase:   chat.Connection.AuthDatabase, // Added AuthDatabase
 		UseSSL:         chat.Connection.UseSSL,
 		SSLMode:        chat.Connection.SSLMode,
 		SSLCertURL:     chat.Connection.SSLCertURL,

@@ -16,6 +16,7 @@ type CreateConnectionRequest struct {
 	Username string  `json:"username" binding:"required"`
 	Password *string `json:"password"`
 	Database string  `json:"database" binding:"required"`
+	AuthDatabase *string `json:"auth_database,omitempty"` // Database to authenticate against (for MongoDB)
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `json:"use_ssl"`

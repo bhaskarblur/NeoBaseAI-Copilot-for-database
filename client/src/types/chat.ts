@@ -8,6 +8,7 @@ export interface Connection {
     username: string;
     password?: string;
     database: string;
+    auth_database?: string; // Database to authenticate against (for MongoDB)
     is_example_db: boolean;
     use_ssl?: boolean;
     ssl_mode?: SSLMode;
