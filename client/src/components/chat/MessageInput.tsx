@@ -123,7 +123,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
         <form
             onSubmit={handleSubmit}
             className={`
-            fixed bottom-0 left-0 right-0 p-4 
+            fixed -bottom-1.5 left-0 right-0 p-4
             bg-white border-t-4 border-black 
             transition-all duration-300
             z-[10]
@@ -216,7 +216,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                         hover-tooltip
                         ${recommendations.length > 0 ? 'bg-gray-200' : ''}
                     `}
-                            data-tooltip={recommendations.length > 0 ? "Hide Recommendations" : "Get Query Recommendations"}
+                            data-tooltip={recommendations.length > 0 ? "Hide recommendations" : "Get query recommendations"}
                         >
                             {recommendations.length > 0 ? (
                                 <X className={`w-5 h-5 text-gray-600`} />
