@@ -74,6 +74,13 @@ services:
       - EXAMPLE_DB_NAME=${EXAMPLE_DB_NAME} # testdb
       - EXAMPLE_DB_USERNAME=${EXAMPLE_DB_USERNAME} # postgres
       - EXAMPLE_DB_PASSWORD=${EXAMPLE_DB_PASSWORD} # postgres
+      - SMTP_HOST=${SMTP_HOST} # smtp.gmail.com
+      - SMTP_PORT=${SMTP_PORT} # 587
+      - SMTP_SECURE=${SMTP_SECURE} # false
+      - SMTP_USER=${SMTP_USER} # your-email@gmail.com
+      - SMTP_PASSWORD=${SMTP_PASSWORD} # your-app-password
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME} # NeoBase - AI Database Copilot
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL} # your-email@gmail.com
     depends_on:
       - neobase-mongodb
       - neobase-redis

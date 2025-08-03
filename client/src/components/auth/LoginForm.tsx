@@ -6,6 +6,7 @@ import analyticsService from '../../services/analyticsService';
 interface LoginFormProps {
   onLogin: (data: LoginFormData) => Promise<void>;
   onSwitchToSignup: () => void;
+  onSwitchToForgotPassword: () => void;
 }
 
 interface FormErrors {
@@ -13,7 +14,7 @@ interface FormErrors {
   password?: string;
 }
 
-export default function LoginForm({ onLogin, onSwitchToSignup }: LoginFormProps) {
+export default function LoginForm({ onLogin, onSwitchToSignup, onSwitchToForgotPassword }: LoginFormProps) {
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -190,14 +191,25 @@ export default function LoginForm({ onLogin, onSwitchToSignup }: LoginFormProps)
               'Login'
             )}
           </button>
-          <div className="my-2" />
+
+          <div className="text-center mt-2">
+            <button
+              type="button"
+              onClick={onSwitchToForgotPassword}
+              className="text-green-600 hover:text-green-800 underline text-sm transition-colors duration-200 font-medium"
+              disabled={isLoading}
+            >
+              Forgot your password?
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={onSwitchToSignup}
             className="neo-button-secondary w-full"
             disabled={isLoading}
           >
-            Create an Account
+            New User - Sign Up
           </button>
         </form>
       </div>

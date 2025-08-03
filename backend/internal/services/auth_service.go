@@ -21,20 +21,24 @@ type AuthService interface {
 	Logout(refreshToken string, accessToken string) (uint32, error)
 	GetUser(userID string) (*models.User, uint, error)
 	SetChatService(chatService ChatService)
+	ForgotPassword(req *dtos.ForgotPasswordRequest) (*dtos.ForgotPasswordResponse, uint, error)
+	ResetPassword(req *dtos.ResetPasswordRequest) (uint, error)
 }
 
 type authService struct {
-	chatService ChatService
-	userRepo    repositories.UserRepository
-	jwtService  utils.JWTService
-	tokenRepo   repositories.TokenRepository
+	chatService  ChatService
+	userRepo     repositories.UserRepository
+	jwtService   utils.JWTService
+	tokenRepo    repositories.TokenRepository
+	emailService EmailService
 }
 
-func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTService, tokenRepo repositories.TokenRepository) AuthService {
+func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTService, tokenRepo repositories.TokenRepository, emailService EmailService) AuthService {
 	return &authService{
-		userRepo:   userRepo,
-		jwtService: jwtService,
-		tokenRepo:  tokenRepo,
+		userRepo:     userRepo,
+		jwtService:   jwtService,
+		tokenRepo:    tokenRepo,
+		emailService: emailService,
 	}
 }
 
@@ -90,6 +94,14 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, http.StatusBadRequest, err
 	}
+
+	// Send welcome email (async, don't block signup process)
+	go func() {
+		err := s.emailService.SendWelcomeEmail(req.Email, req.Username)
+		if err != nil {
+			log.Printf("⚠️  Failed to send welcome email to %s: %v", req.Email, err)
+		}
+	}()
 
 	// Generate token
 	accessToken, err := s.jwtService.GenerateToken(user.ID.Hex())
@@ -296,4 +308,76 @@ func (s *authService) GetUser(userID string) (*models.User, uint, error) {
 	}
 
 	return user, http.StatusOK, nil
+}
+
+func (s *authService) ForgotPassword(req *dtos.ForgotPasswordRequest) (*dtos.ForgotPasswordResponse, uint, error) {
+	// Check if user exists with this email
+	user, err := s.userRepo.FindByEmail(req.Email)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	if user == nil {
+		// For security reasons, don't reveal if email exists or not
+		return &dtos.ForgotPasswordResponse{
+			Message: "If an account with this email exists, you will receive a password reset email shortly.",
+		}, http.StatusOK, nil
+	}
+
+	// Generate 6-digit OTP
+	otp := utils.GenerateOTP()
+
+	// Store OTP in Redis
+	err = s.userRepo.StorePasswordResetOTP(req.Email, otp)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	// Send OTP email (non-blocking)
+	err = s.emailService.SendPasswordResetOTP(req.Email, user.Username, otp)
+	if err != nil {
+		log.Printf("⚠️  Failed to send password reset email to %s: %v", req.Email, err)
+		// Don't return error to user for security reasons - email failure shouldn't block the flow
+	}
+
+	return &dtos.ForgotPasswordResponse{
+		Message: "If an account with this email exists, you will receive a password reset email shortly.",
+	}, http.StatusOK, nil
+}
+
+func (s *authService) ResetPassword(req *dtos.ResetPasswordRequest) (uint, error) {
+	// Validate OTP
+	isValidOTP := s.userRepo.ValidatePasswordResetOTP(req.Email, req.OTP)
+	if !isValidOTP {
+		return http.StatusBadRequest, errors.New("Invalid or expired OTP")
+	}
+
+	// Find user by email
+	user, err := s.userRepo.FindByEmail(req.Email)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	if user == nil {
+		return http.StatusNotFound, errors.New("User not found")
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	// Update password
+	err = s.userRepo.UpdatePassword(user.ID.Hex(), hashedPassword)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	// Delete OTP from Redis (mark as used)
+	err = s.userRepo.DeletePasswordResetOTP(req.Email)
+	if err != nil {
+		log.Printf("Failed to delete OTP from Redis: %v", err)
+		// Don't return error as password is already updated
+	}
+
+	return http.StatusOK, nil
 }

@@ -1297,7 +1297,7 @@ export default function MessageTile({
                                 </span>
                             ) : (
                                 <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">
-                                    Not Executed
+                                    Execute Manually
                                 </span>
                             )}
                         </div>

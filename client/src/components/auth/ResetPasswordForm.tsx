@@ -1,41 +1,31 @@
-import { AlertCircle, Boxes, KeyRound, Loader, Lock, UserRound, Mail } from 'lucide-react';
+import { AlertCircle, Boxes, Mail, KeyRound, Loader } from 'lucide-react';
 import React, { useState } from 'react';
-import { SignupFormData } from '../../types/auth';
-import analyticsService from '../../services/analyticsService';
+import toast from 'react-hot-toast';
 
-interface SignupFormProps {
-    onSignup: (data: SignupFormData) => Promise<void>;
+interface ResetPasswordFormProps {
+    initialEmail: string;
     onSwitchToLogin: () => void;
+    onPasswordResetSuccess: () => void;
 }
 
 interface FormErrors {
-    username?: string;
     email?: string;
-    password?: string;
+    otp?: string;
+    newPassword?: string;
     confirmPassword?: string;
-    userSignupSecret?: string;
 }
 
-export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProps) {
+export default function ResetPasswordForm({ initialEmail, onSwitchToLogin, onPasswordResetSuccess }: ResetPasswordFormProps) {
     const [errors, setErrors] = useState<FormErrors>({});
     const [touched, setTouched] = useState<Record<string, boolean>>({});
     const [isLoading, setIsLoading] = useState(false);
-    const [formData, setFormData] = useState<SignupFormData>({
-        username: '',
-        email: '',
-        password: '',
-        confirmPassword: '',
-        userSignupSecret: ''
+    const [formData, setFormData] = useState({
+        email: initialEmail,
+        otp: '',
+        newPassword: '',
+        confirmPassword: ''
     });
     const [formError, setFormError] = useState<string | null>(null);
-    const Environment = import.meta.env.VITE_ENVIRONMENT;
-
-    const validateUsername = (username: string) => {
-        if (!username) return 'Username is required';
-        if (username.length < 3) return 'Username must be at least 3 characters';
-        if (username.includes(' ')) return 'Username cannot contain spaces';
-        return '';
-    };
 
     const validateEmail = (email: string) => {
         if (!email) return 'Email is required';
@@ -44,37 +34,32 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
         return '';
     };
 
-    const validatePassword = (password: string) => {
-        if (!password) return 'Password is required';
-        if (password.length < 6) {
-            return 'Password must be at least 6 characters';
-        }
+    const validateOTP = (otp: string) => {
+        if (!otp) return 'OTP is required';
+        if (otp.length !== 6) return 'OTP must be 6 digits';
+        if (!/^\d+$/.test(otp)) return 'OTP must contain only numbers';
         return '';
     };
 
-    const validateUserSignupSecret = (userSignupSecret: string) => {
-        if (!userSignupSecret) return 'User signup secret is required';
+    const validatePassword = (password: string) => {
+        if (!password) return 'Password is required';
+        if (password.length < 6) return 'Password must be at least 6 characters';
         return '';
     };
 
     const validateForm = () => {
         const newErrors: FormErrors = {};
 
-        const usernameError = validateUsername(formData.username);
-        if (usernameError) newErrors.username = usernameError;
-
         const emailError = validateEmail(formData.email);
         if (emailError) newErrors.email = emailError;
 
-        const passwordError = validatePassword(formData.password);
-        if (passwordError) newErrors.password = passwordError;
+        const otpError = validateOTP(formData.otp);
+        if (otpError) newErrors.otp = otpError;
 
-        const userSignupSecretError = validateUserSignupSecret(formData.userSignupSecret);
-        if (Environment !== "DEVELOPMENT" && userSignupSecretError) {
-            newErrors.userSignupSecret = userSignupSecretError;
-        }
+        const passwordError = validatePassword(formData.newPassword);
+        if (passwordError) newErrors.newPassword = passwordError;
 
-        if (formData.password !== formData.confirmPassword) {
+        if (formData.newPassword !== formData.confirmPassword) {
             newErrors.confirmPassword = 'Passwords do not match';
         }
 
@@ -91,11 +76,27 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
 
         setIsLoading(true);
         try {
-            await onSignup(formData);
-            analyticsService.trackEvent('signup_attempt', { username: formData.username, email: formData.email });
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/reset-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: formData.email,
+                    otp: formData.otp,
+                    new_password: formData.newPassword
+                }),
+            });
+
+            const data = await response.json();
+
+            if (data.success) { 
+                onPasswordResetSuccess();
+            } else {
+                setFormError(data.error || 'Failed to reset password');
+            }
         } catch (error: any) {
-            setFormError(error.message);
-            analyticsService.trackEvent('signup_error', { error: error.message });
+            setFormError('Network error. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -104,42 +105,26 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
 
-        // Prevent spaces in username
-        if (name === 'username' && value.includes(' ')) {
-            const valueWithoutSpaces = value.replace(/\s/g, '');
-            setFormData(prev => ({
-                ...prev,
-                [name]: valueWithoutSpaces
-            }));
-
-            if (touched[name]) {
-                const error = validateUsername(valueWithoutSpaces);
-                setErrors(prev => ({ ...prev, username: error }));
-            }
-            return;
-        }
-
         setFormData(prev => ({
             ...prev,
             [name]: value
         }));
 
         if (touched[name]) {
-            if (name === 'username') {
-                const trimmedValue = value.trim();
-                const error = validateUsername(trimmedValue);
-                setErrors(prev => ({ ...prev, username: error }));
-            } else if (name === 'email') {
+            if (name === 'email') {
                 const trimmedValue = value.trim();
                 const error = validateEmail(trimmedValue);
                 setErrors(prev => ({ ...prev, email: error }));
-            } else if (name === 'password') {
+            } else if (name === 'otp') {
+                const error = validateOTP(value);
+                setErrors(prev => ({ ...prev, otp: error }));
+            } else if (name === 'newPassword') {
                 const error = validatePassword(value);
-                setErrors(prev => ({ ...prev, password: error }));
+                setErrors(prev => ({ ...prev, newPassword: error }));
             } else if (name === 'confirmPassword') {
                 setErrors(prev => ({
                     ...prev,
-                    confirmPassword: value !== formData.password ? 'Passwords do not match' : ''
+                    confirmPassword: value !== formData.newPassword ? 'Passwords do not match' : ''
                 }));
             }
         }
@@ -149,17 +134,7 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
         const { name, value } = e.target;
         setTouched(prev => ({ ...prev, [name]: true }));
 
-        if (name === 'username') {
-            const trimmedValue = value.trim();
-            if (trimmedValue !== value) {
-                setFormData(prev => ({
-                    ...prev,
-                    [name]: trimmedValue
-                }));
-            }
-            const error = validateUsername(trimmedValue);
-            setErrors(prev => ({ ...prev, username: error }));
-        } else if (name === 'email') {
+        if (name === 'email') {
             const trimmedValue = value.trim();
             if (trimmedValue !== value) {
                 setFormData(prev => ({
@@ -169,20 +144,17 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
             }
             const error = validateEmail(trimmedValue);
             setErrors(prev => ({ ...prev, email: error }));
-        } else if (name === 'password') {
+        } else if (name === 'otp') {
+            const error = validateOTP(value);
+            setErrors(prev => ({ ...prev, otp: error }));
+        } else if (name === 'newPassword') {
             const error = validatePassword(value);
-            setErrors(prev => ({ ...prev, password: error }));
+            setErrors(prev => ({ ...prev, newPassword: error }));
         } else if (name === 'confirmPassword') {
             setErrors(prev => ({
                 ...prev,
-                confirmPassword: value !== formData.password ? 'Passwords do not match' : ''
+                confirmPassword: value !== formData.newPassword ? 'Passwords do not match' : ''
             }));
-        }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.currentTarget.name === 'username' && e.key === ' ') {
-            e.preventDefault();
         }
     };
 
@@ -194,7 +166,7 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
                     NeoBase
                 </h1>
                 <p className="text-gray-600 text-center mb-8">
-                    Create your account to start using NeoBase - Your AI Database Copilot
+                    Enter the OTP sent to your email and your new password
                 </p>
 
                 {formError && (
@@ -207,30 +179,6 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
-                    <div>
-                        <div className="relative">
-                            <UserRound className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
-                            <input
-                                type="text"
-                                name="username"
-                                placeholder="Username"
-                                value={formData.username}
-                                onChange={handleChange}
-                                onBlur={handleBlur}
-                                onKeyDown={handleKeyDown}
-                                className={`neo-input pl-12 w-full ${errors.username && touched.username ? 'border-neo-error' : ''
-                                    }`}
-                                required
-                            />
-                        </div>
-                        {errors.username && touched.username && (
-                            <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                                <AlertCircle className="w-4 h-4" />
-                                <span>{errors.username}</span>
-                            </div>
-                        )}
-                    </div>
-
                     <div>
                         <div className="relative">
                             <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
@@ -254,53 +202,49 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
                         )}
                     </div>
 
-                    {Environment !== "DEVELOPMENT" && (
-                        <div>
-                            <div className="relative">
-                                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
-                                <input
-                                    type="text"
-                                    name="userSignupSecret"
-                                    placeholder="User Signup Secret"
-                                    value={formData.userSignupSecret}
-                                    onChange={handleChange}
-                                    onBlur={handleBlur}
-                                    className={`neo-input pl-12 w-full ${errors.userSignupSecret && touched.userSignupSecret ? 'border-neo-error' : ''
-                                        }`}
-                                    required
-                                />
-                            </div>
-                            <p className="text-gray-500 text-sm mt-2">
-                                Required to signup a user, ask the admin for this secret.
-                            </p>
-                            {errors.userSignupSecret && touched.userSignupSecret && (
-                                <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
-                                    <AlertCircle className="w-4 h-4" />
-                                    <span>{errors.userSignupSecret}</span>
-                                </div>
-                            )}
+                    <div>
+                        <div className="relative">
+                            <KeyRound className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
+                            <input
+                                type="text"
+                                name="otp"
+                                placeholder="6-digit OTP"
+                                value={formData.otp}
+                                onChange={handleChange}
+                                onBlur={handleBlur}
+                                maxLength={6}
+                                className={`neo-input pl-12 w-full ${errors.otp && touched.otp ? 'border-neo-error' : ''
+                                    }`}
+                                required
+                            />
                         </div>
-                    )}
+                        {errors.otp && touched.otp && (
+                            <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
+                                <AlertCircle className="w-4 h-4" />
+                                <span>{errors.otp}</span>
+                            </div>
+                        )}
+                    </div>
 
                     <div>
                         <div className="relative">
                             <KeyRound className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500" />
                             <input
                                 type="password"
-                                name="password"
-                                placeholder="Password"
-                                value={formData.password}
+                                name="newPassword"
+                                placeholder="New Password"
+                                value={formData.newPassword}
                                 onChange={handleChange}
                                 onBlur={handleBlur}
-                                className={`neo-input pl-12 w-full ${errors.password && touched.password ? 'border-neo-error' : ''
+                                className={`neo-input pl-12 w-full ${errors.newPassword && touched.newPassword ? 'border-neo-error' : ''
                                     }`}
                                 required
                             />
                         </div>
-                        {errors.password && touched.password && (
+                        {errors.newPassword && touched.newPassword && (
                             <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
                                 <AlertCircle className="w-4 h-4" />
-                                <span>{errors.password}</span>
+                                <span>{errors.newPassword}</span>
                             </div>
                         )}
                     </div>
@@ -311,7 +255,7 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
                             <input
                                 type="password"
                                 name="confirmPassword"
-                                placeholder="Confirm Password"
+                                placeholder="Confirm New Password"
                                 value={formData.confirmPassword}
                                 onChange={handleChange}
                                 onBlur={handleBlur}
@@ -336,20 +280,22 @@ export default function SignupForm({ onSignup, onSwitchToLogin }: SignupFormProp
                         {isLoading ? (
                             <div className="flex items-center justify-center">
                                 <Loader className="w-4 h-4 animate-spin text-gray-400 mr-2" />
-                                Signing up...
+                                Resetting Password...
                             </div>
                         ) : (
-                            'Sign Up'
+                            'Reset Password'
                         )}
                     </button>
+
                     <div className="my-2" />
+
                     <button
                         type="button"
                         onClick={onSwitchToLogin}
                         className="neo-button-secondary w-full"
                         disabled={isLoading}
                     >
-                       Have an Account - Login
+                        Back to Login
                     </button>
                 </form>
             </div>

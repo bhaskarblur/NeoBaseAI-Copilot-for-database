@@ -444,7 +444,7 @@ export default function Sidebar({
                                           : connection.connection.database}
                                     </h3>
                                     <div className="flex w-full flex-row justify-between items-center gap-4">
-                                      <p className="text-gray-600 capitalize text-sm truncate">
+                                      <p className="text-gray-600 capitalize text-sm truncate pt-0.5">
                                         {connection.connection.type === 'postgresql' 
                                           ? 'PostgreSQL' 
                                           : connection.connection.type === 'yugabytedb' 
@@ -461,7 +461,7 @@ export default function Sidebar({
                                                       ? 'Neo4j' 
                                                       : 'Unknown'}
                                       </p>
-                                      <div className="flex flex-row items-center gap-1.5">
+                                      <div className="flex flex-row items-center gap-1.5 mt-0.5">
                                         <Clock className="w-3.5 h-3.5 text-gray-500" />
                                         <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">
                                           {getRelativeTime(connection.updated_at)}</p>

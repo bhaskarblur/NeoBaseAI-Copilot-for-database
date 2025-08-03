@@ -914,18 +914,11 @@ export default function ChatWindow({
               message={{
                                     id: "welcome-message",
                                     type: "assistant",
-                                    content: "Welcome to NeoBase! Ask me anything about your database.\nYou can fetch your latest knowledge base by clicking the button below.",
+                                    content: "Welcome to NeoBase! Ask me anything about your database. I will understand your request & respond with data.",
                                     queries: [],
+                                    action_buttons: [],
                                     created_at: new Date().toISOString(),
                                     updated_at: new Date().toISOString(),
-                                    action_buttons: [
-                                      {
-                                        id: "refresh-schema-button",
-                                        label: "Refresh Knowledge Base",
-                                        action: "refresh_schema",
-                                        isPrimary: true
-                                      }
-                                    ]
                                   }}
                                   setMessage={setMessage}
                                   onEdit={handleEditMessage}
@@ -1036,7 +1029,7 @@ export default function ChatWindow({
             initialData={chat}
             onClose={() => setShowEditConnection(false)}
             onEdit={async (data, autoExecuteQuery) => {
-              const result = await onEditConnection?.(chat.id, data, autoExecuteQuery);
+              const result = await onEditConnection?.(chat.id, data!, autoExecuteQuery!);
               return { success: result?.success || false, error: result?.error };
             }}
             onSubmit={async (data, autoExecuteQuery) => {
