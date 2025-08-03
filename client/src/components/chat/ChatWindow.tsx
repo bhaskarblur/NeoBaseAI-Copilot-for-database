@@ -287,7 +287,7 @@ export default function ChatWindow({
     } catch (error) {
       console.error('Failed to reconnect to database:', error);
       onConnectionStatusChange?.(chat.id, false, 'chat-window-reconnect');
-      toast.error('Failed to reconnect to database:'+error, {
+      toast.error('Failed to reconnect to database:' + error, {
         style: {
           background: '#ff4444',
           color: '#fff',
@@ -372,7 +372,7 @@ export default function ChatWindow({
       if (chat?.id) {
         analyticsService.trackMessageSent(chat.id, content.length);
       }
-      
+
       await onSendMessage(content);
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -388,12 +388,12 @@ export default function ChatWindow({
       // Get the edited message and the next message (AI response)
       const editedMessage = messages[messageIndex];
       const aiResponse = messages[messageIndex + 1];
-      
+
       // Track message edit event
       if (chat?.id) {
         analyticsService.trackMessageEdited(chat.id, id);
       }
-      
+
       onEditMessage(id, content);
       setMessages(prev => {
         const updated = [...prev];
@@ -594,7 +594,7 @@ export default function ChatWindow({
       }
     } catch (error) {
       console.error('Failed to edit query:', error);
-      toast.error('Failed to update query: '+ error);
+      toast.error('Failed to update query: ' + error);
     } finally {
       setShowEditQueryConfirm({ show: false, messageId: null, queryId: null, query: null });
     }
@@ -704,30 +704,30 @@ export default function ChatWindow({
     onSendMessage(fixErrorContent);
   };
 
-   // New logic for fixing rollback errors
+  // New logic for fixing rollback errors
   const handleFixRollbackErrorAction = (message: Message) => {
-  
-      const queriesWithErrors = message.queries?.filter(q => q.error) || [];
-      if (queriesWithErrors.length === 0) {
-        toast.error("No errors found to fix");
-        return;
-      }
-      // Create the error message content
-      let fixRollbackErrorContent = "Fix Rollback Errors:";
-      queriesWithErrors.forEach(query => {
-        fixRollbackErrorContent += `Query: '${query.rollback_query != null && query.rollback_query != "" ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
-      });
-  
-      // Edit the user message to include the error message
-      onSendMessage(fixRollbackErrorContent);
+
+    const queriesWithErrors = message.queries?.filter(q => q.error) || [];
+    if (queriesWithErrors.length === 0) {
+      toast.error("No errors found to fix");
+      return;
     }
+    // Create the error message content
+    let fixRollbackErrorContent = "Fix Rollback Errors:";
+    queriesWithErrors.forEach(query => {
+      fixRollbackErrorContent += `Query: '${query.rollback_query != null && query.rollback_query != "" ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
+    });
+
+    // Edit the user message to include the error message
+    onSendMessage(fixRollbackErrorContent);
+  }
 
   const handleConfirmClearChat = useCallback(async () => {
     // Track chat cleared event
     if (chat?.id) {
       analyticsService.trackChatCleared(chat.id);
     }
-    
+
     await onClearChat();
     setShowClearConfirm(false);
   }, [chat?.id, onClearChat]);
@@ -737,7 +737,7 @@ export default function ChatWindow({
     if (chat?.id) {
       analyticsService.trackQueryCancelled(chat.id);
     }
-    
+
     onCancelStream();
   }, [chat?.id, onCancelStream]);
 
@@ -746,7 +746,7 @@ export default function ChatWindow({
     if (chat?.id) {
       analyticsService.trackSchemaRefreshed(chat.id, chat.connection.database);
     }
-    
+
     await onRefreshSchema();
     setShowRefreshSchema(false);
   }, [chat?.id, chat?.connection.database, onRefreshSchema]);
@@ -756,7 +756,7 @@ export default function ChatWindow({
     if (chat?.id) {
       analyticsService.trackSchemaCancelled(chat.id, chat.connection.database);
     }
-    
+
     await onCancelRefreshSchema();
     setShowRefreshSchema(false);
   }, [chat?.id, chat?.connection.database, onCancelRefreshSchema]);
@@ -893,7 +893,7 @@ export default function ChatWindow({
           ))}
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full">
-               <div className="
+              <div className="
                   px-4 
                   py-2
                   bg-white 
@@ -905,39 +905,39 @@ export default function ChatWindow({
                   shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
                   rounded-full
                 ">
-                  {formatDateDivider(new Date().toISOString())}
-                </div>
+                {formatDateDivider(new Date().toISOString())}
+              </div>
               <MessageTile
                 key={"welcome-message"}
-              checkSSEConnection={checkSSEConnection}
-              chatId={chat.id}
-              message={{
-                                    id: "welcome-message",
-                                    type: "assistant",
-                                    content: "Welcome to NeoBase! Ask me anything about your database. I will understand your request & respond with data.",
-                                    queries: [],
-                                    action_buttons: [],
-                                    created_at: new Date().toISOString(),
-                                    updated_at: new Date().toISOString(),
-                                  }}
-                                  setMessage={setMessage}
-                                  onEdit={handleEditMessage}
-                                  editingMessageId={editingMessageId}
-                                  editInput={editInput}
-                                  setEditInput={setEditInput}
-                                  onSaveEdit={handleSaveEdit}
-                                  onCancelEdit={handleCancelEdit}
-                                  queryStates={queryStates}
-                                  setQueryStates={setQueryStates}
-                                  queryTimeouts={queryTimeouts}
-                                  isFirstMessage={false}
-                                  onQueryUpdate={handleQueryUpdate}
-                                  onEditQuery={handleEditQuery}
-                                  buttonCallback={(action) => {
-                                    if (action === "refresh_schema") {
-                                      setShowRefreshSchema(true);
-                                    }
-                                  }}
+                checkSSEConnection={checkSSEConnection}
+                chatId={chat.id}
+                message={{
+                  id: "welcome-message",
+                  type: "assistant",
+                  content: "Welcome to NeoBase! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data.",
+                  queries: [],
+                  action_buttons: [],
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                }}
+                setMessage={setMessage}
+                onEdit={handleEditMessage}
+                editingMessageId={editingMessageId}
+                editInput={editInput}
+                setEditInput={setEditInput}
+                onSaveEdit={handleSaveEdit}
+                onCancelEdit={handleCancelEdit}
+                queryStates={queryStates}
+                setQueryStates={setQueryStates}
+                queryTimeouts={queryTimeouts}
+                isFirstMessage={false}
+                onQueryUpdate={handleQueryUpdate}
+                onEditQuery={handleEditQuery}
+                buttonCallback={(action) => {
+                  if (action === "refresh_schema") {
+                    setShowRefreshSchema(true);
+                  }
+                }}
               />
             </div>
           )}
@@ -991,6 +991,7 @@ export default function ChatWindow({
         onSendMessage={handleMessageSubmit}
         isExpanded={isExpanded}
         isDisabled={isMessageSending}
+        chatId={chat.id}
       />
 
       {showRefreshSchema && (

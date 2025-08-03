@@ -190,6 +190,110 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	return string(convertedResponseText), nil
 }
 
+// GenerateRecommendations generates query recommendations using a prompt and schema
+func (c *GeminiClient) GenerateRecommendations(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Convert messages into parts for the Gemini API.
+	geminiMessages := make([]*genai.Content, 0)
+
+	// Add system prompt for recommendations
+	systemPrompt := constants.GetRecommendationsPrompt(constants.Gemini)
+	responseSchema := constants.GetRecommendationsSchema(constants.Gemini).(*genai.Schema)
+
+	// Add system message first
+	geminiMessages = append(geminiMessages, &genai.Content{
+		Role: "user",
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	})
+
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Add conversation history
+	for _, msg := range messages {
+		content := ""
+		switch msg.Role {
+		case "user":
+			if userMsg, ok := msg.Content["user_message"].(string); ok {
+				content = userMsg
+			}
+		case "assistant":
+			if assistantMsg, ok := msg.Content["assistant_response"].(map[string]interface{}); ok {
+				content = formatAssistantResponse(assistantMsg)
+			}
+		case "system":
+			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {
+				content = fmt.Sprintf("Database schema update:\n%s", schemaUpdate)
+			}
+		}
+
+		if content != "" {
+			role := "user"
+			if msg.Role == "assistant" {
+				role = "model"
+			}
+
+			geminiMessages = append(geminiMessages, &genai.Content{
+				Role: role,
+				Parts: []genai.Part{
+					genai.Text(content),
+				},
+			})
+		}
+	}
+
+	// Build the request with a single content bundle.
+	// Call Gemini's content generation API.
+	model := c.client.GenerativeModel(c.model)
+	model.MaxOutputTokens = utils.ToInt32Ptr(int32(c.maxCompletionTokens))
+	model.SetTemperature(float32(c.temperature))
+	model.ResponseMIMEType = "application/json"
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text(systemPrompt)},
+	}
+	model.ResponseSchema = responseSchema
+	model.SafetySettings = []*genai.SafetySetting{
+		{
+			Category:  genai.HarmCategoryHarassment,
+			Threshold: genai.HarmBlockNone,
+		},
+		{
+			Category:  genai.HarmCategoryHateSpeech,
+			Threshold: genai.HarmBlockNone,
+		},
+	}
+
+	// Start chat session
+	session := model.StartChat()
+	session.History = geminiMessages
+
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	// Send empty message to get response based on history
+	result, err := session.SendMessage(ctx, genai.Text("Please provide query recommendations based on our conversation history."))
+	if err != nil {
+		log.Printf("Gemini API error: %v", err)
+		return "", fmt.Errorf("gemini API error: %v", err)
+	}
+
+	log.Printf("GEMINI -> GenerateRecommendations -> result: %v", result)
+	log.Printf("GEMINI -> GenerateRecommendations -> result.Candidates[0].Content.Parts[0]: %v", result.Candidates[0].Content.Parts[0])
+	responseText := strings.ReplaceAll(fmt.Sprintf("%v", result.Candidates[0].Content.Parts[0]), "```json", "")
+	responseText = strings.ReplaceAll(responseText, "```", "")
+
+	return responseText, nil
+}
+
 // GetModelInfo returns information about the Gemini model.
 func (c *GeminiClient) GetModelInfo() ModelInfo {
 	return ModelInfo{

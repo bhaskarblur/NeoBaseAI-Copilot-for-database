@@ -77,3 +77,27 @@ func GetSystemPrompt(provider string, dbType string) string {
 	}
 	return ""
 }
+
+// GetRecommendationsPrompt returns the appropriate recommendations prompt based on provider
+func GetRecommendationsPrompt(provider string) string {
+	switch provider {
+	case OpenAI:
+		return OpenAIRecommendationsPrompt
+	case Gemini:
+		return GeminiRecommendationsPrompt
+	default:
+		return OpenAIRecommendationsPrompt // Default to OpenAI
+	}
+}
+
+// GetRecommendationsSchema returns the appropriate recommendations schema based on provider
+func GetRecommendationsSchema(provider string) interface{} {
+	switch provider {
+	case OpenAI:
+		return OpenAIRecommendationsResponseSchema
+	case Gemini:
+		return GeminiRecommendationsResponseSchema
+	default:
+		return OpenAIRecommendationsResponseSchema // Default to OpenAI
+	}
+}

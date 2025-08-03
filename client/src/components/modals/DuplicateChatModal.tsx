@@ -49,7 +49,7 @@ export default function DuplicateChatModal({
               <span className="text-base">Duplicate all messages</span>
             </label>
             <p className="text-gray-500 text-sm mt-1 ml-7">
-              If checked, all conversation history will be copied to the new chat.
+              All conversation history will be copied to the new chat.
             </p>
           </div>
 

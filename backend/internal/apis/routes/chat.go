@@ -48,5 +48,8 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("/:id/queries/cancel", chatHandler.CancelQueryExecution)
 		protected.POST("/:id/queries/results", chatHandler.GetQueryResults)
 		protected.PATCH("/:id/queries/edit", chatHandler.EditQuery)
+		
+		// Query recommendations
+		protected.GET("/:id/recommendations", chatHandler.GetQueryRecommendations)
 	}
 }

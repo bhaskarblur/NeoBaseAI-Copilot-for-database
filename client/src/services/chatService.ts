@@ -9,6 +9,15 @@ interface CreateChatResponse {
     data: Chat;
 }
 
+interface QueryRecommendationsResponse {
+    success: boolean;
+    data: {
+        recommendations: Array<{
+            text: string;
+        }>;
+    };
+}
+
 const chatService = {
     // Add a cache for tables
     tablesCache: {} as Record<string, {tables: any[], timestamp: number}>,
@@ -479,6 +488,24 @@ const chatService = {
         } catch (error: any) {
             console.error('Update auto execute query error:', error);
             throw new Error(error.response?.data?.error || 'Failed to update auto execute query setting');
+        }
+    },
+
+    async getQueryRecommendations(chatId: string): Promise<QueryRecommendationsResponse> {
+        try {
+            const response = await axios.get<QueryRecommendationsResponse>(
+                `${API_URL}/chats/${chatId}/recommendations`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Get query recommendations error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to get query recommendations');
         }
     }
 };

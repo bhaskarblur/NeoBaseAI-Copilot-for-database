@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Check, Clock, Copy, History, Loader, Pencil, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -1291,9 +1291,9 @@ export default function MessageTile({
                                 <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded">
                                     Rolled Back on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
-                            ) : query.is_executed ? (
+                            ) : query.is_executed && query.action_at != null ? (
                                 <span className="w-[60%] md:w-auto text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
-                                    Executed on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
+                                    Executed on {formatActionAt(query.action_at)}
                                 </span>
                             ) : (
                                 <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">
@@ -1361,9 +1361,11 @@ export default function MessageTile({
                                 <button
                                     onClick={() => handleExecuteQuery(queryId)}
                                     className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
-                                    title="Execute query"
+                                    title={query.is_executed ? "Rerun query" : "Execute query"}
                                 >
-                                    <Play className="w-4 h-4" />
+                                    {query.is_executed
+                                        ? <RefreshCcw className="w-4 h-4" />
+                                        : <Play className="w-4 h-4" />}
                                 </button>
                             )}
                             <div className="w-px h-4 bg-gray-700 mx-2" />
