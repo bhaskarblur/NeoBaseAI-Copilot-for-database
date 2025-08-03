@@ -22,6 +22,7 @@ services:
     command: >
       redis-server 
       --requirepass default
+      --user neobase on >default ~* &* +@all
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --stop-writes-on-bgsave-error no
@@ -56,7 +57,7 @@ services:
       - NEOBASE_MONGODB_NAME=${NEOBASE_MONGODB_NAME} # neobase
       - NEOBASE_REDIS_HOST=${NEOBASE_REDIS_HOST} # neobase-redis
       - NEOBASE_REDIS_PORT=${NEOBASE_REDIS_PORT} # 6379
-      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME} # default
+      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME} # neobase
       - NEOBASE_REDIS_PASSWORD=${NEOBASE_REDIS_PASSWORD} # default
       - DEFAULT_LLM_CLIENT=${DEFAULT_LLM_CLIENT} # openai, gemini
       - OPENAI_API_KEY=${OPENAI_API_KEY} # openai api key

@@ -88,7 +88,7 @@ func LoadEnv() error {
 	Env.RedisHost = getRequiredEnv("NEOBASE_REDIS_HOST", "localhost")
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
-	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "neobase")
+	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "default")
 
 	// Example DB For Development Environment
 	Env.ExampleDatabaseType = getRequiredEnv("EXAMPLE_DB_TYPE", "postgres")
