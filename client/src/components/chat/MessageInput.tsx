@@ -207,15 +207,16 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                             onClick={handleGetRecommendations}
                             disabled={!isConnected || isLoadingRecommendations}
                             className={`
-                        absolute right-3 top-3
+                        absolute right-3 top-2.5
                         p-2 rounded-lg
                         hover:bg-gray-100 
                         disabled:opacity-50 disabled:cursor-not-allowed
                         transition-colors duration-200
                         flex items-center justify-center
+                        hover-tooltip
                         ${recommendations.length > 0 ? 'bg-gray-200' : ''}
                     `}
-                            title={recommendations.length > 0 ? "Hide recommendations" : "Get query recommendations"}
+                            data-tooltip={recommendations.length > 0 ? "Hide Recommendations" : "Get Query Recommendations"}
                         >
                             {recommendations.length > 0 ? (
                                 <X className={`w-5 h-5 text-gray-600`} />

@@ -19,6 +19,51 @@
   animation: fadeIn 0.3s ease-in-out;
 }
 
+/* Custom hover tooltip */
+.hover-tooltip {
+  /* Don't add position: relative here as it affects absolute positioning */
+}
+
+.hover-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: -35px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: black;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  z-index: 50;
+  pointer-events: none; /* Prevent tooltip from interfering with hover */
+}
+
+.hover-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: black;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  z-index: 50;
+  pointer-events: none; /* Prevent tooltip from interfering with hover */
+}
+
+.hover-tooltip:hover::after,
+.hover-tooltip:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+
 
 @layer base {
   body {
