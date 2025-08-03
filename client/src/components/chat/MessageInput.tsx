@@ -1,7 +1,9 @@
 import { Send, Dices, X, Dice2, Dice3, Dice5, LucideDice1, LucideDices } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import chatService from '../../services/chatService';
+import RecommendationTooltip from './RecommendationTooltip';
+import { recommendationStorage } from '../../utils/recommendationStorage';
 
 interface Recommendation {
     text: string;
@@ -19,18 +21,37 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
     const [input, setInput] = useState('');
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+    const [showTooltip, setShowTooltip] = useState(false);
+
+    // Check if tooltip should be shown for new chats
+    useEffect(() => {
+        if (chatId && isConnected && !recommendationStorage.hasShownTooltip(chatId)) {
+            // Show tooltip after a short delay to ensure UI is ready
+            const timer = setTimeout(() => {
+                setShowTooltip(true);
+            }, 1500);
+            
+            return () => clearTimeout(timer);
+        }
+    }, [chatId, isConnected]);
 
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
         if (input.trim()) {
             onSendMessage(input.trim());
             setInput('');
-            // We're not clearing recommendations here because we want to keep them visible as user can pick one from them.
+            setRecommendations([]); // Clear recommendations after sending
         }
     };
 
     const handleGetRecommendations = async () => {
         if (!chatId || !isConnected || isLoadingRecommendations) return;
+
+        // Hide tooltip when dice is clicked
+        if (showTooltip) {
+            setShowTooltip(false);
+            recommendationStorage.markTooltipAsShown(chatId);
+        }
 
         // If recommendations are already shown, hide them
         if (recommendations.length > 0) {
@@ -82,6 +103,20 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
         setRecommendations(prev => prev.filter((_, i) => i !== index));
     };
 
+    const handleTooltipClose = () => {
+        setShowTooltip(false);
+        if (chatId) {
+            recommendationStorage.markTooltipAsShown(chatId);
+        }
+    };
+
+    const handleTooltipDiceClick = () => {
+        setShowTooltip(false);
+        if (chatId) {
+            recommendationStorage.markTooltipAsShown(chatId);
+        }
+        handleGetRecommendations();
+    };
 
 
     return (
@@ -189,6 +224,13 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                                     className={`w-5 h-5 text-gray-600 ${isLoadingRecommendations ? 'animate-spin' : ''}`}
                                 />
                             )}
+                            
+                            {/* Recommendation Tooltip positioned relative to dice button */}
+                            <RecommendationTooltip
+                                isVisible={showTooltip}
+                                onClose={handleTooltipClose}
+                                onDiceClick={handleTooltipDiceClick}
+                            />
                         </button>
                     </div>
                     <button
