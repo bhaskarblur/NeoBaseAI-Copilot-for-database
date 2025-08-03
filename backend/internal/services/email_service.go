@@ -182,8 +182,8 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 	if isDocker {
 		// Docker environment paths
 		possiblePaths = []string{
-			filepath.Join("/app", "backend", "internal", "email_templates", templateName+".html"),
-			filepath.Join("backend", "internal", "email_templates", templateName+".html"),
+			filepath.Join("/app", "internal", "email_templates", templateName+".html"),
+			filepath.Join("internal", "email_templates", templateName+".html"),
 		}
 	} else {
 		// Local development paths

@@ -39,6 +39,9 @@ COPY --from=builder /app/main .
 # Copy any additional required files (like config files)
 COPY --from=builder /app/config ./config
 
+# Copy email templates
+COPY --from=builder /app/internal/email_templates ./internal/email_templates
+
 # Use non root user
 USER appuser
 
