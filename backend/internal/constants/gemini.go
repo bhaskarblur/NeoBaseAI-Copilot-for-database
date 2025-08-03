@@ -930,3 +930,54 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 		},
 	},
 }
+
+// Query Recommendations Prompt and Schema
+const GeminiRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 3 diverse and practical question recommendations that users can ask about their database.
+
+Generate exactly 3 different question recommendations that are:
+- Diverse (data exploration, analytics, insights, etc.)
+- Practical and commonly useful
+- Natural language questions that users would ask
+- Relevant to the database type and schema
+- Concise and clear
+- User-Friendly & Meaningful that user should understand
+
+Consider the database type and any recent conversation context when generating recommendations.
+
+Response format should be JSON with this structure:
+{
+  "recommendations": [
+    {
+      "text": "Show me the most recent orders"
+    },
+    {
+      "text": "What are the top selling products?"
+    },
+    {
+      "text": "How many users registered this month?"
+    }
+  ]
+}`
+
+var GeminiRecommendationsResponseSchema = &genai.Schema{
+	Type:     genai.TypeObject,
+	Enum:     []string{},
+	Required: []string{"recommendations"},
+	Properties: map[string]*genai.Schema{
+		"recommendations": &genai.Schema{
+			Type:        genai.TypeArray,
+			Description: "An array of exactly 3 query recommendations",
+			Items: &genai.Schema{
+				Type:     genai.TypeObject,
+				Enum:     []string{},
+				Required: []string{"text"},
+				Properties: map[string]*genai.Schema{
+					"text": &genai.Schema{
+						Type:        genai.TypeString,
+						Description: "The recommendation text that users can ask",
+					},
+				},
+			},
+		},
+	},
+}

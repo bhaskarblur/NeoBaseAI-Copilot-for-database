@@ -52,6 +52,15 @@ type Environment struct {
 	GeminiModel               string
 	GeminiMaxCompletionTokens int
 	GeminiTemperature         float64
+
+	// SMTP Email configs
+	SMTPHost     string
+	SMTPPort     int
+	SMTPSecure   bool
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFromName string
+	SMTPFromEmail string
 }
 
 var Env Environment
@@ -88,7 +97,7 @@ func LoadEnv() error {
 	Env.RedisHost = getRequiredEnv("NEOBASE_REDIS_HOST", "localhost")
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
 	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
-	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "neobase")
+	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "default")
 
 	// Example DB For Development Environment
 	Env.ExampleDatabaseType = getRequiredEnv("EXAMPLE_DB_TYPE", "postgres")
@@ -112,6 +121,15 @@ func LoadEnv() error {
 	Env.GeminiModel = getEnvWithDefault("GEMINI_MODEL", constants.GeminiModel)
 	Env.GeminiMaxCompletionTokens = getIntEnvWithDefault("GEMINI_MAX_COMPLETION_TOKENS", constants.GeminiMaxCompletionTokens)
 	Env.GeminiTemperature = getFloatEnvWithDefault("GEMINI_TEMPERATURE", constants.GeminiTemperature)
+
+	// SMTP Email configs
+	Env.SMTPHost = getEnvWithDefault("SMTP_HOST", "")
+	Env.SMTPPort = getIntEnvWithDefault("SMTP_PORT", 587)
+	Env.SMTPSecure = getEnvWithDefault("SMTP_SECURE", "false") == "true"
+	Env.SMTPUser = getEnvWithDefault("SMTP_USER", "")
+	Env.SMTPPassword = getEnvWithDefault("SMTP_PASSWORD", "")
+	Env.SMTPFromName = getEnvWithDefault("SMTP_FROM_NAME", "NeoBase")
+	Env.SMTPFromEmail = getEnvWithDefault("SMTP_FROM_EMAIL", Env.SMTPUser)
 
 	return validateConfig()
 }

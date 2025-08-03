@@ -891,3 +891,28 @@ func (h *ChatHandler) GetTables(c *gin.Context) {
 		Data:    response,
 	})
 }
+// @Summary Get query recommendations
+// @Description Get 3 AI-generated query recommendations based on database schema and context
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Success 200 {object} dtos.Response{data=dtos.QueryRecommendationsResponse}
+// @Router /api/chats/{id}/recommendations [get]
+func (h *ChatHandler) GetQueryRecommendations(c *gin.Context) {
+	chatID := c.Param("id")
+	userID := c.GetString("userID")
+
+	recommendations, status, err := h.chatService.GetQueryRecommendations(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(status), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    recommendations,
+	})
+}

@@ -61,6 +61,7 @@ type ChatService interface {
 	processLLMResponseAndRunQuery(ctx context.Context, userID, chatID string, messageID, streamID string) error
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
+	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
 }
 
 type chatService struct {

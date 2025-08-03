@@ -232,3 +232,69 @@ func (h *AuthHandler) GetUser(c *gin.Context) {
 		Data:    user,
 	})
 }
+
+// @Summary Forgot Password
+// @Description Send password reset OTP to user's email
+// @Accept json
+// @Produce json
+// @Param forgotPasswordRequest body dtos.ForgotPasswordRequest true "Forgot password request"
+// @Success 200 {object} dtos.Response
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req dtos.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	response, statusCode, err := h.authService.ForgotPassword(&req)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
+// @Summary Reset Password
+// @Description Reset user password using OTP
+// @Accept json
+// @Produce json
+// @Param resetPasswordRequest body dtos.ResetPasswordRequest true "Reset password request"
+// @Success 200 {object} dtos.Response
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req dtos.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	statusCode, err := h.authService.ResetPassword(&req)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    "Password reset successfully",
+	})
+}

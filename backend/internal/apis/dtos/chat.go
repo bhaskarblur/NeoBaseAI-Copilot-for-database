@@ -88,3 +88,11 @@ type ColumnInfo struct {
 type TablesResponse struct {
 	Tables []TableInfo `json:"tables"`
 }
+// Query Recommendations DTOs
+type QueryRecommendation struct {
+	Text string `json:"text"`
+}
+
+type QueryRecommendationsResponse struct {
+	Recommendations []QueryRecommendation `json:"recommendations"`
+}

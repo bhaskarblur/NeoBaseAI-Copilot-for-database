@@ -135,6 +135,87 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	return resp.Choices[0].Message.Content, nil
 }
 
+// GenerateRecommendations generates query recommendations using a different prompt and schema
+func (c *OpenAIClient) GenerateRecommendations(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Convert messages to OpenAI format
+	openAIMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
+
+	systemPrompt := constants.GetRecommendationsPrompt(constants.OpenAI)
+	responseSchema := constants.GetRecommendationsSchema(constants.OpenAI).(string)
+
+	// Add system message with recommendations-specific prompt
+	openAIMessages = append(openAIMessages, openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+
+	for _, msg := range messages {
+		content := ""
+
+		// Handle different message types
+		switch msg.Role {
+		case "user":
+			if userMsg, ok := msg.Content["user_message"].(string); ok {
+				content = userMsg
+			}
+		case "assistant":
+			content = formatAssistantResponse(msg.Content["assistant_response"].(map[string]interface{}))
+		case "system":
+			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {
+				content = fmt.Sprintf("Database schema update:\n%s", schemaUpdate)
+			}
+		}
+
+		if content != "" {
+			openAIMessages = append(openAIMessages, openai.ChatCompletionMessage{
+				Role:    mapRole(msg.Role),
+				Content: content,
+			})
+		}
+	}
+
+	// Create completion request with JSON schema for recommendations
+	req := openai.ChatCompletionRequest{
+		Model:               c.model,
+		Messages:            openAIMessages,
+		MaxCompletionTokens: c.maxCompletionTokens,
+		Temperature:         float32(c.temperature),
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:        "recommendations-response",
+				Description: "Query recommendations response",
+				Schema:      json.RawMessage(responseSchema),
+				Strict:      false,
+			},
+		},
+	}
+
+	// Check if the context is cancelled
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Call OpenAI API
+	resp, err := c.client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		log.Printf("GenerateRecommendations -> err: %v", err)
+		return "", fmt.Errorf("OpenAI API error: %v", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from OpenAI")
+	}
+
+	log.Printf("OPENAI -> GenerateRecommendations -> resp: %v", resp)
+	return resp.Choices[0].Message.Content, nil
+}
+
 func (c *OpenAIClient) GetModelInfo() ModelInfo {
 	return ModelInfo{
 		Name:                c.model,

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Check, Clock, Copy, History, Loader, Pencil, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -121,6 +121,41 @@ export default function MessageTile({
     const [dateColumns, setDateColumns] = useState<Record<string, boolean>>({});
     // Store expanded state for nested JSON fields
     const expandedNodesRef = useRef<Record<string, boolean>>({});
+    const [minimizedResults, setMinimizedResults] = useState<Record<string, boolean>>({});
+    const [expandedCells, setExpandedCells] = useState<Record<string, boolean>>({});
+
+    useEffect(() => {
+        try {
+            const key = `minimize-result-state-${chatId}`;
+            const storedStateJSON = localStorage.getItem(key);
+            if (storedStateJSON) {
+                const allStoredStates = JSON.parse(storedStateJSON);
+                const messageState = allStoredStates[message.id];
+                if (messageState) {
+                    setMinimizedResults(messageState);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to parse minimized state from localStorage", e);
+        }
+    }, [chatId, message.id]);
+
+    const toggleResultMinimize = (queryId: string) => {
+        const newMinimizedState = !(minimizedResults[queryId] || false);
+        const updatedMessageState = { ...minimizedResults, [queryId]: newMinimizedState };
+        
+        setMinimizedResults(updatedMessageState);
+
+        try {
+            const key = `minimize-result-state-${chatId}`;
+            const storedStateJSON = localStorage.getItem(key);
+            const allStoredStates = storedStateJSON ? JSON.parse(storedStateJSON) : {};
+            allStoredStates[message.id] = updatedMessageState;
+            localStorage.setItem(key, JSON.stringify(allStoredStates));
+        } catch (e) {
+            console.error("Failed to save minimized state to localStorage", e);
+        }
+    };
     
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -802,21 +837,22 @@ export default function MessageTile({
         );
     };
     
-    const renderCellValue = (value: any, column: string) => {
+    const toggleCellExpansion = (cellId: string) => {
+        setExpandedCells(prev => ({ ...prev, [cellId]: !prev[cellId] }));
+    };
+
+    const renderCellValue = (value: any, column: string, rowId: string): JSX.Element => {
+        const cellId = `${rowId}-${column}`;
+        const isExpanded = expandedCells[cellId];
+
         if (value === null) return <span className="text-yellow-400">null</span>;
         if (value === undefined) return <span className="text-yellow-400">undefined</span>;
 
         if (typeof value === 'object' && value !== null) {
             return <NestedJsonCell data={value} />;
         }
-        
-        // Handle primitive types with appropriate styling
-        if (typeof value === 'number') {
-            return <span className="text-cyan-400">{value}</span>;
-        } else if (typeof value === 'boolean') {
-            return <span className="text-purple-400">{String(value)}</span>;
-        } else if (typeof value === 'string') {
-            // Check if it's a date string
+
+        if (typeof value === 'string') {
             if (isDateString(value)) {
                 return (
                     <span className="text-yellow-300">
@@ -824,7 +860,32 @@ export default function MessageTile({
                     </span>
                 );
             }
+
+            if (value.length > 140) {
+                const maxLength = Math.min(250, value.length);
+                const truncatedText = isExpanded ? value : value.substring(0, maxLength);
+                return (
+                    <span onClick={() => toggleCellExpansion(cellId)} className="cursor-pointer">
+                        <span className="text-green-400">"{truncatedText}</span>
+                        {!isExpanded ? (
+                             <span className="text-green-400">..<br></br><span className="text-cyan-400">Show More</span></span> )
+                             : (
+                                <span className="text-cyan-400"><br></br>Show Less</span>
+                             )
+                            }
+                    </span>
+                );
+            }
+
             return <span className="text-green-400">"{value}"</span>;
+        }
+
+        if (typeof value === 'number') {
+            return <span className="text-cyan-400">{value}</span>;
+        }
+        
+        if (typeof value === 'boolean') {
+            return <span className="text-purple-400">{String(value)}</span>;
         }
         
         // Fallback
@@ -875,14 +936,15 @@ export default function MessageTile({
                                         row[column] !== null && 
                                         Object.keys(row[column]).length > 0;
                                     
+                                    const isTooLong = row[column] != null && row[column].length > 140;
                                     const isDateColumn = dateColumnList.includes(column);
                                     
                                     return (
                                         <td 
                                             key={column} 
-                                            className={`py-2 px-4 ${isComplexObject ? 'min-w-[280px]' : ''} ${isDateColumn ? 'min-w-[200px] whitespace-nowrap' : ''}`}
+                                            className={`py-2 px-4 ${isComplexObject ? 'min-w-[300px]' : ''} ${isDateColumn ? 'min-w-[200px] whitespace-nowrap' : ''} ${isTooLong ? 'min-w-[480px]' : ''}`}
                                         >
-                                            {renderCellValue(row[column], column)}
+                                            {renderCellValue(row[column], column, row.id || i.toString())}
                                         </td>
                                     );
                                 })}
@@ -1260,6 +1322,7 @@ export default function MessageTile({
 
         // Get query state or initialize it
         const queryState = queryStates[query.id] || { isExecuting: false, isExample: false };
+        const isResultMinimized = minimizedResults[query.id] || false;
 
         const queryId = query.id;
         const shouldShowExampleResult = !query.is_executed && !query.is_rolled_back;
@@ -1291,13 +1354,13 @@ export default function MessageTile({
                                 <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded">
                                     Rolled Back on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
                                 </span>
-                            ) : query.is_executed ? (
+                            ) : query.is_executed && query.action_at != null ? (
                                 <span className="w-[60%] md:w-auto text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded">
-                                    Executed on {query.action_at != null ? `${formatActionAt(query.action_at)}` : ''}
+                                    Executed on {formatActionAt(query.action_at)}
                                 </span>
                             ) : (
                                 <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded">
-                                    Not Executed
+                                    Execute Manually
                                 </span>
                             )}
                         </div>
@@ -1311,7 +1374,8 @@ export default function MessageTile({
                                                 e.stopPropagation();
                                                 setIsEditingQuery(true);
                                             }}
-                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300"
+                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300 hover-tooltip-messagetile"
+                                            data-tooltip="Edit query"
                                             title="Edit query"
                                         >
                                             <Pencil className="w-4 h-4" />
@@ -1352,7 +1416,8 @@ export default function MessageTile({
                                         }, 0);
                                         toast.error('Query cancelled', toastStyle);
                                     }}
-                                    className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
+                                    className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400 hover-tooltip-messagetile"
+                                    data-tooltip="Cancel query"
                                     title="Cancel query"
                                 >
                                     <XCircle className="w-4 h-4" />
@@ -1360,16 +1425,20 @@ export default function MessageTile({
                             ) : (
                                 <button
                                     onClick={() => handleExecuteQuery(queryId)}
-                                    className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors"
-                                    title="Execute query"
+                                    className="p-2 text-red-500 hover:text-red-400 hover:bg-gray-800 rounded transition-colors hover-tooltip-messagetile"
+                                    data-tooltip={query.is_executed ? "Rerun query" : "Execute query"}
+                                    title={query.is_executed ? "Rerun query" : "Execute query"}
                                 >
-                                    <Play className="w-4 h-4" />
+                                    {query.is_executed
+                                        ? <RefreshCcw className="w-4 h-4" />
+                                        : <Play className="w-4 h-4" />}
                                 </button>
                             )}
                             <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
                                 onClick={() => handleCopyToClipboard(query.query)}
-                                className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200 hover-tooltip-messagetile"
+                                data-tooltip="Copy query"
                                 title="Copy query"
                             >
                                 <Copy className="w-4 h-4" />
@@ -1439,9 +1508,23 @@ export default function MessageTile({
                                                     Error
                                                 </span>
                                             ) : (
-                                                <span>
-                                                    {shouldShowExampleResult ? 'Example Result:' : query.is_rolled_back ? 'Rolled Back Result:' : 'Result:'}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => toggleResultMinimize(query.id)}
+                                                        className="p-1 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                                        title={isResultMinimized ? "Expand" : "Collapse"}
+                                                        
+                                                    >
+                                                        {isResultMinimized ? (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                                        ) : (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                                                        )}
+                                                    </button>
+                                                    <span>
+                                                        {shouldShowExampleResult ? 'Example Result:' : query.is_rolled_back ? 'Rolled Back Result:' : 'Result:'}
+                                                    </span>
+                                                </div>
                                             )}
                                             {query.example_execution_time && !query.execution_time && !query.is_executed && !query.error && (
                                                 <span className="text-xs bg-gray-800 px-2 py-1 rounded flex items-center gap-1">
@@ -1468,7 +1551,8 @@ export default function MessageTile({
                                                             window.scrollTo(window.scrollX, window.scrollY);
                                                         }, 0);
                                                     }}
-                                                    className={`p-1 md:p-2 rounded ${viewMode === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                                                    className={`p-1 md:p-2 rounded ${viewMode === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
+                                                    data-tooltip="Table view"
                                                     title="Table view"
                                                 >
                                                     <Table className="w-4 h-4" />
@@ -1483,7 +1567,8 @@ export default function MessageTile({
                                                             window.scrollTo(window.scrollX, window.scrollY);
                                                         }, 0);
                                                     }}
-                                                    className={`p-1 md:p-2 rounded ${viewMode === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                                                    className={`p-1 md:p-2 rounded ${viewMode === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
+                                                    data-tooltip="JSON view"
                                                     title="JSON view"
                                                 >
                                                     <Braces className="w-4 h-4" />
@@ -1498,7 +1583,8 @@ export default function MessageTile({
                                                             e.stopPropagation();
                                                             setOpenDownloadMenu(openDownloadMenu === query.id ? null : query.id);
                                                         }}
-                                                        className="p-1 md:p-2 rounded hover:bg-gray-800 flex items-center gap-1"
+                                                        className="p-1 md:p-2 rounded hover:bg-gray-800 flex items-center gap-1 hover-tooltip-messagetile"
+                                                        data-tooltip="Download data"
                                                         title="Download data"
                                                     >
                                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
@@ -1577,7 +1663,8 @@ export default function MessageTile({
                                                                     window.scrollTo(window.scrollX, window.scrollY);
                                                                 }, 0);
                                                             }}
-                                                            className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300"
+                                                            className="p-2 hover:bg-gray-800 rounded text-yellow-400 hover:text-yellow-300 hover-tooltip-messagetile"
+                                                            data-tooltip="Rollback changes"
                                                             disabled={queryState.isExecuting}
                                                         >
                                                             <History className="w-4 h-4" />
@@ -1617,7 +1704,8 @@ export default function MessageTile({
                                                                 }, 0);
                                                                 toast.error('Query cancelled', toastStyle);
                                                             }}
-                                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400"
+                                                            className="p-2 hover:bg-gray-800 rounded transition-colors text-red-500 hover:text-red-400 hover-tooltip-messagetile"
+                                                            data-tooltip="Cancel query"
                                                             title="Cancel query"
                                                         >
                                                             <XCircle className="w-4 h-4" />
@@ -1628,7 +1716,8 @@ export default function MessageTile({
                                                 )}
                                                 <button
                                                     onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
-                                                    className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200"
+                                                    className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200 hover-tooltip-messagetile"
+                                                    data-tooltip="Copy result"
                                                     title="Copy result"
                                                 >
                                                     <Copy className="w-4 h-4" />
@@ -1636,57 +1725,61 @@ export default function MessageTile({
                                             </div>
                                         </div>}
                                     </div>
-                                    {query.error ? (
-                                        <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
-                                            <div className="font-bold mb-2">{query.error.code}</div>
-                                            {query.error.message != query.error.details && <div className="mb-2">{query.error.message}</div>}
-                                            {query.error.details && (
-                                                <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
-                                                    {query.error.details}
+                                    {!isResultMinimized && (
+                                        <>
+                                            {query.error ? (
+                                                <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
+                                                    <div className="font-bold mb-2">{query.error.code}</div>
+                                                    {query.error.message != query.error.details && <div className="mb-2">{query.error.message}</div>}
+                                                    {query.error.details && (
+                                                        <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
+                                                            {query.error.details}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="px-0">
-                                            <div className={`
+                                            ) : (
+                                                <div className="px-0">
+                                                    <div className={`
                                             text-green-400 pb-6 w-full
                                                     ${!query.example_result && !query.error ? '' : ''}
                                         `}>
-                                                {viewMode === 'table' ? (
-                                                    <div className="w-full">
-                                                        {shouldShowExampleResult ? (
-                                                            resultToShow ? renderTableView(parseResults(resultToShow)) : (
-                                                                <div className="text-gray-500">No example data available</div>
-                                                            )
+                                                        {viewMode === 'table' ? (
+                                                            <div className="w-full">
+                                                                {shouldShowExampleResult ? (
+                                                                    resultToShow ? renderTableView(parseResults(resultToShow)) : (
+                                                                        <div className="text-gray-500">No example data available</div>
+                                                                    )
+                                                                ) : (
+                                                                    resultToShow ? (
+                                                                        renderQueryResult(resultToShow)
+                                                                    ) : (
+                                                                        <div className="text-gray-500">No data to display</div>
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         ) : (
-                                                            resultToShow ? (
-                                                                renderQueryResult(resultToShow)
-                                                            ) : (
-                                                                <div className="text-gray-500">No data to display</div>
-                                                            )
+                                                            <div className="w-full">
+                                                                {shouldShowExampleResult ? (
+                                                                    resultToShow ? (
+                                                                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md">
+                                                                            {renderColoredJson(parseResults(resultToShow))}
+                                                                        </pre>
+                                                                    ) : (
+                                                                        <div className="text-gray-500">No example data available</div>
+                                                                    )
+                                                                ) : (
+                                                                    resultToShow ? (
+                                                                        renderQueryResult(resultToShow)
+                                                                    ) : (
+                                                                        <div className="text-gray-500">No data to display</div>
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
-                                                ) : (
-                                                    <div className="w-full">
-                                                        {shouldShowExampleResult ? (
-                                                            resultToShow ? (
-                                                                <pre className="overflow-x-auto whitespace-pre-wrap rounded-md">
-                                                                    {renderColoredJson(parseResults(resultToShow))}
-                                                                </pre>
-                                                            ) : (
-                                                                <div className="text-gray-500">No example data available</div>
-                                                            )
-                                                        ) : (
-                                                            resultToShow ? (
-                                                                renderQueryResult(resultToShow)
-                                                            ) : (
-                                                                <div className="text-gray-500">No data to display</div>
-                                                            )
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
+                                                </div>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             )}
@@ -1885,7 +1978,9 @@ export default function MessageTile({
                 border-0
                 bg-white/80
                 backdrop-blur-sm
+                hover-tooltip-messagetile
               "
+                            data-tooltip="Copy message"
                             title="Copy message"
                         >
                             <Copy className="w-4 h-4 text-gray-800" />
@@ -1912,8 +2007,9 @@ export default function MessageTile({
                   border-0
                   bg-white/80
                   backdrop-blur-sm
-
+                  hover-tooltip-messagetile
                 "
+                                data-tooltip="Edit message"
                                 title="Edit message"
                             >
                                 <Pencil className="w-4 h-4 text-gray-800" />
@@ -1945,7 +2041,9 @@ export default function MessageTile({
                 border-0
                 bg-white/80
                 backdrop-blur-sm
+                hover-tooltip-messagetile
               "
+                            data-tooltip="Copy message"
                             title="Copy message"
                         >
                             <Copy className="w-4 h-4 text-gray-800" />

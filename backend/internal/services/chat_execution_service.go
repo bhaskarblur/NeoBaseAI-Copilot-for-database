@@ -2387,3 +2387,127 @@ func (s *chatService) removeFixErrorButton(msg *models.Message) {
 		log.Printf("ChatService -> removeFixErrorButton -> msg.ActionButtons: nil")
 	}
 }
+
+// GetQueryRecommendations generates 3 random query recommendations based on database schema and nature
+func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error) {
+	log.Printf("ChatService -> GetQueryRecommendations -> userID: %s, chatID: %s", userID, chatID)
+
+	// Get connection info
+	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+	if !exists {
+		return nil, http.StatusBadRequest, fmt.Errorf("database connection not found")
+	}
+
+	// Get chat to access settings and context
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	_, err = s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+
+	// Get recent LLM messages for context
+	llmMessages, err := s.llmRepo.GetByChatID(chatObjID)
+	if err != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> Error getting LLM messages: %v", err)
+		// Continue without context if we can't get messages
+		llmMessages = []*models.LLMMessage{}
+	}
+
+	// Use the existing conversation context directly
+	contextMessages := llmMessages
+
+	// Generate recommendations using LLM
+	response, err := s.llmClient.GenerateRecommendations(ctx, contextMessages, connInfo.Config.Type)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate recommendations: %v", err)
+	}
+
+	log.Printf("ChatService -> GetQueryRecommendations -> LLM response: %s", response)
+
+	// Parse the LLM response
+	var jsonResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to parse LLM response: %v", err)
+	}
+
+	// Extract recommendations
+	var recommendations []dtos.QueryRecommendation
+	if recsInterface, ok := jsonResponse["recommendations"]; ok {
+		if recsArray, ok := recsInterface.([]interface{}); ok {
+			for _, recInterface := range recsArray {
+				if recMap, ok := recInterface.(map[string]interface{}); ok {
+					rec := dtos.QueryRecommendation{}
+					if text, ok := recMap["text"].(string); ok {
+						rec.Text = text
+					}
+
+					// Only add if we have text
+					if rec.Text != "" {
+						recommendations = append(recommendations, rec)
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback recommendations if LLM didn't provide proper format
+	if len(recommendations) == 0 {
+		log.Printf("ChatService -> GetQueryRecommendations -> No valid recommendations from LLM, using fallbacks")
+		recommendations = s.getFallbackRecommendations(connInfo.Config.Type)
+	}
+
+	// Ensure we have exactly 3 recommendations
+	if len(recommendations) > 3 {
+		recommendations = recommendations[:3]
+	} else if len(recommendations) < 3 {
+		// Add fallbacks to reach 3
+		fallbacks := s.getFallbackRecommendations(connInfo.Config.Type)
+		for i := len(recommendations); i < 3 && i < len(fallbacks); i++ {
+			recommendations = append(recommendations, fallbacks[i])
+		}
+	}
+
+	return &dtos.QueryRecommendationsResponse{
+		Recommendations: recommendations,
+	}, http.StatusOK, nil
+}
+
+// getFallbackRecommendations provides fallback recommendations based on database type
+func (s *chatService) getFallbackRecommendations(dbType string) []dtos.QueryRecommendation {
+	switch dbType {
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+		return []dtos.QueryRecommendation{
+			{Text: "Show me all the tables in this database"},
+			{Text: "What are the column details for the main tables?"},
+			{Text: "How many active connections are there right now?"},
+		}
+	case constants.DatabaseTypeMySQL:
+		return []dtos.QueryRecommendation{
+			{Text: "List all tables in this database"},
+			{Text: "Show me the structure of the main tables"},
+			{Text: "What processes are currently running?"},
+		}
+	case constants.DatabaseTypeMongoDB:
+		return []dtos.QueryRecommendation{
+			{Text: "What collections are available in this database?"},
+			{Text: "Show me the database statistics and size"},
+			{Text: "What's the current server status and performance?"},
+		}
+	case constants.DatabaseTypeClickhouse:
+		return []dtos.QueryRecommendation{
+			{Text: "Show me all tables with their row counts"},
+			{Text: "What are the recent query performance metrics?"},
+			{Text: "Which tables have the most data?"},
+		}
+	default:
+		return []dtos.QueryRecommendation{
+			{Text: "Test the database connection"},
+			{Text: "How many tables are in this database?"},
+			{Text: "What version is this database running?"},
+		}
+	}
+}

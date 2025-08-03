@@ -7,6 +7,7 @@ Thank you to all the people who have contributed to NeoBase!
 Add core team members here with their GitHub profiles and roles -->
 - [Bhaskar Kaura](https://github.com/bhaskarblur) - Founder & Developer
 - [Ankit Srivastava](https://github.com/ankit-apk) - Founder & Developer
+- [Denis Perov](https://github.com/imajus) - Contributor
 
 
 ## Contributors

@@ -22,6 +22,7 @@ services:
     command: >
       redis-server 
       --requirepass default
+      --user neobase on >default ~* &* +@all
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --stop-writes-on-bgsave-error no

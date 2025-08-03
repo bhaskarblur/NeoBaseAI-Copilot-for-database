@@ -22,6 +22,7 @@ services:
     command: >
       redis-server 
       --requirepass default
+      --user neobase on >default ~* &* +@all
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --stop-writes-on-bgsave-error no
@@ -56,7 +57,7 @@ services:
       - NEOBASE_MONGODB_NAME=${NEOBASE_MONGODB_NAME} # neobase
       - NEOBASE_REDIS_HOST=${NEOBASE_REDIS_HOST} # neobase-redis
       - NEOBASE_REDIS_PORT=${NEOBASE_REDIS_PORT} # 6379
-      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME} # default
+      - NEOBASE_REDIS_USERNAME=${NEOBASE_REDIS_USERNAME} # neobase
       - NEOBASE_REDIS_PASSWORD=${NEOBASE_REDIS_PASSWORD} # default
       - DEFAULT_LLM_CLIENT=${DEFAULT_LLM_CLIENT} # openai, gemini
       - OPENAI_API_KEY=${OPENAI_API_KEY} # openai api key
@@ -73,6 +74,13 @@ services:
       - EXAMPLE_DB_NAME=${EXAMPLE_DB_NAME} # testdb
       - EXAMPLE_DB_USERNAME=${EXAMPLE_DB_USERNAME} # postgres
       - EXAMPLE_DB_PASSWORD=${EXAMPLE_DB_PASSWORD} # postgres
+      - SMTP_HOST=${SMTP_HOST} # smtp.gmail.com
+      - SMTP_PORT=${SMTP_PORT} # 587
+      - SMTP_SECURE=${SMTP_SECURE} # false
+      - SMTP_USER=${SMTP_USER} # your-email@gmail.com
+      - SMTP_PASSWORD=${SMTP_PASSWORD} # your-app-password
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME} # NeoBase - AI Database Copilot
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL} # your-email@gmail.com
     depends_on:
       - neobase-mongodb
       - neobase-redis

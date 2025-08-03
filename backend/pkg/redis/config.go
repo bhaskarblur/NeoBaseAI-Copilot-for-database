@@ -9,12 +9,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func RedisClient(redisHost, redisPort, _, redisPassword string) (*redis.Client, error) {
+func RedisClient(redisHost, redisPort, redisUsername, redisPassword string) (*redis.Client, error) {
 	redisURL := fmt.Sprintf("%s:%s", redisHost, redisPort)
 
 	// Create Redis client with retry logic
 	client := redis.NewClient(&redis.Options{
 		Addr:         redisURL,
+		Username:     redisUsername,
 		Password:     redisPassword,
 		DB:           0,
 		DialTimeout:  10 * time.Second,

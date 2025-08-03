@@ -88,8 +88,8 @@ func Initialize() {
 		log.Fatalf("Failed to provide DB manager: %v", err)
 	}
 
-	if err := DiContainer.Provide(func(db *mongodb.MongoDBClient) repositories.UserRepository {
-		return repositories.NewUserRepository(db)
+	if err := DiContainer.Provide(func(db *mongodb.MongoDBClient, redisRepo redis.IRedisRepositories) repositories.UserRepository {
+		return repositories.NewUserRepository(db, redisRepo)
 	}); err != nil {
 		log.Fatalf("Failed to provide user repository: %v", err)
 	}
@@ -98,9 +98,16 @@ func Initialize() {
 		log.Fatalf("Failed to provide token repository: %v", err)
 	}
 
+	// Provide email service
+	if err := DiContainer.Provide(func() services.EmailService {
+		return services.NewEmailService()
+	}); err != nil {
+		log.Fatalf("Failed to provide email service: %v", err)
+	}
+
 	// Provide services
-	if err := DiContainer.Provide(func(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepository, jwt utils.JWTService) services.AuthService {
-		return services.NewAuthService(userRepo, jwt, tokenRepo)
+	if err := DiContainer.Provide(func(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepository, jwt utils.JWTService, emailService services.EmailService) services.AuthService {
+		return services.NewAuthService(userRepo, jwt, tokenRepo, emailService)
 	}); err != nil {
 		log.Fatalf("Failed to provide auth service: %v", err)
 	}
