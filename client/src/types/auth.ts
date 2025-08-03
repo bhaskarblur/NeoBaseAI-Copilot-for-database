@@ -6,15 +6,19 @@ export interface AuthState {
 export interface User {
   id: string;
   username: string;
+  email: string;
   created_at: string;
 }
 
 export interface LoginFormData {
-  userName: string;
+  usernameOrEmail: string;
   password: string;
 }
 
-export interface SignupFormData extends LoginFormData {
+export interface SignupFormData {
+  username: string;
+  email: string;
+  password: string;
   confirmPassword: string;
   userSignupSecret: string;
 }
@@ -27,6 +31,7 @@ export interface AuthResponse {
     user: {
       id: string;
       username: string;
+      email: string;
       created_at: string;
     };
   };

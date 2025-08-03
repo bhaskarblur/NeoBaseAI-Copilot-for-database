@@ -21,7 +21,7 @@ const authService = {
     async login(data: LoginFormData): Promise<AuthResponse> {
         try {
             const response = await axios.post(`${API_URL}/auth/login`, {
-                username: data.userName,
+                username_or_email: data.usernameOrEmail,
                 password: data.password,
             });
             if (response.data.data?.access_token) {
@@ -41,7 +41,8 @@ const authService = {
     async signup(data: SignupFormData): Promise<AuthResponse> {
         try {
             const response = await axios.post(`${API_URL}/auth/signup`, {
-                username: data.userName,
+                username: data.username,
+                email: data.email,
                 password: data.password,
                 user_signup_secret: data.userSignupSecret
             });

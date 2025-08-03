@@ -43,10 +43,6 @@ func (s *authService) SetChatService(chatService ChatService) {
 }
 
 func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint, error) {
-	if req.Username == config.Env.AdminUser {
-		return nil, http.StatusBadRequest, errors.New("username already exists")
-	}
-
 	if config.Env.Environment == "DEVELOPMENT" {
 		log.Println("Development mode, skipping user signup secret validation")
 	} else {
@@ -55,12 +51,23 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 			return nil, http.StatusUnauthorized, errors.New("invalid user signup secret")
 		}
 	}
-	existingUser, err := s.userRepo.FindByUsername(req.Username)
+
+	// Check if email already exists
+	existingUserByEmail, err := s.userRepo.FindByEmail(req.Email)
 	if err != nil {
-		return nil, http.StatusNotFound, err
+		return nil, http.StatusInternalServerError, err
 	}
-	if existingUser != nil {
-		return nil, http.StatusBadRequest, errors.New("username already exists")
+	if existingUserByEmail != nil {
+		return nil, http.StatusBadRequest, errors.New("User with this email already exists")
+	}
+
+	// Check if username already exists
+	existingUserByUsername, err := s.userRepo.FindByUsername(req.Username)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	if existingUserByUsername != nil {
+		return nil, http.StatusBadRequest, errors.New("User with this username already exists")
 	}
 
 	// Hash password
@@ -72,6 +79,7 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 	// Create user
 	user := &models.User{
 		Username: req.Username,
+		Email:    req.Email,
 		Password: hashedPassword,
 		Base: models.Base{
 			CreatedAt: time.Now(),
@@ -145,12 +153,12 @@ func (s *authService) Login(req *dtos.LoginRequest) (*dtos.AuthResponse, uint, e
 	var authUser *models.User
 	var err error
 	// Check if it's Admin User
-	if req.Username == config.Env.AdminUser {
+	if req.UsernameOrEmail == config.Env.AdminUser {
 		log.Println("Admin User Login")
 		if req.Password != config.Env.AdminPassword {
 			return nil, http.StatusUnauthorized, errors.New("invalid password")
 		}
-		user, err := s.userRepo.FindByUsername(req.Username)
+		user, err := s.userRepo.FindByUsername(req.UsernameOrEmail)
 		// Checking if Admin user exists in the DB, if not then create user for admin creds
 		if err != nil || user == nil {
 			log.Println("Admin User not found, creating user")
@@ -162,7 +170,8 @@ func (s *authService) Login(req *dtos.LoginRequest) (*dtos.AuthResponse, uint, e
 
 			// Create user
 			authUser = &models.User{
-				Username: req.Username,
+				Username: req.UsernameOrEmail,
+				Email:    "", // Admin user doesn't need email
 				Password: hashedPassword,
 				Base: models.Base{
 					CreatedAt: time.Now(),
@@ -174,22 +183,24 @@ func (s *authService) Login(req *dtos.LoginRequest) (*dtos.AuthResponse, uint, e
 				log.Println("Failed to create admin user:" + err.Error())
 				return nil, http.StatusBadRequest, err
 			}
+		} else {
+			authUser = user
 		}
 	} else {
 		log.Println("Non-Admin User Login")
-		authUser, err = s.userRepo.FindByUsername(req.Username)
+		authUser, err = s.userRepo.FindByUsernameOrEmail(req.UsernameOrEmail)
 		if err != nil {
 			log.Println("Failed to find user:" + err.Error())
-			return nil, http.StatusNotFound, err
+			return nil, http.StatusUnauthorized, err
 		}
 		if authUser == nil {
 			log.Println("User not found")
-			return nil, http.StatusUnauthorized, errors.New("invalid credentials")
+			return nil, http.StatusUnauthorized, errors.New("Invalid credentials, User does not exist.")
 		}
 
 		if !utils.CheckPasswordHash(req.Password, authUser.Password) {
 			log.Println("Invalid credentials")
-			return nil, http.StatusUnauthorized, errors.New("invalid credentials")
+			return nil, http.StatusUnauthorized, errors.New("Invalid credentials. Please try again.")
 		}
 	}
 	accessToken, err := s.jwtService.GenerateToken(authUser.ID.Hex())

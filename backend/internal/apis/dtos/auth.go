@@ -4,13 +4,14 @@ import "neobase-ai/internal/models"
 
 type SignupRequest struct {
 	Username         string `json:"username" binding:"required"`
+	Email            string `json:"email" binding:"required,email"`
 	Password         string `json:"password" binding:"required,min=6"`
 	UserSignupSecret string `json:"user_signup_secret"`
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	UsernameOrEmail string `json:"username_or_email" binding:"required"`
+	Password        string `json:"password" binding:"required"`
 }
 
 type UserSignupSecretRequest struct {

@@ -13,6 +13,8 @@ import (
 
 type UserRepository interface {
 	FindByUsername(username string) (*models.User, error)
+	FindByEmail(email string) (*models.User, error)
+	FindByUsernameOrEmail(usernameOrEmail string) (*models.User, error)
 	Create(user *models.User) error
 	CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error)
 	ValidateUserSignupSecret(secret string) bool
@@ -35,6 +37,36 @@ func NewUserRepository(mongoClient *mongodb.MongoDBClient) UserRepository {
 func (r *userRepository) FindByUsername(username string) (*models.User, error) {
 	var user models.User
 	err := r.userCollection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) FindByEmail(email string) (*models.User, error) {
+	var user models.User
+	err := r.userCollection.FindOne(context.Background(), bson.M{"email": email}).Decode(&user)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) FindByUsernameOrEmail(usernameOrEmail string) (*models.User, error) {
+	var user models.User
+	filter := bson.M{
+		"$or": []bson.M{
+			{"username": usernameOrEmail},
+			{"email": usernameOrEmail},
+		},
+	}
+	err := r.userCollection.FindOne(context.Background(), filter).Decode(&user)
 	if err == mongo.ErrNoDocuments {
 		return nil, nil
 	}
