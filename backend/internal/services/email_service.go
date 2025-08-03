@@ -173,14 +173,27 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 	cwd, _ := os.Getwd()
 	log.Printf("📁 Current working directory: %s", cwd)
 	
-	// Try multiple possible template paths
-	possiblePaths := []string{
-		filepath.Join("internal", "email_templates", templateName+".html"),
-		filepath.Join("backend", "internal", "email_templates", templateName+".html"),
-		filepath.Join(".", "internal", "email_templates", templateName+".html"),
-		filepath.Join("..", "internal", "email_templates", templateName+".html"),
-		filepath.Join(cwd, "internal", "email_templates", templateName+".html"),
-		filepath.Join(cwd, "backend", "internal", "email_templates", templateName+".html"),
+	// Check if we're running in Docker (working directory is /app)
+	isDocker := cwd == "/app"
+	
+	// Build possible paths based on environment
+	var possiblePaths []string
+	
+	if isDocker {
+		// Docker environment paths
+		possiblePaths = []string{
+			filepath.Join("/app", "backend", "internal", "email_templates", templateName+".html"),
+			filepath.Join("backend", "internal", "email_templates", templateName+".html"),
+		}
+	} else {
+		// Local development paths
+		possiblePaths = []string{
+			filepath.Join("internal", "email_templates", templateName+".html"),
+			filepath.Join(cwd, "internal", "email_templates", templateName+".html"),
+			// If running from project root instead of backend directory
+			filepath.Join("backend", "internal", "email_templates", templateName+".html"),
+			filepath.Join(cwd, "backend", "internal", "email_templates", templateName+".html"),
+		}
 	}
 	
 	var templateBytes []byte
