@@ -3,7 +3,7 @@ import { MessageSquare, Database, Zap, Shield, Server, Boxes, Rocket, Github } f
 import FloatingBackground from './FloatingBackground';
 
 const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
-  
+
 
   const features = [
     {
@@ -63,17 +63,17 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
   ];
 
 
-  const formatStarCount= (count: number): string => {
+  const formatStarCount = (count: number): string => {
     if (count >= 1000) {
       return `${(count / 1000).toFixed(1)}k`
     }
     return count.toString()
   }
-  
+
   return (
     <section id="features" className="py-12 sm:py-16 md:py-20 lg:py-24 bg-[#FFDB58]/5 relative overflow-hidden">
       <FloatingBackground count={10} opacity={0.03} />
-      
+
       <div className="container mx-auto px-4 sm:px-6 md:px-8 max-w-7xl">
         <div className="text-center mb-8 md:mb-12">
           <h2 className="text-3xl sm:text-3xl md:text-4xl font-bold mb-3 md:mb-4">
@@ -83,13 +83,13 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
             NeoBase makes database management simple and intuitive with these powerful features.
           </p>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-5 md:gap-6 lg:gap-8">
           {features.map((feature, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className={`neo-border bg-white p-4 sm:p-4 md:p-5 hover:shadow-lg transition-all duration-300 ${feature.width}`}
-              style={{ 
+              style={{
                 transform: feature.transform,
                 zIndex: feature.importance === "primary" ? 10 : feature.importance === "secondary" ? 5 : 1
               }}
@@ -110,28 +110,28 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
             </div>
           ))}
         </div>
-        
-        <div className="flex flex-row justify-center gap-4 mt-8 sm:mt-12 md:mt-16 text-center ">
-          <a 
+
+        <div className="flex flex-col md:flex-row w-full justify-center gap-4 mt-8 sm:mt-12 md:mt-16 text-center ">
+          <a
             href={import.meta.env.VITE_NEOBASE_APP_URL}
-            target="_blank" 
-            rel="noopener noreferrer" 
+            target="_blank"
+            rel="noopener noreferrer"
             className="neo-button inline-flex items-center justify-center gap-2 py-3 px-6 sm:py-3 sm:px-8 text-lg sm:text-lg"
           >
             <span className="flex items-center gap-2 sm:gap-4"><Rocket className="w-5 h-5 sm:w-5 sm:h-5" /> Try NeoBase</span>
           </a>
-          <a 
-                href="https://github.com/bhaskarblur/neobase-ai-dba" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="neo-button-secondary flex items-center justify-center gap-2 py-2 sm:py-3 px-5 sm:px-6 text-base sm:text-lg"
-              >
-                <Github className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Star us</span>
-                <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                      {formatStarCount(stars || 1)}
-                    </span>
-              </a>
+          <a
+            href="https://github.com/bhaskarblur/neobase-ai-dba"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="neo-button-secondary flex items-center justify-center gap-2 py-3 sm:py-3 px-5 sm:px-6 text-base sm:text-lg"
+          >
+            <Github className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span>Star us</span>
+            <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
+              {formatStarCount(stars || 1)}
+            </span>
+          </a>
         </div>
       </div>
     </section>

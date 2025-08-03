@@ -24,12 +24,12 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'OpenAI', isSupported: true },
     { name: 'Google Gemini', isSupported: true },
     { name: 'Anthropic (Claude)', isSupported: false, priority: 1 },
-    { name: 'Ollama', isSupported: false, priority: 2 }
+    { name: 'Ollama (Local)', isSupported: false, priority: 2 }
   ];
 
   const TechnologyChip = ({ tech }: { tech: Technology }) => (
     <div className="neo-border bg-white px-3 sm:px-4 py-2 sm:py-3 flex items-center gap-2 sm:gap-3 transition-all hover:shadow-lg">
-      <div className={`${tech.isSupported ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'} p-1 sm:p-1.5 rounded-full`}>
+      <div className={`${tech.isSupported ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-500'} p-1 sm:p-1.5 rounded-full`}>
         {tech.isSupported ? <Check size={16} className="sm:w-4 sm:h-4" /> : <Clock size={16} className="sm:w-4 sm:h-4" />}
       </div>
       <span className="font-bold text-base sm:text-base">{tech.name}</span>
