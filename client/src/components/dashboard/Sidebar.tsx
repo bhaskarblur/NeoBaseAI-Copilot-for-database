@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { useUser } from '../../contexts/UserContext';
 import chatService from '../../services/chatService';
-import analyticsService from '../../services/analyticsService';
+import analyticsService, { trackViewGuideTutorial } from '../../services/analyticsService';
 import { Chat } from '../../types/chat';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -206,7 +206,7 @@ export default function Sidebar({
 
   const handleToggleExpand = useCallback(() => {
     // Track sidebar toggled event
-    analyticsService.trackSidebarToggled(!isExpanded);
+    analyticsService.trackSidebarToggled(!isExpanded, user?.id || '', user?.username || '');
     
     onToggleExpand();
   }, [isExpanded, onToggleExpand]);
@@ -232,7 +232,9 @@ export default function Sidebar({
     analyticsService.trackConnectionEdited(
       connection.id,
       connection.connection.type,
-      connection.connection.database
+      connection.connection.database,
+      user?.id || '',
+      user?.username || ''
     );
     
     handleSelectConnection(connection.id);
@@ -256,7 +258,9 @@ export default function Sidebar({
         analyticsService.trackConnectionDeleted(
           chatId,
           connectionToDelete.connection.type,
-          connectionToDelete.connection.database
+          connectionToDelete.connection.database,
+          user?.id || '',
+          user?.username || ''
         );
       }
       
@@ -293,7 +297,9 @@ export default function Sidebar({
         analyticsService.trackConnectionSelected(
           id,
           connection.connection.type,
-          connection.connection.database
+          connection.connection.database,
+          user?.id || '',
+          user?.username || ''
         );
       }
       
@@ -347,7 +353,9 @@ export default function Sidebar({
           chatId,
           connectionToDuplicate.connection.type,
           connectionToDuplicate.connection.database,
-          duplicateMessages
+          duplicateMessages,
+          user?.id || '',
+          user?.username || ''
         );
       }
 
@@ -461,7 +469,7 @@ export default function Sidebar({
                                                       ? 'Neo4j' 
                                                       : 'Unknown'}
                                       </p>
-                                      <div className="flex flex-row items-center gap-1.5 mt-0.5">
+                                      <div className="flex flex-row items-center gap-1.5 mt-1">
                                         <Clock className="w-3.5 h-3.5 text-gray-500" />
                                         <p className="text-right text-gray-500 text-xs whitespace-nowrap ml-auto">
                                           {getRelativeTime(connection.updated_at)}</p>
@@ -505,7 +513,10 @@ export default function Sidebar({
                     <div className="px-4">
             <div className="mb-3 relative">
               <button
-                onClick={() => setShowDemoModal(true)}
+                onClick={() => {
+                  trackViewGuideTutorial(user?.id || '', user?.username || '');
+                   setShowDemoModal(true);
+                }}
                 className="w-full p-4 rounded-lg bg-purple-100 hover:bg-purple-200 transition-colors border-2 border-purple-300 flex items-center gap-3"
               >
                 <div className="bg-purple-500 rounded-full p-2">
@@ -554,7 +565,7 @@ export default function Sidebar({
                   <div className="border-t border-gray-200 my-2"></div>
                   <button
                     onClick={handleLogoutClick}
-                    className="text-red-500 hover:text-red-600 text-sm font-medium flex items-center gap-2 transition-colors"
+                    className="text-red-500 hover:text-red-700 text-sm font-medium flex items-center gap-2 transition-colors w-fit"
                   >
                     <span>Logout</span>
                     <ArrowRight className="w-4 h-4" />
@@ -580,14 +591,14 @@ export default function Sidebar({
               <div className="flex flex-col space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-base">{user?.username}</span>
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                  <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
                     Joined {formatDate(user?.created_at || '')}
                   </span>
                 </div>
                 <div className="border-t border-gray-200 my-2"></div>
                 <button
                   onClick={handleLogoutClick}
-                  className="text-red-500 hover:text-red-600 text-sm font-medium flex items-center gap-2 transition-colors"
+                  className="text-red-500 hover:text-red-800 text-sm font-medium flex items-center gap-2 transition-colors"
                 >
                   <span>Sign out</span>
                   <ArrowRight className="w-4 h-4" />
@@ -666,7 +677,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-[#FFDB58] transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
             >
               <Pencil className="w-4 h-4 mr-2 text-black" />
               Edit Connection
@@ -681,7 +692,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-[#FFDB58] transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
             >
               <Copy className="w-4 h-4 mr-2 text-black" />
               Duplicate Chat
@@ -698,7 +709,7 @@ export default function Sidebar({
               }}
               className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
             >
-              <Trash2 className="w-4 h-4 mr-2 text-red-500" />
+              <Trash2 className="w-4 h-4 mr-2" />
               Delete Connection
             </button>
           </div>

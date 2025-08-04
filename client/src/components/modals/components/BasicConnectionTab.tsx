@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertCircle, ChevronDown } from 'lucide-react';
 import { Connection } from '../../../types/chat';
 
@@ -39,6 +39,9 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
   mongoUriInputRef,
   onMongoUriChange
 }) => {
+  // State to track the connection URI value independently
+  const [connectionUri, setConnectionUri] = useState<string>('');
+
   // Custom blur handler that validates the field using the passed validateField function
   const handleFieldBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const { name } = e.target;
@@ -51,6 +54,337 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
     // Call the parent's handleBlur to update touched state
     handleBlur(e);
   };
+
+  // Unified function to parse connection URIs for different database types
+  const parseConnectionUri = (uri: string, dbType: string) => {
+    try {
+      // Remove whitespace
+      uri = uri.trim();
+      if (!uri) return;
+
+      let parsedData: Partial<Connection> = {};
+
+      switch (dbType) {
+        case 'postgresql':
+        case 'yugabytedb':
+          parsedData = parsePostgreSQLUri(uri);
+          break;
+        case 'mysql':
+          parsedData = parseMySQLUri(uri);
+          break;
+        case 'clickhouse':
+          parsedData = parseClickHouseUri(uri);
+          break;
+        case 'mongodb':
+          parsedData = parseMongoDBUri(uri);
+          break;
+        default:
+          console.log(`URI parsing not supported for database type: ${dbType}`);
+          return;
+      }
+
+      if (parsedData && Object.keys(parsedData).length > 0) {
+        console.log(`${dbType} URI parsed successfully`, parsedData);
+        
+        // Update formData through parent component
+        Object.entries(parsedData).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            const mockEvent = {
+              target: { name: key, value: String(value) }
+            } as React.ChangeEvent<HTMLInputElement>;
+            handleChange(mockEvent);
+          }
+        });
+      }
+    } catch (err) {
+      console.log(`Invalid ${dbType} URI format`, err);
+    }
+  };
+
+  // PostgreSQL URI parser: postgresql://user:password@host:port/database?params
+  const parsePostgreSQLUri = (uri: string): Partial<Connection> => {
+    const match = uri.match(/^postgresql:\/\/(?:([^:]+)(?::([^@]+))?@)?([^:\/]+)(?::(\d+))?(?:\/([^?]+))?(?:\?(.*))?$/);
+    if (!match) throw new Error('Invalid PostgreSQL URI format');
+
+    const [, username, password, host, port, database, params] = match;
+    const result: Partial<Connection> = {};
+
+    if (host) result.host = host;
+    if (port) result.port = port;
+    if (database) result.database = database;
+    if (username) result.username = decodeURIComponent(username);
+    if (password) result.password = decodeURIComponent(password);
+
+    // Parse SSL parameters
+    if (params) {
+      const urlParams = new URLSearchParams(params);
+      if (urlParams.has('sslmode')) {
+        result.use_ssl = urlParams.get('sslmode') !== 'disable';
+        result.ssl_mode = urlParams.get('sslmode') as any;
+      }
+    }
+
+    return result;
+  };
+
+  // MySQL URI parser: mysql://user:password@host:port/database?params
+  const parseMySQLUri = (uri: string): Partial<Connection> => {
+    const match = uri.match(/^mysql:\/\/(?:([^:]+)(?::([^@]+))?@)?([^:\/]+)(?::(\d+))?(?:\/([^?]+))?(?:\?(.*))?$/);
+    if (!match) throw new Error('Invalid MySQL URI format');
+
+    const [, username, password, host, port, database, params] = match;
+    const result: Partial<Connection> = {};
+
+    if (host) result.host = host;
+    if (port) result.port = port;
+    if (database) result.database = database;
+    if (username) result.username = decodeURIComponent(username);
+    if (password) result.password = decodeURIComponent(password);
+
+    // Parse SSL parameters
+    if (params) {
+      const urlParams = new URLSearchParams(params);
+      if (urlParams.has('useSSL')) {
+        result.use_ssl = urlParams.get('useSSL') === 'true';
+      }
+    }
+
+    return result;
+  };
+
+  // ClickHouse URI parser: clickhouse://user:password@host:port/database?params
+  const parseClickHouseUri = (uri: string): Partial<Connection> => {
+    const match = uri.match(/^clickhouse:\/\/(?:([^:]+)(?::([^@]+))?@)?([^:\/]+)(?::(\d+))?(?:\/([^?]+))?(?:\?(.*))?$/);
+    if (!match) throw new Error('Invalid ClickHouse URI format');
+
+    const [, username, password, host, port, database, params] = match;
+    const result: Partial<Connection> = {};
+
+    if (host) result.host = host;
+    if (port) result.port = port;
+    if (database) result.database = database;
+    if (username) result.username = decodeURIComponent(username);
+    if (password) result.password = decodeURIComponent(password);
+
+    // Parse SSL parameters
+    if (params) {
+      const urlParams = new URLSearchParams(params);
+      if (urlParams.has('secure')) {
+        result.use_ssl = urlParams.get('secure') === 'true' || urlParams.get('secure') === '1';
+      }
+    }
+
+    return result;
+  };
+
+  // MongoDB URI parser (existing logic refactored)
+  const parseMongoDBUri = (uri: string): Partial<Connection> => {
+    const srvFormat = uri.startsWith('mongodb+srv://');
+    
+    // Extract the protocol and the rest
+    const protocolMatch = uri.match(/^(mongodb(?:\+srv)?:\/\/)(.*)/);
+    if (!protocolMatch) {
+      throw new Error('Invalid MongoDB URI format: Missing protocol');
+    }
+    
+    const [, , remainder] = protocolMatch;
+    
+    // Check if credentials are provided (look for @ after the protocol)
+    const hasCredentials = remainder.includes('@');
+    let username = '';
+    let password = '';
+    let hostPart = remainder;
+    
+    if (hasCredentials) {
+      // Find the last @ which separates credentials from host
+      const lastAtIndex = remainder.lastIndexOf('@');
+      const credentialsPart = remainder.substring(0, lastAtIndex);
+      hostPart = remainder.substring(lastAtIndex + 1);
+      
+      // Find the first : which separates username from password
+      const firstColonIndex = credentialsPart.indexOf(':');
+      if (firstColonIndex !== -1) {
+        username = credentialsPart.substring(0, firstColonIndex);
+        password = credentialsPart.substring(firstColonIndex + 1);
+        
+        // Handle URL encoded characters in username and password
+        try {
+          username = decodeURIComponent(username);
+          password = decodeURIComponent(password);
+        } catch (e) {
+          console.log("Could not decode URI components:", e);
+        }
+      } else {
+        username = credentialsPart;
+        try {
+          username = decodeURIComponent(username);
+        } catch (e) {
+          console.log("Could not decode username:", e);
+        }
+      }
+    }
+    
+    // Parse host, port and database
+    let host = '';
+    let port = srvFormat ? '27017' : ''; // Default for SRV format
+    let database = 'test'; // Default database name
+    let authDatabase = 'admin'; // Default auth database
+    
+    // Check if there's a / after the host[:port] part
+    const pathIndex = hostPart.indexOf('/');
+    if (pathIndex !== -1) {
+      const hostPortPart = hostPart.substring(0, pathIndex);
+      const pathPart = hostPart.substring(pathIndex + 1);
+      
+      // Extract database name and query parameters
+      const queryIndex = pathPart.indexOf('?');
+      if (queryIndex !== -1) {
+        database = pathPart.substring(0, queryIndex);
+        const queryParams = new URLSearchParams(pathPart.substring(queryIndex + 1));
+        if (queryParams.has('authSource')) {
+          authDatabase = queryParams.get('authSource') || 'admin';
+        }
+      } else {
+        database = pathPart;
+      }
+      
+      // Parse host and port
+      const portIndex = hostPortPart.indexOf(':');
+      if (portIndex !== -1) {
+        host = hostPortPart.substring(0, portIndex);
+        port = hostPortPart.substring(portIndex + 1);
+      } else {
+        host = hostPortPart;
+      }
+    } else {
+      // No database specified in the URI
+      const portIndex = hostPart.indexOf(':');
+      if (portIndex !== -1) {
+        host = hostPart.substring(0, portIndex);
+        port = hostPart.substring(portIndex + 1);
+      } else {
+        host = hostPart;
+      }
+    }
+    
+    if (!host) throw new Error('Could not extract host from MongoDB URI');
+    
+    return {
+      host: host,
+      port: port || (srvFormat ? '27017' : formData.port),
+      database: database || 'test',
+      auth_database: authDatabase,
+      username: username || formData.username,
+      password: password || formData.password
+    };
+  };
+
+  // Get connection URI placeholder and label based on database type
+  const getUriConfig = (dbType: string) => {
+    switch (dbType) {
+      case 'postgresql':
+        return {
+          label: 'PostgreSQL Connection URI',
+          placeholder: 'postgresql://username:password@host:port/database',
+          description: 'Paste your PostgreSQL connection string to auto-fill fields'
+        };
+      case 'yugabytedb':
+        return {
+          label: 'YugabyteDB Connection URI',
+          placeholder: 'postgresql://username:password@host:port/database',
+          description: 'Paste your YugabyteDB connection string to auto-fill fields'
+        };
+      case 'mysql':
+        return {
+          label: 'MySQL Connection URI',
+          placeholder: 'mysql://username:password@host:port/database',
+          description: 'Paste your MySQL connection string to auto-fill fields'
+        };
+      case 'clickhouse':
+        return {
+          label: 'ClickHouse Connection URI',
+          placeholder: 'clickhouse://username:password@host:port/database',
+          description: 'Paste your ClickHouse connection string to auto-fill fields'
+        };
+      case 'mongodb':
+        return {
+          label: 'MongoDB Connection URI',
+          placeholder: 'mongodb://username:password@host:port/database or mongodb+srv://username:password@host/database',
+          description: 'Paste your MongoDB connection string to auto-fill fields'
+        };
+      default:
+        return null;
+    }
+  };
+
+  // Build connection URI from form data
+  const buildConnectionUri = (data: Connection): string => {
+    if (!data.host || !data.database) return '';
+
+    let uri = '';
+    const username = data.username || '';
+    // Always show <password> placeholder to indicate where password should go
+    const password = '<password>';
+    const host = data.host;
+    const port = data.port || getDefaultPort(data.type);
+    const database = data.database;
+
+    switch (data.type) {
+      case 'postgresql':
+      case 'yugabytedb':
+        uri = `postgresql://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
+        if (data.use_ssl && data.ssl_mode && data.ssl_mode !== 'disable') {
+          uri += `?sslmode=${data.ssl_mode}`;
+        }
+        break;
+      case 'mysql':
+        uri = `mysql://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
+        if (data.use_ssl) {
+          uri += '?useSSL=true';
+        }
+        break;
+      case 'clickhouse':
+        uri = `clickhouse://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
+        if (data.use_ssl) {
+          uri += '?secure=true';
+        }
+        break;
+      case 'mongodb':
+        uri = `mongodb://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
+        if (data.auth_database && data.auth_database !== 'admin') {
+          uri += `?authSource=${data.auth_database}`;
+        }
+        break;
+      default:
+        return '';
+    }
+
+    return uri;
+  };
+
+  // Get default port for database type
+  const getDefaultPort = (dbType: string): string => {
+    switch (dbType) {
+      case 'postgresql':
+      case 'yugabytedb':
+        return '5432';
+      case 'mysql':
+        return '3306';
+      case 'clickhouse':
+        return '8123';
+      case 'mongodb':
+        return '27017';
+      default:
+        return '';
+    }
+  };
+
+  // Update connection URI when form data changes
+  useEffect(() => {
+    if (formData.host && formData.database) {
+      setConnectionUri(buildConnectionUri(formData));
+    }
+  }, [formData.host, formData.database, formData.username, formData.port, formData.type, formData.use_ssl, formData.ssl_mode, formData.auth_database]);
 
   return (
     <>
@@ -85,153 +419,47 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
         </div>
       </div>
 
-      {/* MongoDB Connection URI Field - Only show when MongoDB is selected */}
-      {formData.type === 'mongodb' && (
+      {/* Universal Connection URI Field - Show for supported database types */}
+      {getUriConfig(formData.type) && (
         <div className="mb-6">
-          <label className="block font-bold mb-2 text-lg">MongoDB Connection URI</label>
-          <p className="text-gray-600 text-sm mb-2">Paste your MongoDB connection string to auto-fill fields</p>
+          <label className="block font-bold mb-2 text-lg">{getUriConfig(formData.type)!.label}</label>
+          <p className="text-gray-600 text-sm mb-2">{getUriConfig(formData.type)!.description}</p>
           <input
             type="text"
-            name="mongo_uri"
-            ref={mongoUriInputRef}
+            name="connection_uri"
+            ref={formData.type === 'mongodb' ? mongoUriInputRef : undefined}
             className="neo-input w-full"
-            placeholder="mongodb://username:password@host:port/database or mongodb+srv://username:password@host/database"
+            placeholder={getUriConfig(formData.type)!.placeholder}
+            value={connectionUri}
             onChange={(e) => {
               const uri = e.target.value;
-              // Save the URI value through the callback
-              if (onMongoUriChange) {
+              // Update local state to allow free editing
+              setConnectionUri(uri);
+              // Save the URI value through the callback for MongoDB compatibility
+              if (formData.type === 'mongodb' && onMongoUriChange) {
                 onMongoUriChange(uri);
               }
-              try {
-                // Better parsing logic for MongoDB URIs that can handle special characters in credentials
-                const srvFormat = uri.startsWith('mongodb+srv://');
-                
-                // Extract the protocol and the rest
-                const protocolMatch = uri.match(/^(mongodb(?:\+srv)?:\/\/)(.*)/);
-                if (!protocolMatch) {
-                  console.log("Invalid MongoDB URI format: Missing protocol");
-                  return;
-                }
-                
-                const [, protocol, remainder] = protocolMatch;
-                
-                // Check if credentials are provided (look for @ after the protocol)
-                const hasCredentials = remainder.includes('@');
-                let username = '';
-                let password = '';
-                let hostPart = remainder;
-                
-                if (hasCredentials) {
-                  // Find the last @ which separates credentials from host
-                  const lastAtIndex = remainder.lastIndexOf('@');
-                  const credentialsPart = remainder.substring(0, lastAtIndex);
-                  hostPart = remainder.substring(lastAtIndex + 1);
-                  
-                  // Find the first : which separates username from password
-                  const firstColonIndex = credentialsPart.indexOf(':');
-                  if (firstColonIndex !== -1) {
-                    username = credentialsPart.substring(0, firstColonIndex);
-                    password = credentialsPart.substring(firstColonIndex + 1);
-                    
-                    // Handle URL encoded characters in username and password
-                    try {
-                      username = decodeURIComponent(username);
-                      password = decodeURIComponent(password);
-                    } catch (e) {
-                      console.log("Could not decode URI components:", e);
-                    }
-                  } else {
-                    username = credentialsPart;
-                    try {
-                      username = decodeURIComponent(username);
-                    } catch (e) {
-                      console.log("Could not decode username:", e);
-                    }
-                  }
-                }
-                
-                // Parse host, port and database
-                let host = '';
-                let port = srvFormat ? '27017' : ''; // Default for SRV format
-                let database = 'test'; // Default database name
-                let authDatabase = 'admin'; // Default auth database
-                
-                // Check if there's a / after the host[:port] part
-                const pathIndex = hostPart.indexOf('/');
-                if (pathIndex !== -1) {
-                  const hostPortPart = hostPart.substring(0, pathIndex);
-                  const pathPart = hostPart.substring(pathIndex + 1);
-                  
-                  // Extract database name and query parameters
-                  const queryIndex = pathPart.indexOf('?');
-                  if (queryIndex !== -1) {
-                    database = pathPart.substring(0, queryIndex);
-                    const queryParams = new URLSearchParams(pathPart.substring(queryIndex + 1));
-                    if (queryParams.has('authSource')) {
-                      authDatabase = queryParams.get('authSource') || 'admin';
-                    }
-                  } else {
-                    database = pathPart;
-                  }
-                  
-                  // Parse host and port
-                  const portIndex = hostPortPart.indexOf(':');
-                  if (portIndex !== -1) {
-                    host = hostPortPart.substring(0, portIndex);
-                    port = hostPortPart.substring(portIndex + 1);
-                  } else {
-                    host = hostPortPart;
-                  }
-                } else {
-                  // No database specified in the URI
-                  const portIndex = hostPart.indexOf(':');
-                  if (portIndex !== -1) {
-                    host = hostPart.substring(0, portIndex);
-                    port = hostPart.substring(portIndex + 1);
-                  } else {
-                    host = hostPart;
-                  }
-                }
-                
-                if (host) {
-                  console.log("MongoDB URI parsed successfully", { username, host, port, database, authDatabase });
-                  
-                  // Update formData through parent component
-                  const newFormData = {
-                    ...formData,
-                    host: host,
-                    port: port || (srvFormat ? '27017' : formData.port),
-                    database: database || 'test',
-                    auth_database: authDatabase,
-                    username: username || formData.username,
-                    password: password || formData.password
-                  };
-                  
-                  // Trigger handleChange with each field
-                  const mockEvent = (name: string, value: string) => ({
-                    target: { name, value }
-                  }) as React.ChangeEvent<HTMLInputElement>;
-                  
-                  handleChange(mockEvent('host', newFormData.host));
-                  handleChange(mockEvent('port', newFormData.port));
-                  handleChange(mockEvent('database', newFormData.database));
-                  handleChange(mockEvent('auth_database', newFormData.auth_database));
-                  handleChange(mockEvent('username', newFormData.username));
-                  if (password) {
-                    handleChange(mockEvent('password', password));
-                  }
-                } else {
-                  console.log("MongoDB URI parsing failed: could not extract host");
-                }
-              } catch (err) {
-                // Invalid URI format, just continue
-                console.log("Invalid MongoDB URI format", err);
-              }
+              // Parse the URI based on the selected database type
+              parseConnectionUri(uri, formData.type);
             }}
           />
           <p className="text-gray-500 text-xs mt-2">
-            Connection URI will be used to auto-fill the fields below. Both standard and Atlas SRV formats supported.
+            Connection URI will be used to auto-fill the fields below. Replace &lt;password&gt; with your actual password.
+            {formData.type === 'mongodb' && ' Both standard and Atlas SRV formats supported.'}
+            {formData.type === 'postgresql' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
+            {formData.type === 'yugabytedb' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
+            {formData.type === 'mysql' && ' Supports useSSL parameter (e.g., ?useSSL=true).'}
+            {formData.type === 'clickhouse' && ' Supports secure parameter (e.g., ?secure=true).'}
           </p>
+        </div>
+      )}
+
+      {/* Divider between Connection URI and Manual Fields */}
+      {getUriConfig(formData.type) && (
+        <div className="flex items-center my-6">
+          <div className="flex-1 border-t border-gray-300"></div>
+          <span className="px-4 text-sm font-medium text-gray-500">OR</span>
+          <div className="flex-1 border-t border-gray-300"></div>
         </div>
       )}
 

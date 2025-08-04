@@ -1388,6 +1388,8 @@ function AppContent() {
           onCancelRefreshSchema={handleCancelRefreshSchema}
           onUpdateSelectedCollections={(chatId, selectedCollections) => handleUpdateSelectedCollections(chatId, selectedCollections)}
           onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
+          userId={user?.id || ''}
+          userName={user?.username || ''}
         />
       ) : (
         <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />

@@ -121,70 +121,145 @@ export const trackLogout = (userId: string, username: string) => {
 };
 
 // Connection events
-export const trackConnectionCreated = (connectionId: string, connectionType: string, connectionName: string) => {
-  trackEvent('connection_created', { connectionId, connectionType, connectionName });
+export const trackConnectionCreated = (connectionId: string, connectionType: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('connection_created', { connectionId, connectionType, connectionName, userId, userName });
 };
 
-export const trackConnectionDeleted = (connectionId: string, connectionType: string, connectionName: string) => {
-  trackEvent('connection_deleted', { connectionId, connectionType, connectionName });
+export const trackConnectionDeleted = (connectionId: string, connectionType: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('connection_deleted', { connectionId, connectionType, connectionName, userId, userName });
 };
 
-export const trackConnectionEdited = (connectionId: string, connectionType: string, connectionName: string) => {
-  trackEvent('connection_edited', { connectionId, connectionType, connectionName });
+export const trackConnectionEdited = (connectionId: string, connectionType: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('connection_edited', { connectionId, connectionType, connectionName, userId, userName });
 };
 
-export const trackConnectionSelected = (connectionId: string, connectionType: string, connectionName: string) => {
-  trackEvent('connection_selected', { connectionId, connectionType, connectionName });
+export const trackConnectionSelected = (connectionId: string, connectionType: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('connection_selected', { connectionId, connectionType, connectionName, userId, userName });
 };
 
-export const trackConnectionStatusChange = (connectionId: string, isConnected: boolean) => {
-  trackEvent('connection_status_change', { connectionId, isConnected });
+export const trackConnectionStatusChange = (connectionId: string, isConnected: boolean, userId: string, userName: string) => {
+  trackEvent('connection_status_change', { connectionId, isConnected, userId, userName });
 };
 
 // Message events
-export const trackMessageSent = (chatId: string, messageLength: number) => {
-  trackEvent('message_sent', { chatId, messageLength });
+export const trackMessageSent = (chatId: string, messageLength: number, userId: string, userName: string) => {
+  trackEvent('message_sent', { chatId, messageLength, userId, userName });
 };
 
-export const trackMessageEdited = (chatId: string, messageId: string) => {
-  trackEvent('message_edited', { chatId, messageId });
+export const trackMessageEdited = (chatId: string, messageId: string, userId: string, userName: string) => {
+  trackEvent('message_edited', { chatId, messageId, userId, userName });
 };
 
-export const trackChatCleared = (chatId: string) => {
-  trackEvent('chat_cleared', { chatId });
+export const trackChatCleared = (chatId: string, userId: string, userName: string) => {
+  trackEvent('chat_cleared', { chatId, userId, userName });
 };
 
 // Schema events
-export const trackSchemaRefreshed = (connectionId: string, connectionName: string) => {
-  trackEvent('schema_refreshed', { connectionId, connectionName });
+export const trackSchemaRefreshed = (connectionId: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('schema_refreshed', { connectionId, connectionName, userId, userName });
 };
 
-export const trackSchemaCancelled = (connectionId: string, connectionName: string) => {
-  trackEvent('schema_refresh_cancelled', { connectionId, connectionName });
+export const trackSchemaCancelled = (connectionId: string, connectionName: string, userId: string, userName: string) => {
+  trackEvent('schema_refresh_cancelled', { connectionId, connectionName, userId, userName });
 };
 
 // Query events
-export const trackQueryExecuted = (chatId: string, queryLength: number, success: boolean) => {
-  trackEvent('query_executed', { chatId, queryLength, success });
+export const trackQueryExecuted = (chatId: string, queryLength: number, success: boolean, userId: string, userName: string) => {
+  trackEvent('query_executed', { chatId, queryLength, success, userId, userName });
 };
 
-export const trackQueryCancelled = (chatId: string) => {
-  trackEvent('query_cancelled', { chatId });
+export const trackQueryCancelled = (chatId: string, userId: string, userName: string) => {
+  trackEvent('query_cancelled', { chatId, userId, userName });
 };
 
+export const trackRecommendationGenerated = (chatId: string, userId: string, userName: string) => {
+  trackEvent('recommendation_generated', { chatId, userId, userName });
+};
+
+export const trackRecommendationSelected = (chatId: string, userId: string, userName: string) => {
+  trackEvent('recommendation_selected', { chatId, userId, userName });
+};
 // UI events
-export const trackSidebarToggled = (isExpanded: boolean) => {
-  trackEvent('sidebar_toggled', { isExpanded });
+export const trackSidebarToggled = (isExpanded: boolean, userId: string, userName: string) => {
+  trackEvent('sidebar_toggled', { isExpanded, userId, userName });
+};
+
+export const trackViewGuideTutorial = (userId: string, userName: string) => {
+  trackEvent('view_guide_tutorial', { userId, userName });
+};
+
+// MessageTile events
+export const trackQueryExecuteClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('query_execute_click', { chatId, queryId, userId, userName });
+};
+
+export const trackQueryCancelClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('query_cancel_click', { chatId, queryId, userId, userName });
+};
+
+export const trackQueryEditClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('query_edit_click', { chatId, queryId, userId, userName });
+};
+
+export const trackQueryCopyClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('query_copy_click', { chatId, queryId, userId, userName });
+};
+
+export const trackResultViewToggle = (chatId: string, queryId: string, viewMode: string, userId: string, userName: string) => {
+  trackEvent('result_view_toggle', { chatId, queryId, viewMode, userId, userName });
+};
+
+export const trackResultMinimizeToggle = (chatId: string, queryId: string, isMinimized: boolean, userId: string, userName: string) => {
+  trackEvent('result_minimize_toggle', { chatId, queryId, isMinimized, userId, userName });
+};
+
+export const trackDataExport = (chatId: string, queryId: string, format: string, recordCount: number, userId: string, userName: string) => {
+  trackEvent('data_export', { chatId, queryId, format, recordCount, userId, userName });
+};
+
+export const trackRollbackClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('rollback_click', { chatId, queryId, userId, userName });
+};
+
+export const trackResultCopyClick = (chatId: string, queryId: string, userId: string, userName: string) => {
+  trackEvent('result_copy_click', { chatId, queryId, userId, userName });
+};
+
+export const trackMessageCopyClick = (chatId: string, messageId: string, messageType: string, userId: string, userName: string) => {
+  trackEvent('message_copy_click', { chatId, messageId, messageType, userId, userName });
+};
+
+export const trackMessageEditClick = (chatId: string, messageId: string, userId: string, userName: string) => {
+  trackEvent('message_edit_click', { chatId, messageId, userId, userName });
+};
+
+// MessageInput events
+export const trackRecommendationDiceClick = (chatId: string, userId: string, userName: string) => {
+  trackEvent('recommendation_dice_click', { chatId, userId, userName });
+};
+
+export const trackRecommendationChipClick = (chatId: string, recommendationText: string, userId: string, userName: string) => {
+  trackEvent('recommendation_chip_click', { chatId, recommendationText, userId, userName });
+};
+
+export const trackTooltipClose = (chatId: string, userId: string, userName: string) => {
+  trackEvent('tooltip_close', { chatId, userId, userName });
+};
+
+export const trackMessageSubmit = (chatId: string, messageLength: number, userId: string, userName: string) => {
+  trackEvent('message_submit', { chatId, messageLength, userId, userName });
 };
 
 // Add this function with the other tracking functions
-export const trackConnectionDuplicated = (connectionId: string, connectionType: string, databaseName: string, withMessages: boolean) => {
+export const trackConnectionDuplicated = (connectionId: string, connectionType: string, databaseName: string, withMessages: boolean, userId: string, userName: string) => {
   try {
     trackEvent('connection_duplicated', {
       connectionId,
       connectionType,
       databaseName,
-      withMessages
+      withMessages,
+      userId,
+      userName
     });
     console.log('[Analytics] Tracked Connection Duplicated event');
   } catch (error) {
@@ -212,8 +287,28 @@ const analyticsService = {
   trackSchemaCancelled,
   trackQueryExecuted,
   trackQueryCancelled,
+  trackRecommendationGenerated,
+  trackRecommendationSelected,
   trackSidebarToggled,
-  trackConnectionDuplicated
+  trackViewGuideTutorial,
+  trackConnectionDuplicated,
+  // MessageTile events
+  trackQueryExecuteClick,
+  trackQueryCancelClick,
+  trackQueryEditClick,
+  trackQueryCopyClick,
+  trackResultViewToggle,
+  trackResultMinimizeToggle,
+  trackDataExport,
+  trackRollbackClick,
+  trackResultCopyClick,
+  trackMessageCopyClick,
+  trackMessageEditClick,
+  // MessageInput events
+  trackRecommendationDiceClick,
+  trackRecommendationChipClick,
+  trackTooltipClose,
+  trackMessageSubmit
 };
 
 export default analyticsService; 

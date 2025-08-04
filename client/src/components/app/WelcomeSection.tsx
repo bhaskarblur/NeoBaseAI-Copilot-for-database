@@ -22,10 +22,10 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
   {/* Welcome Section */}
   <div className="w-full max-w-4xl mx-auto text-center mb-12">
     <h1 className="text-5xl font-bold mb-4">
-      Welcome to NeoBase
+     You Ask, NeoBase Will Answer!
     </h1>
     <p className="text-xl text-gray-600 mb-2 max-w-2xl mx-auto">
-      Open-source AI-powered engine for seamless database interactions.
+      Open-source AI Copilot for seamless database interactions.
       <br />
       From SQL to NoSQL, explore and analyze your data through natural conversations.
     </p>
@@ -57,7 +57,7 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
         <MessageSquare className="w-6 h-6 text-black" />
       </div>
       <h3 className="text-lg font-bold mb-2">
-        Natural Language Queries
+       Ask in Your Language
       </h3>
       <p className="text-gray-600">
         Talk to your database in plain English. NeoBase translates your questions into database queries automatically.
@@ -118,7 +118,7 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
         Visualize Results
       </h3>
       <p className="text-gray-600">
-        View your data in tables or JSON format. Execute queries and see results in real-time.
+        View your data in tables or JSON format. Execute queries &amp; see results in real-time. Charts coming soon.
       </p>
     </button>
   </div>
