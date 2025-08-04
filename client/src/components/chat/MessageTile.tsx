@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Check, Clock, Copy, History, Loader, Pencil, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -10,6 +10,7 @@ import LoadingSteps from './LoadingSteps';
 import { Message, QueryResult } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import { formatActionAt } from '../../utils/message';
+import analyticsService from '../../services/analyticsService';
 
 interface QueryState {
     isExecuting: boolean;
@@ -48,6 +49,8 @@ interface MessageTileProps {
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
     buttonCallback?: (action: string) => void;
+    userId?: string;
+    userName?: string;
 }
 
 const toastStyle = {
@@ -96,6 +99,8 @@ export default function MessageTile({
     onQueryUpdate,
     onEditQuery,
     buttonCallback,
+    userId,
+    userName,
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
@@ -143,6 +148,11 @@ export default function MessageTile({
     const toggleResultMinimize = (queryId: string) => {
         const newMinimizedState = !(minimizedResults[queryId] || false);
         const updatedMessageState = { ...minimizedResults, [queryId]: newMinimizedState };
+        
+        // Track result minimize toggle
+        if (userId && userName) {
+            analyticsService.trackResultMinimizeToggle(chatId, queryId, newMinimizedState, userId, userName);
+        }
         
         setMinimizedResults(updatedMessageState);
 
@@ -292,17 +302,33 @@ export default function MessageTile({
         }
     }, [message.queries]);
 
-    const handleCopyToClipboard = (text: string) => {
+    const handleCopyToClipboard = (text: string, context?: { type: 'message' | 'query' | 'result', messageId?: string, queryId?: string }) => {
         navigator.clipboard.writeText(text);
         toast('Copied to clipboard!', {
             ...toastStyle,
             icon: '📋',
         });
+
+        // Track copy action
+        if (userId && userName && context) {
+            if (context.type === 'message' && context.messageId) {
+                analyticsService.trackMessageCopyClick(chatId, context.messageId, message.type, userId, userName);
+            } else if (context.type === 'query' && context.queryId) {
+                analyticsService.trackQueryCopyClick(chatId, context.queryId, userId, userName);
+            } else if (context.type === 'result' && context.queryId) {
+                analyticsService.trackResultCopyClick(chatId, context.queryId, userId, userName);
+            }
+        }
     };
 
     const handleExecuteQuery = async (queryId: string) => {
         const query = message.queries?.find(q => q.id === queryId);
         if (!query) return;
+
+        // Track query execute click
+        if (userId && userName) {
+            analyticsService.trackQueryExecuteClick(chatId, queryId, userId, userName);
+        }
 
         if (query.is_critical) {
             setQueryToExecute(queryId);
@@ -852,6 +878,10 @@ export default function MessageTile({
             return <NestedJsonCell data={value} />;
         }
 
+        if (typeof value === 'number') {
+            return <span className="text-cyan-400">{value}</span>;
+        }
+
         if (typeof value === 'string') {
             if (isDateString(value)) {
                 return (
@@ -880,10 +910,6 @@ export default function MessageTile({
             return <span className="text-green-400">"{value}"</span>;
         }
 
-        if (typeof value === 'number') {
-            return <span className="text-cyan-400">{value}</span>;
-        }
-        
         if (typeof value === 'boolean') {
             return <span className="text-purple-400">{String(value)}</span>;
         }
@@ -1372,6 +1398,12 @@ export default function MessageTile({
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 e.stopPropagation();
+                                                
+                                                // Track query edit click
+                                                if (userId && userName) {
+                                                    analyticsService.trackQueryEditClick(chatId, query.id, userId, userName);
+                                                }
+                                                
                                                 setIsEditingQuery(true);
                                             }}
                                             className="p-2 hover:bg-gray-800 rounded transition-colors text-yellow-400 hover:text-yellow-300 hover-tooltip-messagetile"
@@ -1390,6 +1422,11 @@ export default function MessageTile({
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
+
+                                        // Track query cancel click
+                                        if (userId && userName) {
+                                            analyticsService.trackQueryCancelClick(chatId, queryId, userId, userName);
+                                        }
 
                                         // Abort the API call if it's in progress
                                         if (abortControllerRef.current[queryId]) {
@@ -1436,7 +1473,7 @@ export default function MessageTile({
                             )}
                             <div className="w-px h-4 bg-gray-700 mx-2" />
                             <button
-                                onClick={() => handleCopyToClipboard(query.query)}
+                                onClick={() => handleCopyToClipboard(query.query, { type: 'query', queryId: query.id })}
                                 className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200 hover-tooltip-messagetile"
                                 data-tooltip="Copy query"
                                 title="Copy query"
@@ -1452,7 +1489,7 @@ export default function MessageTile({
                                 onChange={(e) => setEditedQueryText(e.target.value)}
                                 className="w-full bg-gray-900 text-white p-3 rounded-none 
                                        border-4 border-gray-600 font-mono text-sm min-h-[120px]
-                                       focus:outline-none focus:border-yellow-500 shadow-[4px_4px_0px_0px_rgba(75,85,99,1)]"
+                                       focus:outline-none focus:border-neo-gray shadow-[4px_4px_0px_0px_rgba(75,85,99,1)]"
                             />
                             <div className="flex justify-end gap-3 mt-4">
                                 <button
@@ -1460,7 +1497,7 @@ export default function MessageTile({
                                         setIsEditingQuery(false);
                                         setEditedQueryText(removeDuplicateQueries(query.query || ''));
                                     }}
-                                    className="px-4 py-2 bg-gray-800 text-white border-2 border-gray-600
+                                    className="font-semibold px-4 py-2 bg-gray-800 text-white border-2 border-gray-600
                                                   hover:bg-gray-700 transition-colors shadow-[2px_2px_0px_0px_rgba(75,85,99,1)]
                                                   active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(75,85,99,1)]"
                                 >
@@ -1471,7 +1508,7 @@ export default function MessageTile({
                                         setIsEditingQuery(false);
                                         onEditQuery(message.id, queryId, editedQueryText);
                                     }}
-                                    className="px-4 py-2 bg-yellow-400 text-black border-2 border-black
+                                    className="font-semibold px-4 py-2 bg-yellow-400 text-black border-2 border-black
                                                   hover:bg-yellow-300 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
                                                   active:translate-y-[1px] active:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
                                 >
@@ -1546,6 +1583,12 @@ export default function MessageTile({
                                                     onClick={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
+                                                        
+                                                        // Track view mode toggle
+                                                        if (userId && userName) {
+                                                            analyticsService.trackResultViewToggle(chatId, query.id, 'table', userId, userName);
+                                                        }
+                                                        
                                                         setViewMode('table');
                                                         setTimeout(() => {
                                                             window.scrollTo(window.scrollX, window.scrollY);
@@ -1562,6 +1605,12 @@ export default function MessageTile({
                                                     onClick={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
+                                                        
+                                                        // Track view mode toggle
+                                                        if (userId && userName) {
+                                                            analyticsService.trackResultViewToggle(chatId, query.id, 'json', userId, userName);
+                                                        }
+                                                        
                                                         setViewMode('json');
                                                         setTimeout(() => {
                                                             window.scrollTo(window.scrollX, window.scrollY);
@@ -1658,6 +1707,12 @@ export default function MessageTile({
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
+                                                                    
+                                                                    // Track rollback click
+                                                                    if (userId && userName) {
+                                                                        analyticsService.trackRollbackClick(chatId, queryId, userId, userName);
+                                                                    }
+                                                                    
                                                                     setRollbackState({ show: true, queryId });
                                                                     setTimeout(() => {
                                                                     window.scrollTo(window.scrollX, window.scrollY);
@@ -1715,7 +1770,7 @@ export default function MessageTile({
                                                     )
                                                 )}
                                                 <button
-                                                    onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2))}
+                                                    onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2), { type: 'result', queryId: query.id })}
                                                     className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200 hover-tooltip-messagetile"
                                                     data-tooltip="Copy result"
                                                     title="Copy result"
@@ -1931,6 +1986,11 @@ export default function MessageTile({
                 URL.revokeObjectURL(url);
             }, 100);
             
+            // Track data export
+            if (userId && userName) {
+                analyticsService.trackDataExport(chatId, queryId, format, allData.length, userId, userName);
+            }
+
             toast(`Exported ${allData.length} records as ${format.toUpperCase()}`, {
                 ...toastStyle,
                 icon: '📥',
@@ -1965,7 +2025,7 @@ export default function MessageTile({
 
           ">
                         <button
-                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content))}
+                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content), { type: 'message', messageId: message.id })}
                             className="
                 -translate-y-1/2
                 p-1.5
@@ -1990,6 +2050,12 @@ export default function MessageTile({
                                 onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    
+                                    // Track message edit click
+                                    if (userId && userName) {
+                                        analyticsService.trackMessageEditClick(chatId, message.id, userId, userName);
+                                    }
+                                    
                                     onEdit(message.id);
                                     setTimeout(() => {
                                         window.scrollTo(window.scrollX, window.scrollY);
@@ -2028,7 +2094,7 @@ export default function MessageTile({
             z-[5]
           ">
                         <button
-                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content))}
+                            onClick={() => handleCopyToClipboard(removeDuplicateContent(message.content), { type: 'message', messageId: message.id })}
                             className="
                 -translate-y-1/2
                 p-1.5

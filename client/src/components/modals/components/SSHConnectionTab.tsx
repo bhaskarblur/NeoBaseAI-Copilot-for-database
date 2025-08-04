@@ -60,8 +60,8 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
             </div>
             <h3 className="text-xl font-bold mb-2">SSH Tunnel Coming Soon</h3>
             <p className="text-gray-700">
-              SSH tunneling is currently under development. You can configure the settings below, 
-              but the connection will use direct database connection for now.
+              SSH tunneling is currently under development such as a Jump Host.
+              The connection will use direct database connection for now.
             </p>
           </div>
         </div>
@@ -174,7 +174,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
 
           {/* Database Settings Section */}
           <div>
-            <h3 className="font-bold text-lg mb-3">Database Settings</h3>
+            <h3 className="font-bold text-lg mb-3">Database Credentials</h3>
             
             {/* Database Type */}
             <div className="mb-6">

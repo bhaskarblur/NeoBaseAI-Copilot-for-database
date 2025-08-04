@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import chatService from '../../services/chatService';
 import RecommendationTooltip from './RecommendationTooltip';
 import { recommendationStorage } from '../../utils/recommendationStorage';
+import analyticsService from '../../services/analyticsService';
 
 interface Recommendation {
     text: string;
@@ -15,9 +16,11 @@ interface MessageInputProps {
     isExpanded: boolean;
     isDisabled?: boolean;
     chatId?: string;
+    userId?: string;
+    userName?: string;
 }
 
-export default function MessageInput({ isConnected, onSendMessage, isExpanded, chatId }: MessageInputProps) {
+export default function MessageInput({ isConnected, onSendMessage, isExpanded, chatId, userId, userName }: MessageInputProps) {
     const [input, setInput] = useState('');
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -38,6 +41,10 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
         if (input.trim()) {
+            // Track message submit
+            if (chatId && userId && userName) {
+                analyticsService.trackMessageSubmit(chatId, input.trim().length, userId, userName);
+            }
             onSendMessage(input.trim());
             setInput('');
             setRecommendations([]); // Clear recommendations after sending
@@ -46,6 +53,11 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
 
     const handleGetRecommendations = async () => {
         if (!chatId || !isConnected || isLoadingRecommendations) return;
+
+        // Track dice click
+        if (userId && userName) {
+            analyticsService.trackRecommendationDiceClick(chatId, userId, userName);
+        }
 
         // Hide tooltip when dice is clicked
         if (showTooltip) {
@@ -98,12 +110,22 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
     };
 
     const handleChipClick = (recommendationText: string, index: number) => {
+        // Track recommendation chip click
+        if (chatId && userId && userName) {
+            analyticsService.trackRecommendationChipClick(chatId, recommendationText, userId, userName);
+        }
+        
         setInput(recommendationText);
         // Remove only the clicked recommendation from the list
         setRecommendations(prev => prev.filter((_, i) => i !== index));
     };
 
     const handleTooltipClose = () => {
+        // Track tooltip close
+        if (chatId && userId && userName) {
+            analyticsService.trackTooltipClose(chatId, userId, userName);
+        }
+        
         setShowTooltip(false);
         if (chatId) {
             recommendationStorage.markTooltipAsShown(chatId);

@@ -166,7 +166,7 @@ export default function ResetPasswordForm({ initialEmail, onSwitchToLogin, onPas
                     NeoBase
                 </h1>
                 <p className="text-gray-600 text-center mb-8">
-                    Enter the OTP sent to your email and your new password
+                    Enter the OTP sent to your email(check spam if not found) and your new password
                 </p>
 
                 {formError && (

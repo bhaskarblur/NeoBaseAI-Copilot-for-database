@@ -32,6 +32,8 @@ interface ChatWindowProps {
   checkSSEConnection: () => Promise<void>;
   onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
   onEditConnectionFromChatWindow?: () => void;
+  userId?: string;
+  userName?: string;
 }
 
 interface QueryState {
@@ -100,7 +102,9 @@ export default function ChatWindow({
   onCancelRefreshSchema,
   checkSSEConnection,
   onUpdateSelectedCollections,
-  onEditConnectionFromChatWindow
+  onEditConnectionFromChatWindow,
+  userId,
+  userName
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -370,7 +374,7 @@ export default function ChatWindow({
     try {
       // Track message sent event
       if (chat?.id) {
-        analyticsService.trackMessageSent(chat.id, content.length);
+        analyticsService.trackMessageSent(chat.id, content.length, userId || '', userName || '');
       }
 
       await onSendMessage(content);
@@ -391,7 +395,7 @@ export default function ChatWindow({
 
       // Track message edit event
       if (chat?.id) {
-        analyticsService.trackMessageEdited(chat.id, id);
+        analyticsService.trackMessageEdited(chat.id, id, userId || '', userName || '');
       }
 
       onEditMessage(id, content);
@@ -725,7 +729,7 @@ export default function ChatWindow({
   const handleConfirmClearChat = useCallback(async () => {
     // Track chat cleared event
     if (chat?.id) {
-      analyticsService.trackChatCleared(chat.id);
+      analyticsService.trackChatCleared(chat.id, userId || '', userName || '');
     }
 
     await onClearChat();
@@ -735,7 +739,7 @@ export default function ChatWindow({
   const handleCancelStreamClick = useCallback(() => {
     // Track query cancelled event
     if (chat?.id) {
-      analyticsService.trackQueryCancelled(chat.id);
+      analyticsService.trackQueryCancelled(chat.id, userId || '', userName || '');
     }
 
     onCancelStream();
@@ -744,7 +748,7 @@ export default function ChatWindow({
   const handleConfirmRefreshSchema = useCallback(async () => {
     // Track schema refreshed event
     if (chat?.id) {
-      analyticsService.trackSchemaRefreshed(chat.id, chat.connection.database);
+      analyticsService.trackSchemaRefreshed(chat.id, chat.connection.database, userId || '', userName || '');
     }
 
     await onRefreshSchema();
@@ -754,7 +758,7 @@ export default function ChatWindow({
   const handleCancelRefreshSchema = useCallback(async () => {
     // Track schema refresh cancelled event
     if (chat?.id) {
-      analyticsService.trackSchemaCancelled(chat.id, chat.connection.database);
+      analyticsService.trackSchemaCancelled(chat.id, chat.connection.database, userId || '', userName || '');
     }
 
     await onCancelRefreshSchema();
@@ -873,6 +877,8 @@ export default function ChatWindow({
                   isFirstMessage={index === 0}
                   onQueryUpdate={handleQueryUpdate}
                   onEditQuery={handleEditQuery}
+                  userId={userId || ''}
+                  userName={userName || ''}
                   buttonCallback={(action) => {
                     if (action === "refresh_schema") {
                       setShowRefreshSchema(true);
@@ -914,7 +920,7 @@ export default function ChatWindow({
                 message={{
                   id: "welcome-message",
                   type: "assistant",
-                  content: "Welcome to NeoBase! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data.",
+                  content: `Hi ${userName || 'There'}! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data. You can start by asking me what's in this database or try recommendations.`,
                   queries: [],
                   action_buttons: [],
                   created_at: new Date().toISOString(),
@@ -933,6 +939,8 @@ export default function ChatWindow({
                 isFirstMessage={false}
                 onQueryUpdate={handleQueryUpdate}
                 onEditQuery={handleEditQuery}
+                userId={userId || ''}
+                userName={userName || ''}
                 buttonCallback={(action) => {
                   if (action === "refresh_schema") {
                     setShowRefreshSchema(true);
@@ -992,6 +1000,8 @@ export default function ChatWindow({
         isExpanded={isExpanded}
         isDisabled={isMessageSending}
         chatId={chat.id}
+        userId={userId || ''}
+        userName={userName || ''}
       />
 
       {showRefreshSchema && (
@@ -1018,7 +1028,7 @@ export default function ChatWindow({
       {showCloseConfirm && (
         <ConfirmationModal
           title="Disconnect Connection"
-          message="Are you sure you want to disconnect from this database?"
+          message="Are you sure you want to disconnect from this database? You can reconnect anytime."
           onConfirm={handleDisconnect}
           onCancel={() => setShowCloseConfirm(false)}
         />
