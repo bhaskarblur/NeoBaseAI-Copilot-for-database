@@ -52,7 +52,7 @@ export interface BackendMessage {
 
 // Add transform function
 export const transformBackendMessage = (msg: BackendMessage): Message => {
-    console.log('transformBackendMessage -> msg', msg);
+    // console.log('transformBackendMessage -> msg', msg);
     return {
         id: msg.id,
         type: msg.type,
@@ -60,8 +60,8 @@ export const transformBackendMessage = (msg: BackendMessage): Message => {
         queries: msg.queries || [],
         user_message_id: msg.user_message_id,
         is_loading: false,
-    loading_steps: [],
-    is_streaming: false,
+        loading_steps: [],
+        is_streaming: false,
         is_edited: msg.is_edited,
         created_at: msg.created_at,
         action_buttons: msg.action_buttons || []
