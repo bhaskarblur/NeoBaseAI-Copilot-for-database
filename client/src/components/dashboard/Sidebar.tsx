@@ -291,11 +291,7 @@ export default function Sidebar({
     try {
       console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
-      // Navigate to the chat URL
-      navigate(`/chat/${id}`);
-
       if (id === currentConnectedChatId) {
-        onSelectConnection(id);
         return;
       }
 
@@ -320,7 +316,7 @@ export default function Sidebar({
       onConnectionStatusChange?.(id, false, 'sidebar-select-connection');
       toast.error('Failed to connect to database');
     }
-  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections, navigate]);
+  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections]);
 
   const handleOpenMenu = (e: React.MouseEvent, connectionId: string) => {
     e.preventDefault();

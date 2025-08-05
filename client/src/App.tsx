@@ -3,7 +3,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
-import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
 import { Message, QueryResult, LoadingStep } from './components/chat/types';
@@ -49,6 +49,8 @@ function AppContent() {
   const [refreshSchemaController, setRefreshSchemaController] = useState<AbortController | null>(null);
   const [isSSEReconnecting, setIsSSEReconnecting] = useState(false);
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
+  const [isSettingUpSSE, setIsSettingUpSSE] = useState(false);
+  const [isSelectingConnection, setIsSelectingConnection] = useState(false);
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
@@ -164,7 +166,7 @@ function AppContent() {
           setChats(response.data.data.chats);
           
           // If we have a chatId from URL and chats are loaded, select it
-          if (chatIdFromUrl) {
+          if (chatIdFromUrl && !isSelectingConnection) {
             const chatFromUrl = response.data.data.chats.find(c => c.id === chatIdFromUrl);
             if (chatFromUrl) {
               setSelectedConnection(chatFromUrl);
@@ -306,6 +308,12 @@ function AppContent() {
   }, []);
 
   const handleCloseConnection = useCallback(async () => {
+    // Set selecting flag to prevent re-selection
+    setIsSelectingConnection(true);
+    
+    // Navigate to root first to prevent URL effect from triggering
+    navigate('/');
+    
     if (eventSource) {
       console.log('Closing SSE connection');
       eventSource.close();
@@ -316,9 +324,6 @@ function AppContent() {
       handleConnectionStatusChange(selectedConnection?.id || '', false, 'app-close-connection');
     }
 
-    // Clear messages
-    setMessages([]);
-
     // Clear connection status
     if (selectedConnection) {
       handleConnectionStatusChange(selectedConnection.id, false, 'app-close-connection');
@@ -328,9 +333,11 @@ function AppContent() {
     setMessages([]);
     setSelectedConnection(undefined);
     
-    // Navigate to root
-    navigate('/');
-  }, [eventSource, selectedConnection, handleConnectionStatusChange, navigate]);
+    // Reset the selecting flag after a delay
+    setTimeout(() => {
+      setIsSelectingConnection(false);
+    }, 200);
+  }, [eventSource, selectedConnection, handleConnectionStatusChange, navigate, setMessages]);
 
   const handleDeleteConnection = async (id: string) => {
     try {
@@ -469,11 +476,24 @@ function AppContent() {
   }, [selectedConnection]);
 
   const handleSelectConnection = useCallback(async (id: string) => {
+    // Prevent multiple simultaneous selections
+    if (isSelectingConnection) {
+      console.log('Already selecting a connection, skipping...');
+      return;
+    }
+    
     console.log('handleSelectConnection happened in app.tsx', { id });
     const currentConnection = selectedConnection;
     const connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
+      
+      setIsSelectingConnection(true);
+      
+      // Clear messages immediately when switching chats
+      if (currentConnection?.id !== connection.id) {
+        setMessages([]);
+      }
       
       // Set the connection immediately for smooth transition
       setSelectedConnection(connection);
@@ -499,7 +519,7 @@ function AppContent() {
         }
       }
 
-      if (currentConnection?.id != connection?.id) {
+      if (currentConnection?.id !== connection?.id) {
         // Check eventsource state
         console.log('eventSource?.readyState', eventSource?.readyState);
         if (eventSource?.readyState === EventSource.OPEN) {
@@ -508,22 +528,35 @@ function AppContent() {
         console.log('Setting up new connection');
         await setupSSEConnection(id);
       }
+      
+      // Reset the flag after a short delay to allow all effects to complete
+      setTimeout(() => {
+        setIsSelectingConnection(false);
+      }, 100);
     }
-  }, [chats, connectionStatuses, handleConnectionStatusChange, navigate, selectedConnection, eventSource, streamId]);
+  }, [chats, connectionStatuses, handleConnectionStatusChange, navigate, selectedConnection, eventSource, streamId, setMessages, isSelectingConnection]);
 
   // Handle chat selection from URL
   useEffect(() => {
-    if (chatIdFromUrl && chats.length > 0 && !isLoadingChats) {
+    if (chatIdFromUrl && chats.length > 0 && !isLoadingChats && !isSelectingConnection) {
       const chatFromUrl = chats.find(c => c.id === chatIdFromUrl);
       if (chatFromUrl && (!selectedConnection || selectedConnection.id !== chatIdFromUrl)) {
         handleSelectConnection(chatIdFromUrl);
       }
     }
-  }, [chatIdFromUrl, chats, isLoadingChats, selectedConnection, handleSelectConnection]);
+  }, [chatIdFromUrl, chats, isLoadingChats, selectedConnection, handleSelectConnection, isSelectingConnection]);
 
   // Update setupSSEConnection to include onclose
   const setupSSEConnection = useCallback(async (chatId: string): Promise<string> => {
+    // Prevent duplicate SSE connections
+    if (isSettingUpSSE) {
+      console.log('Already setting up SSE connection, skipping...');
+      return streamId || '';
+    }
+
     try {
+      setIsSettingUpSSE(true);
+      
       // Close existing SSE connection if any
       if (eventSource) {
         console.log('Closing existing SSE connection');
@@ -607,8 +640,10 @@ function AppContent() {
       console.error('Failed to setup SSE connection:', error);
       toast.error('Failed to setup SSE connection', errorToast);
       throw error;
+    } finally {
+      setIsSettingUpSSE(false);
     }
-  }, [eventSource, streamId, generateStreamId, handleConnectionStatusChange]);
+  }, [eventSource, streamId, generateStreamId, handleConnectionStatusChange, isSettingUpSSE]);
 
   // Cleanup SSE on unmount or connection change
   useEffect(() => {
@@ -1523,6 +1558,7 @@ function App() {
         <Routes>
           <Route path="/" element={<AppContent />} />
           <Route path="/chat/:chatId" element={<AppContent />} />
+          <Route path='*' element={<Navigate to="/" replace />} />
         </Routes>
       </StreamProvider>
     </UserProvider>

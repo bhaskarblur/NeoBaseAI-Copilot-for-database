@@ -144,6 +144,7 @@ export default function ChatWindow({
     query: null
   });
   const wasStreamingRef = useRef<boolean>(false);
+  const currentChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isConnected) {
@@ -365,13 +366,13 @@ export default function ChatWindow({
 
   const handleDisconnect = useCallback(async () => {
     try {
-      onCloseConnection();
+      await onCloseConnection();
       handleCloseConfirm();
     } catch (error) {
       console.error('Failed to disconnect:', error);
       toast.error('Failed to disconnect from database');
     }
-  }, [chat.id, onCloseConnection, handleCloseConfirm, onConnectionStatusChange]);
+  }, [onCloseConnection, handleCloseConfirm]);
 
   const handleEditMessage = (id: string) => {
     // Set message source to prevent auto-scroll
@@ -477,7 +478,7 @@ export default function ChatWindow({
     if (!chat?.id || isLoadingMessages) return;
 
     try {
-      console.log('Fetching messages, page:', page);
+      console.log('Fetching messages for chat:', chat.id, 'page:', page);
       setIsLoadingMessages(true);
       isLoadingOldMessages.current = page > 1;
       messageUpdateSource.current = 'api';
@@ -511,7 +512,7 @@ export default function ChatWindow({
 
         setHasMore(newMessages.length === pageSize);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch messages:', error);
       toast.error('Failed to load messages');
     } finally {
@@ -519,7 +520,7 @@ export default function ChatWindow({
         messageUpdateSource.current = null;
         isLoadingOldMessages.current = false;
         setIsLoadingMessages(false);
-      }, 200); // Increased timeout to prevent conflicts
+      }, 200);
     }
   }, [chat?.id, pageSize]);
 
@@ -547,11 +548,14 @@ export default function ChatWindow({
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoadingMessages, page, fetchMessages]);
+  }, [hasMore, isLoadingMessages, page, fetchMessages, chat?.id]);
 
   // Keep only necessary effects
   useEffect(() => {
-    if (chat?.id) {
+    if (chat?.id && chat.id !== currentChatIdRef.current) {
+      // Update current chat ID
+      currentChatIdRef.current = chat.id;
+
       // Reset all scroll-related state
       isInitialLoad.current = true;
       isScrollingRef.current = false;
