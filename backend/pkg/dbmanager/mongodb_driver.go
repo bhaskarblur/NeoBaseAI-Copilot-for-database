@@ -349,7 +349,124 @@ func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, 
 		return nil, fmt.Errorf("invalid MongoDB connection")
 	}
 
-	// Fetch sample documents
+	// Try to sample a few documents first to determine field types and find timestamp fields
+	sampleOpts := options.Find().SetLimit(5)
+	sampleCursor, err := wrapper.Client.Database(wrapper.Database).Collection(collection).Find(ctx, bson.M{}, sampleOpts)
+	if err != nil {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Error sampling collection %s: %v", collection, err)
+		// Fall back to simple find without sorting if we can't get sample documents
+		return fetchRecordsWithoutSorting(ctx, wrapper, collection, limit)
+	}
+	defer sampleCursor.Close(ctx)
+
+	// Process sample documents to find timestamp or ID fields
+	var sampleDocs []bson.M
+	if err := sampleCursor.All(ctx, &sampleDocs); err != nil {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Error decoding sample documents: %v", err)
+		return fetchRecordsWithoutSorting(ctx, wrapper, collection, limit)
+	}
+
+	if len(sampleDocs) == 0 {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> No sample documents found in collection %s", collection)
+		return fetchRecordsWithoutSorting(ctx, wrapper, collection, limit)
+	}
+
+	// Common field names that might contain timestamps or sequential IDs (in priority order)
+	timeFields := []string{"updatedAt", "updated_at", "modifiedAt", "modified_at", "modified", "lastModified", "last_modified"}
+	creationFields := []string{"createdAt", "created_at", "insertedAt", "inserted_at", "timestamp", "date", "createTime"}
+
+	// Identify the field to sort by
+	sortField := ""
+	sortOrder := -1 // Default to descending order
+
+	// Helper function to check if a field is likely a timestamp
+	isTimestampField := func(field string, doc bson.M) bool {
+		if val, ok := doc[field]; ok {
+			switch v := val.(type) {
+			case primitive.DateTime, time.Time:
+				return true
+			case string:
+				// Try to parse as date string
+				_, err := time.Parse(time.RFC3339, v)
+				if err == nil {
+					return true
+				}
+				_, err = time.Parse("2006-01-02T15:04:05", v)
+				if err == nil {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Check for timestamp fields first (modification timestamps take priority)
+	for _, field := range timeFields {
+		for _, doc := range sampleDocs {
+			if isTimestampField(field, doc) {
+				sortField = field
+				log.Printf("MongoDBDriver -> FetchExampleRecords -> Using modification timestamp field: %s", sortField)
+				break
+			}
+		}
+		if sortField != "" {
+			break
+		}
+	}
+
+	// If no modification timestamp found, look for creation timestamps
+	if sortField == "" {
+		for _, field := range creationFields {
+			for _, doc := range sampleDocs {
+				if isTimestampField(field, doc) {
+					sortField = field
+					log.Printf("MongoDBDriver -> FetchExampleRecords -> Using creation timestamp field: %s", sortField)
+					break
+				}
+			}
+			if sortField != "" {
+				break
+			}
+		}
+	}
+
+	// As a last resort, use _id field (MongoDB ObjectIDs contain a timestamp component)
+	if sortField == "" {
+		// Check if _id is an ObjectId (has timestamp) or another sequential field
+		for _, doc := range sampleDocs {
+			if id, ok := doc["_id"]; ok {
+				if _, ok := id.(primitive.ObjectID); ok {
+					sortField = "_id"
+					log.Printf("MongoDBDriver -> FetchExampleRecords -> Using _id (ObjectID) field for sorting")
+					break
+				}
+			}
+		}
+	}
+
+	// If we couldn't identify a timestamp field, just fetch without sorting
+	if sortField == "" {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> No suitable timestamp or ID field found for sorting")
+		return fetchRecordsWithoutSorting(ctx, wrapper, collection, limit)
+	}
+
+	// Create sort specification
+	sortSpec := bson.D{{Key: sortField, Value: sortOrder}}
+	findOpts := options.Find().SetLimit(int64(limit)).SetSort(sortSpec)
+
+	log.Printf("MongoDBDriver -> FetchExampleRecords -> Fetching records sorted by %s DESC", sortField)
+	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collection).Find(ctx, bson.M{}, findOpts)
+	if err != nil {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> Error fetching with sort: %v", err)
+		return fetchRecordsWithoutSorting(ctx, wrapper, collection, limit)
+	}
+	defer cursor.Close(ctx)
+
+	return processMongoResults(ctx, cursor, collection)
+}
+
+// Helper function to fetch records without sorting
+func fetchRecordsWithoutSorting(ctx context.Context, wrapper *MongoDBWrapper, collection string, limit int) ([]map[string]interface{}, error) {
 	opts := options.Find().SetLimit(int64(limit))
 	cursor, err := wrapper.Client.Database(wrapper.Database).Collection(collection).Find(ctx, bson.M{}, opts)
 	if err != nil {
@@ -357,6 +474,11 @@ func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, 
 	}
 	defer cursor.Close(ctx)
 
+	return processMongoResults(ctx, cursor, collection)
+}
+
+// Helper function to process MongoDB cursor results
+func processMongoResults(ctx context.Context, cursor *mongo.Cursor, collection string) ([]map[string]interface{}, error) {
 	// Process results
 	var results []map[string]interface{}
 	for cursor.Next(ctx) {
@@ -384,6 +506,7 @@ func (d *MongoDBDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, 
 
 	// If no records found, return empty slice
 	if len(results) == 0 {
+		log.Printf("MongoDBDriver -> FetchExampleRecords -> No records found in collection %s", collection)
 		return []map[string]interface{}{}, nil
 	}
 

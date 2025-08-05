@@ -355,11 +355,101 @@ func (f *PostgresSchemaFetcher) FetchExampleRecords(ctx context.Context, db DBEx
 		limit = 10 // Cap at 10 records to avoid large data transfers
 	}
 
-	// Build a simple query to fetch example records
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", table, limit)
+	// Try to identify time-based or ID columns to order by for getting latest records
+	var columns []struct {
+		ColumnName string `db:"column_name"`
+		DataType   string `db:"data_type"`
+	}
+
+	columnQuery := `
+		SELECT column_name, data_type 
+		FROM information_schema.columns 
+		WHERE table_schema = 'public' 
+		AND table_name = $1
+	`
+
+	err := db.Query(columnQuery, &columns, table)
+	if err != nil {
+		// Fall back to simple LIMIT query if column metadata isn't available
+		query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", table, limit)
+		var records []map[string]interface{}
+		err := db.QueryRows(query, &records)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+		}
+		return records, nil
+	}
+
+	// Common column names that might indicate recency (in priority order)
+	timeColumns := []string{"updated_at", "modified_at", "update_time", "updated", "modified", "modified_time", "last_update", "last_modified"}
+	creationColumns := []string{"created_at", "creation_time", "create_time", "created", "creation_date", "insert_time", "timestamp"}
+	idColumns := []string{"id", "uuid", "record_id", "key", "primary_key"}
+
+	// First try timestamp columns with datetime/timestamp types
+	var orderByColumn string
+
+	// Check for time-based columns first (update timestamps take priority over creation timestamps)
+	for _, colPattern := range timeColumns {
+		for _, col := range columns {
+			if strings.EqualFold(col.ColumnName, colPattern) &&
+				(strings.Contains(strings.ToLower(col.DataType), "time") ||
+					strings.Contains(strings.ToLower(col.DataType), "date")) {
+				orderByColumn = col.ColumnName
+				break
+			}
+		}
+		if orderByColumn != "" {
+			break
+		}
+	}
+
+	// If no update timestamp found, look for creation timestamps
+	if orderByColumn == "" {
+		for _, colPattern := range creationColumns {
+			for _, col := range columns {
+				if strings.EqualFold(col.ColumnName, colPattern) &&
+					(strings.Contains(strings.ToLower(col.DataType), "time") ||
+						strings.Contains(strings.ToLower(col.DataType), "date")) {
+					orderByColumn = col.ColumnName
+					break
+				}
+			}
+			if orderByColumn != "" {
+				break
+			}
+		}
+	}
+
+	// As a last resort, look for ID columns (assuming higher IDs are newer records)
+	if orderByColumn == "" {
+		for _, colPattern := range idColumns {
+			for _, col := range columns {
+				if strings.EqualFold(col.ColumnName, colPattern) &&
+					(strings.Contains(strings.ToLower(col.DataType), "int") ||
+						strings.Contains(strings.ToLower(col.DataType), "char") ||
+						strings.Contains(strings.ToLower(col.DataType), "uuid")) {
+					orderByColumn = col.ColumnName
+					break
+				}
+			}
+			if orderByColumn != "" {
+				break
+			}
+		}
+	}
+
+	// Build the query based on whether we found a column to order by
+	var query string
+	if orderByColumn != "" {
+		// Use double quotes around identifiers to handle reserved words
+		query = fmt.Sprintf(`SELECT * FROM "%s" ORDER BY "%s" DESC LIMIT %d`, table, orderByColumn, limit)
+	} else {
+		// Fallback to simple query without ORDER BY
+		query = fmt.Sprintf(`SELECT * FROM "%s" LIMIT %d`, table, limit)
+	}
 
 	var records []map[string]interface{}
-	err := db.QueryRows(query, &records)
+	err = db.QueryRows(query, &records)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
 	}

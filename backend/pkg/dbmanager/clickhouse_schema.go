@@ -408,22 +408,160 @@ func (f *ClickHouseSchemaFetcher) FetchExampleRecords(ctx context.Context, db DB
 		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Capped limit to maximum: %d", limit)
 	}
 
-	// Build a simple query to fetch example records
-	query := fmt.Sprintf("SELECT * FROM `%s` LIMIT %d", table, limit)
-	log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Executing query: %s", query)
-
-	var records []map[string]interface{}
-	err := db.QueryRows(query, &records)
-	if err != nil {
-		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Error fetching example records for table %s: %v", table, err)
-		return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+	// Try to identify time-based or ID columns to order by for getting latest records
+	var columns []struct {
+		Name string `db:"name"`
+		Type string `db:"type"`
 	}
 
-	log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Retrieved %d records from table: %s", len(records), table)
+	columnQuery := `
+		SELECT name, type
+		FROM system.columns
+		WHERE database = currentDatabase()
+		AND table = ?
+	`
 
+	err := db.Query(columnQuery, &columns, table)
+	if err != nil {
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Error fetching columns for table %s: %v", table, err)
+		// Fall back to simple LIMIT query if column metadata isn't available
+		query := fmt.Sprintf("SELECT * FROM `%s` LIMIT %d", table, limit)
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using simple query: %s", query)
+
+		var records []map[string]interface{}
+		err := db.QueryRows(query, &records)
+		if err != nil {
+			log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Error fetching records from table %s: %v", table, err)
+			return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+		}
+		return processClickHouseRecords(records)
+	}
+
+	// Also check if the table has a predefined sorting key (ORDER BY) in ClickHouse
+	var tableInfo *TableInfo
+	tableInfo, err = f.fetchTableInfo(ctx, table)
+	if err != nil {
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Error fetching table info: %v", err)
+		// Continue anyway, we'll try to find appropriate timestamp columns
+	}
+
+	// If the table has a defined ORDER BY clause, use that
+	var orderByColumn string
+	if tableInfo != nil && tableInfo.OrderBy != "" {
+		// Extract the first column from the ORDER BY clause (could be multiple columns)
+		orderParts := strings.Split(tableInfo.OrderBy, ",")
+		firstOrderColumn := strings.TrimSpace(orderParts[0])
+
+		// Extract just the column name (in case it includes ASC/DESC)
+		if spaceIdx := strings.Index(firstOrderColumn, " "); spaceIdx > 0 {
+			firstOrderColumn = firstOrderColumn[:spaceIdx]
+		}
+
+		// Use this column for ordering
+		orderByColumn = firstOrderColumn
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using table's ORDER BY column: %s", orderByColumn)
+	}
+
+	// If no ORDER BY defined in table, look for common timestamp columns
+	if orderByColumn == "" {
+		// Common column names that might indicate recency (in priority order)
+		timeColumns := []string{"updated_at", "modified_at", "update_time", "updated", "modified", "modified_time", "last_update", "last_modified"}
+		creationColumns := []string{"created_at", "creation_time", "create_time", "created", "creation_date", "insert_time", "timestamp", "time", "datetime", "date"}
+		idColumns := []string{"id", "uuid", "record_id", "key", "primary_key"}
+
+		// First try timestamp columns with datetime/timestamp types
+		// Check for time-based columns first (update timestamps take priority over creation timestamps)
+		for _, colPattern := range timeColumns {
+			for _, col := range columns {
+				if strings.EqualFold(col.Name, colPattern) &&
+					(strings.Contains(strings.ToLower(col.Type), "date") ||
+						strings.Contains(strings.ToLower(col.Type), "time")) {
+					orderByColumn = col.Name
+					log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using modification timestamp column: %s", orderByColumn)
+					break
+				}
+			}
+			if orderByColumn != "" {
+				break
+			}
+		}
+
+		// If no update timestamp found, look for creation timestamps
+		if orderByColumn == "" {
+			for _, colPattern := range creationColumns {
+				for _, col := range columns {
+					if strings.EqualFold(col.Name, colPattern) &&
+						(strings.Contains(strings.ToLower(col.Type), "date") ||
+							strings.Contains(strings.ToLower(col.Type), "time")) {
+						orderByColumn = col.Name
+						log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using creation timestamp column: %s", orderByColumn)
+						break
+					}
+				}
+				if orderByColumn != "" {
+					break
+				}
+			}
+		}
+
+		// As a last resort, look for ID columns (assuming higher IDs are newer records)
+		if orderByColumn == "" {
+			for _, colPattern := range idColumns {
+				for _, col := range columns {
+					if strings.EqualFold(col.Name, colPattern) &&
+						(strings.Contains(strings.ToLower(col.Type), "int") ||
+							strings.Contains(strings.ToLower(col.Type), "uuid") ||
+							strings.Contains(strings.ToLower(col.Type), "string")) {
+						orderByColumn = col.Name
+						log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using ID column: %s", orderByColumn)
+						break
+					}
+				}
+				if orderByColumn != "" {
+					break
+				}
+			}
+		}
+	}
+
+	// Build the query based on whether we found a column to order by
+	var query string
+	if orderByColumn != "" {
+		// Use backticks around identifiers to handle reserved words
+		query = fmt.Sprintf("SELECT * FROM `%s` ORDER BY `%s` DESC LIMIT %d", table, orderByColumn, limit)
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Using ordered query: %s", query)
+	} else {
+		// Fallback to simple query without ORDER BY
+		query = fmt.Sprintf("SELECT * FROM `%s` LIMIT %d", table, limit)
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> No suitable ordering column found, using simple query: %s", query)
+	}
+
+	var records []map[string]interface{}
+	err = db.QueryRows(query, &records)
+	if err != nil {
+		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Error fetching example records for table %s: %v", table, err)
+
+		// If ordering failed (possibly due to syntax or unsupported column type), try without ordering
+		if orderByColumn != "" {
+			log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Ordering failed, falling back to simple query")
+			simpleQuery := fmt.Sprintf("SELECT * FROM `%s` LIMIT %d", table, limit)
+			err = db.QueryRows(simpleQuery, &records)
+			if err != nil {
+				log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Simple query also failed: %v", err)
+				return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
+		}
+	}
+
+	return processClickHouseRecords(records)
+}
+
+// Process ClickHouse records to handle specific data types
+func processClickHouseRecords(records []map[string]interface{}) ([]map[string]interface{}, error) {
 	// If no records found, return empty slice
 	if len(records) == 0 {
-		log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> No records found for table: %s", table)
 		return []map[string]interface{}{}, nil
 	}
 
@@ -443,8 +581,6 @@ func (f *ClickHouseSchemaFetcher) FetchExampleRecords(ctx context.Context, db DB
 		}
 	}
 
-	log.Printf("ClickHouseSchemaFetcher -> FetchExampleRecords -> Successfully processed %d records for table: %s",
-		len(records), table)
 	return records, nil
 }
 
