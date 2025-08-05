@@ -43,6 +43,7 @@ interface QueryState {
 
 type UpdateSource = 'api' | 'new' | 'query' | null;
 
+
 const formatDateDivider = (dateString: string) => {
   const date = new Date(dateString);
   const today = new Date();
@@ -142,6 +143,7 @@ export default function ChatWindow({
     queryId: null,
     query: null
   });
+  const wasStreamingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (isConnected) {
@@ -154,24 +156,55 @@ export default function ChatWindow({
     setMessages(prev => prev.map(m => m.id === message.id ? message : m));
   };
 
-  const scrollToBottom = (origin: string) => {
-    console.log("scrollToBottom called from", origin);
+  const scrollToBottom = (origin: string, force: boolean = false) => {
     const chatContainer = chatContainerRef.current;
-    if (!chatContainer) return;
+    if (!chatContainer) {
+      return;
+    }
 
     isScrollingRef.current = true;
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
 
-    requestAnimationFrame(() => {
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-      scrollPositionRef.current = chatContainer.scrollTop;
+    // Use multiple animation frames to ensure content is fully rendered
+    const performScroll = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          // Ensure we scroll to the absolute bottom
+          const maxScrollTop = chatContainer.scrollHeight - chatContainer.clientHeight;
+          chatContainer.scrollTop = maxScrollTop;
+          scrollPositionRef.current = chatContainer.scrollTop;
 
-      scrollTimeoutRef.current = setTimeout(() => {
-        isScrollingRef.current = false;
-      }, 100);
-    });
+          // Verify we're actually at the bottom and retry if needed
+          const currentScrollTop = chatContainer.scrollTop;
+          const isAtBottom = Math.abs(maxScrollTop - currentScrollTop) < 1;
+          
+          if (!isAtBottom && force) {
+            let retryCount = 0;
+            const retryScroll = () => {
+              const newMaxScrollTop = chatContainer.scrollHeight - chatContainer.clientHeight;
+              chatContainer.scrollTop = newMaxScrollTop;
+              scrollPositionRef.current = chatContainer.scrollTop;
+              
+              const stillNotAtBottom = Math.abs(newMaxScrollTop - chatContainer.scrollTop) > 1;
+              retryCount++;
+              
+              if (stillNotAtBottom && retryCount < 5) {
+                setTimeout(retryScroll, 100 * retryCount);
+              }
+            };
+            setTimeout(retryScroll, 50);
+          }
+
+          scrollTimeoutRef.current = setTimeout(() => {
+            isScrollingRef.current = false;
+          }, 150);
+        });
+      });
+    };
+
+    performScroll();
   };
 
   const preserveScroll = (chatContainer: HTMLDivElement | null, callback: () => void) => {
@@ -243,17 +276,23 @@ export default function ChatWindow({
 
       setShowScrollButton(!isAtBottom);
 
-      if (!isLoadingOldMessages.current &&
-        !isLoadingMessages &&
-        messageUpdateSource.current === 'new' &&
-        (isAtBottom || messages.some(m => m.is_streaming))) {
+      // Skip auto-scroll during query updates, edits, or API updates
+      if (messageUpdateSource.current === 'query' || 
+          messageUpdateSource.current === 'api' ||
+          isLoadingOldMessages.current ||
+          isLoadingMessages) {
+        return;
+      }
+
+      // Remove auto-scroll behavior - let users control scrolling manually
+      // Only auto-scroll for new user messages
+      const shouldAutoScroll = messageUpdateSource.current === 'new';
+
+      if (shouldAutoScroll) {
         requestAnimationFrame(() => {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
+          const maxScrollTop = chatContainer.scrollHeight - chatContainer.clientHeight;
+          chatContainer.scrollTop = maxScrollTop;
           scrollPositionRef.current = chatContainer.scrollTop;
-        });
-      } else if (scrollPositionRef.current) {
-        requestAnimationFrame(() => {
-          chatContainer.scrollTop = scrollPositionRef.current;
         });
       }
     });
@@ -335,20 +374,32 @@ export default function ChatWindow({
   }, [chat.id, onCloseConnection, handleCloseConfirm, onConnectionStatusChange]);
 
   const handleEditMessage = (id: string) => {
-    // Prevent auto-scroll
+    // Set message source to prevent auto-scroll
+    messageUpdateSource.current = 'query';
+    
     const message = messages.find(m => m.id === id);
     if (message) {
       setEditingMessageId(id);
       setEditInput(message.content);
     }
-
-
+    
+    // Reset after a delay
+    setTimeout(() => {
+      messageUpdateSource.current = null;
+    }, 200);
   };
 
   const handleCancelEdit = () => {
-    // Prevent auto-scroll
+    // Set message source to prevent auto-scroll
+    messageUpdateSource.current = 'query';
+    
     setEditingMessageId(null);
     setEditInput('');
+    
+    // Reset after a delay
+    setTimeout(() => {
+      messageUpdateSource.current = null;
+    }, 200);
   };
 
   const connectToDatabase = async (chatId: string, streamId: string) => {
@@ -385,6 +436,9 @@ export default function ChatWindow({
 
   const handleSaveEdit = useCallback((id: string, content: string) => {
     if (content.trim()) {
+      // Set message source to prevent auto-scroll
+      messageUpdateSource.current = 'query';
+      
       // Find the message and its index
       const messageIndex = messages.findIndex(msg => msg.id === id);
       if (messageIndex === -1) return;
@@ -409,6 +463,11 @@ export default function ChatWindow({
         }
         return updated;
       });
+      
+      // Reset after a delay
+      setTimeout(() => {
+        messageUpdateSource.current = null;
+      }, 200);
     }
     setEditingMessageId(null);
     setEditInput('');
@@ -433,10 +492,15 @@ export default function ChatWindow({
           // For initial load, set messages and scroll to bottom
           setMessages(newMessages);
           if (isInitialLoad.current) {
-            requestAnimationFrame(() => {
-              scrollToBottom('initial-load');
-              isInitialLoad.current = false;
-            });
+            // Use multiple timeouts to ensure DOM is fully updated and all images/content loaded
+            setTimeout(() => {
+              scrollToBottom('initial-load', true);
+              // Double-check after a longer delay to handle lazy-loaded content
+              setTimeout(() => {
+                scrollToBottom('initial-load-verification', true);
+                isInitialLoad.current = false;
+              }, 300);
+            }, 100);
           }
         } else {
           // For pagination, preserve scroll position
@@ -455,7 +519,7 @@ export default function ChatWindow({
         messageUpdateSource.current = null;
         isLoadingOldMessages.current = false;
         setIsLoadingMessages(false);
-      }, 100);
+      }, 200); // Increased timeout to prevent conflicts
     }
   }, [chat?.id, pageSize]);
 
@@ -488,32 +552,88 @@ export default function ChatWindow({
   // Keep only necessary effects
   useEffect(() => {
     if (chat?.id) {
-      console.log('Chat changed, loading initial messages');
+      // Reset all scroll-related state
       isInitialLoad.current = true;
+      isScrollingRef.current = false;
+      scrollPositionRef.current = 0;
+      messageUpdateSource.current = null;
+      isLoadingOldMessages.current = false;
+      
+      // Clear any pending timeouts
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      
       setPage(1);
       setHasMore(true);
       setMessages([]);
+      
+      // Immediate scroll for welcome message or empty state
+      setTimeout(() => {
+        scrollToBottom('chat-mounted', true);
+      }, 50);
       fetchMessages(1);
     }
   }, [chat?.id, fetchMessages]);
 
-  // Update the message update effect
+  // Update the message update effect with better timing control
   useEffect(() => {
     // Skip effect if source is API, query operations, or loading old messages
     if (messageUpdateSource.current === 'api' ||
       messageUpdateSource.current === 'query' ||
       isLoadingOldMessages.current) {
-      console.log('Skipping scroll - API/query/pagination update');
       return;
     }
 
-    // Only scroll for new user messages or initial streaming
+    // Always scroll for new user messages (when user sends a message)
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+    
     const lastMessage = messages[messages.length - 1];
-    if ((lastMessage?.type === 'user' && messageUpdateSource.current === 'new') ||
-      (lastMessage?.is_streaming && !lastMessage?.queries?.length)) {
-      console.log('Scrolling - new user message/initial streaming');
-      scrollToBottom('new-message');
+    const shouldScrollForNewMessage = lastMessage?.type === 'user' && messageUpdateSource.current === 'new';
+
+    if (shouldScrollForNewMessage) {
+      // Use timeout to ensure proper timing after state updates
+      setTimeout(() => {
+        scrollToBottom('new-message', true);
+      }, 50);
     }
+  }, [messages]);
+
+  // Effect to track streaming state and show toast when completed
+  useEffect(() => {
+    const hasStreamingMessage = messages.some(m => m.is_streaming);
+    const chatContainer = chatContainerRef.current;
+    
+    if (chatContainer) {
+      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+      
+      // Check if streaming just stopped (was streaming before, not streaming now)
+      if (wasStreamingRef.current && !hasStreamingMessage && !isAtBottom) {
+        toast('Assistant response completed!', {
+          icon: '✅',
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '14px',
+            fontWeight: '500',
+          },
+          position: 'bottom-center' as const,
+          duration: 2000,
+        });
+      }
+    }
+    
+    // Update the streaming state for next comparison
+    wasStreamingRef.current = hasStreamingMessage;
   }, [messages]);
 
   // Update handleMessageSubmit to be more explicit
@@ -521,8 +641,14 @@ export default function ChatWindow({
     try {
       messageUpdateSource.current = 'new';
       await handleSendMessage(content);
+      // Force scroll after message is sent
+      setTimeout(() => {
+        scrollToBottom('user-message-sent', true);
+      }, 100);
     } finally {
-      messageUpdateSource.current = null;
+      setTimeout(() => {
+        messageUpdateSource.current = null;
+      }, 300);
     }
   };
 
@@ -531,26 +657,50 @@ export default function ChatWindow({
     messageUpdateSource.current = 'query';
     const chatContainer = chatContainerRef.current;
 
-    if (!chatContainer) return callback();
+    if (!chatContainer) {
+      callback();
+      setTimeout(() => {
+        messageUpdateSource.current = null;
+      }, 100);
+      return;
+    }
 
-    const oldHeight = chatContainer.scrollHeight;
-    const oldScroll = chatContainer.scrollTop;
+    // Store exact scroll state before update
+    const oldScrollTop = chatContainer.scrollTop;
+    const oldScrollHeight = chatContainer.scrollHeight;
+    const distanceFromBottom = oldScrollHeight - oldScrollTop - chatContainer.clientHeight;
+    const wasAtBottom = distanceFromBottom < 10;
 
     // Execute the update
     callback();
 
     // Preserve scroll position after update
     requestAnimationFrame(() => {
-      const newHeight = chatContainer.scrollHeight;
-      const heightDiff = newHeight - oldHeight;
-      chatContainer.scrollTop = oldScroll + heightDiff;
-      scrollPositionRef.current = chatContainer.scrollTop;
+      requestAnimationFrame(() => {
+        const newScrollHeight = chatContainer.scrollHeight;
+        const heightDiff = newScrollHeight - oldScrollHeight;
+        
+        if (wasAtBottom) {
+          // If user was at bottom, keep them at bottom
+          chatContainer.scrollTop = newScrollHeight - chatContainer.clientHeight;
+        } else {
+          // Otherwise, maintain their distance from top
+          chatContainer.scrollTop = oldScrollTop;
+          
+          // If content expanded above current position, adjust
+          if (heightDiff > 0 && oldScrollTop > 0) {
+            chatContainer.scrollTop = oldScrollTop;
+          }
+        }
+        
+        scrollPositionRef.current = chatContainer.scrollTop;
+      });
     });
 
     // Reset message source after a delay
     setTimeout(() => {
       messageUpdateSource.current = null;
-    }, 100);
+    }, 200);
   };
 
   const handleEditQuery = async (messageId: string, queryId: string, query: string) => {
@@ -985,7 +1135,7 @@ export default function ChatWindow({
 
         {showScrollButton && (
           <button
-            onClick={() => scrollToBottom('scroll-button')}
+            onClick={() => scrollToBottom('scroll-button', true)}
             className="fixed bottom-24 right-4 md:right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border z-40"
             title="Scroll to bottom"
           >

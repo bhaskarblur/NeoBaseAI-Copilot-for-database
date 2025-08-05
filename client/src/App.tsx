@@ -3,6 +3,7 @@ import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
 import { Message, QueryResult, LoadingStep } from './components/chat/types';
@@ -24,8 +25,11 @@ import WelcomeSection from './components/app/WelcomeSection';
 import LoadingComponent from './components/app/Loading';
 
 function AppContent() {
+  const navigate = useNavigate();
+  const { chatId: chatIdFromUrl } = useParams<{ chatId?: string }>();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [isEditingConnection, setIsEditingConnection] = useState(false);
   const [, setShowSelectTablesModal] = useState(false);
@@ -52,8 +56,11 @@ function AppContent() {
   
   // Check auth status on mount
   useEffect(() => {
-    checkAuth();
-  }, []);
+    if (!hasCheckedAuth) {
+      setHasCheckedAuth(true);
+      checkAuth();
+    }
+  }, [hasCheckedAuth]);
 
   // First, update the toast configurations
   const toastStyle = {
@@ -155,6 +162,16 @@ function AppContent() {
         console.log("Loaded chats:", response.data);
         if (response.data?.data?.chats) {
           setChats(response.data.data.chats);
+          
+          // If we have a chatId from URL and chats are loaded, select it
+          if (chatIdFromUrl) {
+            const chatFromUrl = response.data.data.chats.find(c => c.id === chatIdFromUrl);
+            if (chatFromUrl) {
+              setSelectedConnection(chatFromUrl);
+              // Setup connection for the chat from URL
+              handleSelectConnection(chatIdFromUrl);
+            }
+          }
         }
       } catch (error) {
         console.error("Failed to load chats:", error);
@@ -250,7 +267,7 @@ function AppContent() {
 
   const handleLogout = async () => {
     try {
-      await authService.logout();
+      authService.logout();
       setUser(null);
       setSuccessMessage('You\'ve been logged out!');
       setIsAuthenticated(false);
@@ -310,7 +327,10 @@ function AppContent() {
     // Clear messages and selected connection
     setMessages([]);
     setSelectedConnection(undefined);
-  }, [eventSource, selectedConnection, handleConnectionStatusChange]);
+    
+    // Navigate to root
+    navigate('/');
+  }, [eventSource, selectedConnection, handleConnectionStatusChange, navigate]);
 
   const handleDeleteConnection = async (id: string) => {
     try {
@@ -321,6 +341,7 @@ function AppContent() {
       if (selectedConnection?.id === id) {
         setSelectedConnection(undefined);
         setMessages([]); // Clear messages if showing deleted chat
+        navigate('/'); // Navigate to root when deleting selected chat
       }
 
       if (chats.length === 0) {
@@ -453,9 +474,14 @@ function AppContent() {
     const connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
+      
+      // Set the connection immediately for smooth transition
       setSelectedConnection(connection);
+      
+      // Navigate to the chat URL
+      navigate(`/chat/${id}`);
 
-      // Check if the connection is already connected
+      // Then handle the connection setup in the background
       const isConnected = connectionStatuses[id];
       if (isConnected) {
         handleConnectionStatusChange(id, true, 'app-select-connection');
@@ -483,7 +509,17 @@ function AppContent() {
         await setupSSEConnection(id);
       }
     }
-  }, [chats, connectionStatuses, handleConnectionStatusChange]);
+  }, [chats, connectionStatuses, handleConnectionStatusChange, navigate, selectedConnection, eventSource, streamId]);
+
+  // Handle chat selection from URL
+  useEffect(() => {
+    if (chatIdFromUrl && chats.length > 0 && !isLoadingChats) {
+      const chatFromUrl = chats.find(c => c.id === chatIdFromUrl);
+      if (chatFromUrl && (!selectedConnection || selectedConnection.id !== chatIdFromUrl)) {
+        handleSelectConnection(chatIdFromUrl);
+      }
+    }
+  }, [chatIdFromUrl, chats, isLoadingChats, selectedConnection, handleSelectConnection]);
 
   // Update setupSSEConnection to include onclose
   const setupSSEConnection = useCallback(async (chatId: string): Promise<string> => {
@@ -652,10 +688,10 @@ function AppContent() {
       });
     });
 
-    // Animate content word by word with natural timing
+    // Animate content word by word with faster timing
     const words = text.split(' ');
     for (const word of words) {
-      await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
+      await new Promise(resolve => setTimeout(resolve, 5 + Math.random() * 5));
       setMessages(prev => {
         return prev.map(msg => {
           if (msg.id === messageId) {
@@ -715,7 +751,7 @@ function AppContent() {
     for (const query of queries) {
       const queryWords = query.query.split(' ');
       for (const word of queryWords) {
-        await new Promise(resolve => setTimeout(resolve, 20 + Math.random() * 10));
+        await new Promise(resolve => setTimeout(resolve, 5 + Math.random() * 5));
         setMessages(prev => {
           return prev.map(msg => {
             if (msg.id === messageId) {
@@ -1243,7 +1279,7 @@ function AppContent() {
     }
   };
 
-  const handleUpdateAutoExecuteQuery = async (chatId: string, autoExecuteQuery: boolean): Promise<void> => {
+  const _handleUpdateAutoExecuteQuery = async (chatId: string, autoExecuteQuery: boolean): Promise<void> => {
     try {
       const updatedChat = await chatService.updateAutoExecuteQuery(chatId, autoExecuteQuery);
       
@@ -1369,31 +1405,33 @@ function AppContent() {
         eventSource={eventSource}
       />
 
-      {selectedConnection ? (
-        <ChatWindow
-          chat={selectedConnection}
-          isExpanded={isSidebarExpanded}
-          messages={messages}
-          checkSSEConnection={checkSSEConnection}
-          setMessages={setMessages}
-          onSendMessage={handleSendMessage}
-          onClearChat={handleClearChat}
-          onEditMessage={handleEditMessage}
-          onCloseConnection={handleCloseConnection}
-          onEditConnection={handleEditConnection}
-          onConnectionStatusChange={handleConnectionStatusChange}
-          isConnected={!!connectionStatuses[selectedConnection.id]}
-          onCancelStream={handleCancelStream}
-          onRefreshSchema={handleRefreshSchema}
-          onCancelRefreshSchema={handleCancelRefreshSchema}
-          onUpdateSelectedCollections={(chatId, selectedCollections) => handleUpdateSelectedCollections(chatId, selectedCollections)}
-          onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
-          userId={user?.id || ''}
-          userName={user?.username || ''}
-        />
-      ) : (
-        <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />
-      )}
+      <div className="flex-1 transition-all duration-200 ease-in-out">
+        {selectedConnection ? (
+          <ChatWindow
+            chat={selectedConnection}
+            isExpanded={isSidebarExpanded}
+            messages={messages}
+            checkSSEConnection={checkSSEConnection}
+            setMessages={setMessages}
+            onSendMessage={handleSendMessage}
+            onClearChat={handleClearChat}
+            onEditMessage={handleEditMessage}
+            onCloseConnection={handleCloseConnection}
+            onEditConnection={handleEditConnection}
+            onConnectionStatusChange={handleConnectionStatusChange}
+            isConnected={!!connectionStatuses[selectedConnection.id]}
+            onCancelStream={handleCancelStream}
+            onRefreshSchema={handleRefreshSchema}
+            onCancelRefreshSchema={handleCancelRefreshSchema}
+            onUpdateSelectedCollections={(chatId, selectedCollections) => handleUpdateSelectedCollections(chatId, selectedCollections)}
+            onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
+            userId={user?.id || ''}
+            userName={user?.username || ''}
+          />
+        ) : (
+          <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />
+        )}
+      </div>
 
       {showConnectionModal && (
         <ConnectionModal
@@ -1482,7 +1520,10 @@ function App() {
   return (
     <UserProvider>
       <StreamProvider>
-        <AppContent />
+        <Routes>
+          <Route path="/" element={<AppContent />} />
+          <Route path="/chat/:chatId" element={<AppContent />} />
+        </Routes>
       </StreamProvider>
     </UserProvider>
   );

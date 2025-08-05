@@ -1,8 +1,9 @@
 import { Eraser, ListRestart, Loader, Pencil, PlugZap, RefreshCw } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
 import DatabaseLogo from '../icons/DatabaseLogos';
+import DisconnectionTooltip from './DisconnectionTooltip';
 
 interface ChatHeaderProps {
     chat: Chat;
@@ -25,6 +26,22 @@ export default function ChatHeader({
     onReconnect,
     setShowRefreshSchema,
 }: ChatHeaderProps) {
+    const [showDisconnectionTooltip, setShowDisconnectionTooltip] = useState(false);
+
+    // Show tooltip when connection is lost
+    useEffect(() => {
+        if (!isConnected && !isConnecting) {
+            // Show tooltip after a short delay
+            const timer = setTimeout(() => {
+                setShowDisconnectionTooltip(true);
+            }, 1000);
+            
+            return () => clearTimeout(timer);
+        } else {
+            setShowDisconnectionTooltip(false);
+        }
+    }, [isConnected, isConnecting]);
+
     const connectionStatus = useMemo(() => {
         if (isConnecting) {
             return (
@@ -169,6 +186,10 @@ export default function ChatHeader({
                         <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
                             Reconnect
                         </div>
+                        <DisconnectionTooltip
+                            isVisible={showDisconnectionTooltip}
+                            onClose={() => setShowDisconnectionTooltip(false)}
+                        />
                     </div>
                 )}
 
@@ -237,6 +258,10 @@ export default function ChatHeader({
                         <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
                             Reconnect
                         </div>
+                        <DisconnectionTooltip
+                            isVisible={showDisconnectionTooltip}
+                            onClose={() => setShowDisconnectionTooltip(false)}
+                        />
                     </div>
                 )}
             </div>
