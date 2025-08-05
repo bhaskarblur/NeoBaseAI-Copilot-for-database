@@ -103,7 +103,7 @@ export default function MessageTile({
     userName,
 }: MessageTileProps) {
     const { streamId } = useStream();
-    const [viewMode, setViewMode] = useState<'table' | 'json'>('table');
+    const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json'>>({});
     const [showCriticalConfirm, setShowCriticalConfirm] = useState(false);
     const [queryToExecute, setQueryToExecute] = useState<string | null>(null);
     const [rollbackState, setRollbackState] = useState<{
@@ -982,12 +982,12 @@ export default function MessageTile({
         );
     };
 
-    const renderQueryResult = (result: any) => {
+    const renderQueryResult = (result: any, queryId: string) => {
         if (!result) {
             return <div className="text-gray-500">No results available</div>;
         }
 
-        const query = message.queries?.find(q => q.execution_result === result);
+        const query = message.queries?.find(q => q.id === queryId);
         if (!query) return null;
 
         const state = queryResults[query.id];
@@ -1021,7 +1021,7 @@ export default function MessageTile({
                             </div>
                         )}
 
-                        {viewMode === 'table' ? (
+                        {(viewModes[queryId] || 'table') === 'table' ? (
                             currentPageData.length > 0 ? (
                                 renderTableView(currentPageData)
                             ) : (
@@ -1589,12 +1589,12 @@ export default function MessageTile({
                                                             analyticsService.trackResultViewToggle(chatId, query.id, 'table', userId, userName);
                                                         }
                                                         
-                                                        setViewMode('table');
+                                                        setViewModes(prev => ({ ...prev, [query.id]: 'table' }));
                                                         setTimeout(() => {
                                                             window.scrollTo(window.scrollX, window.scrollY);
                                                         }, 0);
                                                     }}
-                                                    className={`p-1 md:p-2 rounded ${viewMode === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
+                                                    className={`p-1 md:p-2 rounded ${(viewModes[query.id] || 'table') === 'table' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
                                                     data-tooltip="Table view"
                                                     title="Table view"
                                                 >
@@ -1611,12 +1611,12 @@ export default function MessageTile({
                                                             analyticsService.trackResultViewToggle(chatId, query.id, 'json', userId, userName);
                                                         }
                                                         
-                                                        setViewMode('json');
+                                                        setViewModes(prev => ({ ...prev, [query.id]: 'json' }));
                                                         setTimeout(() => {
                                                             window.scrollTo(window.scrollX, window.scrollY);
                                                         }, 0);
                                                     }}
-                                                    className={`p-1 md:p-2 rounded ${viewMode === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
+                                                    className={`p-1 md:p-2 rounded ${(viewModes[query.id] || 'table') === 'json' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
                                                     data-tooltip="JSON view"
                                                     title="JSON view"
                                                 >
@@ -1798,7 +1798,7 @@ export default function MessageTile({
                                             text-green-400 pb-6 w-full
                                                     ${!query.example_result && !query.error ? '' : ''}
                                         `}>
-                                                        {viewMode === 'table' ? (
+                                                        {(viewModes[query.id] || 'table') === 'table' ? (
                                                             <div className="w-full">
                                                                 {shouldShowExampleResult ? (
                                                                     resultToShow ? renderTableView(parseResults(resultToShow)) : (
@@ -1806,7 +1806,7 @@ export default function MessageTile({
                                                                     )
                                                                 ) : (
                                                                     resultToShow ? (
-                                                                        renderQueryResult(resultToShow)
+                                                                        renderQueryResult(resultToShow, query.id)
                                                                     ) : (
                                                                         <div className="text-gray-500">No data to display</div>
                                                                     )
@@ -1824,7 +1824,7 @@ export default function MessageTile({
                                                                     )
                                                                 ) : (
                                                                     resultToShow ? (
-                                                                        renderQueryResult(resultToShow)
+                                                                        renderQueryResult(resultToShow, query.id)
                                                                     ) : (
                                                                         <div className="text-gray-500">No data to display</div>
                                                                     )
