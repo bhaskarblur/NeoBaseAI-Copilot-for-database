@@ -143,6 +143,7 @@ export default function ChatWindow({
     queryId: null,
     query: null
   });
+  const wasStreamingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (isConnected) {
@@ -283,10 +284,9 @@ export default function ChatWindow({
         return;
       }
 
-      // Only auto-scroll for streaming messages or new user messages
-      const hasStreamingMessage = messages.some(m => m.is_streaming);
-      const shouldAutoScroll = (messageUpdateSource.current === 'new' || hasStreamingMessage) &&
-                               (isAtBottom || hasStreamingMessage);
+      // Remove auto-scroll behavior - let users control scrolling manually
+      // Only auto-scroll for new user messages
+      const shouldAutoScroll = messageUpdateSource.current === 'new';
 
       if (shouldAutoScroll) {
         requestAnimationFrame(() => {
@@ -585,17 +585,55 @@ export default function ChatWindow({
       return;
     }
 
-    // Only scroll for new user messages or streaming messages
+    // Always scroll for new user messages (when user sends a message)
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+    
     const lastMessage = messages[messages.length - 1];
     const shouldScrollForNewMessage = lastMessage?.type === 'user' && messageUpdateSource.current === 'new';
-    const shouldScrollForStream = lastMessage?.is_streaming;
 
-    if (shouldScrollForNewMessage || shouldScrollForStream) {
+    if (shouldScrollForNewMessage) {
       // Use timeout to ensure proper timing after state updates
       setTimeout(() => {
-        scrollToBottom('new-message', shouldScrollForNewMessage);
+        scrollToBottom('new-message', true);
       }, 50);
     }
+  }, [messages]);
+
+  // Effect to track streaming state and show toast when completed
+  useEffect(() => {
+    const hasStreamingMessage = messages.some(m => m.is_streaming);
+    const chatContainer = chatContainerRef.current;
+    
+    if (chatContainer) {
+      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+      
+      // Check if streaming just stopped (was streaming before, not streaming now)
+      if (wasStreamingRef.current && !hasStreamingMessage && !isAtBottom) {
+        toast('Assistant response completed!', {
+          icon: '✅',
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '14px',
+            fontWeight: '500',
+          },
+          position: 'bottom-center' as const,
+          duration: 2000,
+        });
+      }
+    }
+    
+    // Update the streaming state for next comparison
+    wasStreamingRef.current = hasStreamingMessage;
   }, [messages]);
 
   // Update handleMessageSubmit to be more explicit
@@ -603,8 +641,14 @@ export default function ChatWindow({
     try {
       messageUpdateSource.current = 'new';
       await handleSendMessage(content);
+      // Force scroll after message is sent
+      setTimeout(() => {
+        scrollToBottom('user-message-sent', true);
+      }, 100);
     } finally {
-      messageUpdateSource.current = null;
+      setTimeout(() => {
+        messageUpdateSource.current = null;
+      }, 300);
     }
   };
 

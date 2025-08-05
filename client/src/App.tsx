@@ -688,10 +688,10 @@ function AppContent() {
       });
     });
 
-    // Animate content word by word with natural timing
+    // Animate content word by word with faster timing
     const words = text.split(' ');
     for (const word of words) {
-      await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 15));
+      await new Promise(resolve => setTimeout(resolve, 5 + Math.random() * 5));
       setMessages(prev => {
         return prev.map(msg => {
           if (msg.id === messageId) {
@@ -751,7 +751,7 @@ function AppContent() {
     for (const query of queries) {
       const queryWords = query.query.split(' ');
       for (const word of queryWords) {
-        await new Promise(resolve => setTimeout(resolve, 20 + Math.random() * 10));
+        await new Promise(resolve => setTimeout(resolve, 5 + Math.random() * 5));
         setMessages(prev => {
           return prev.map(msg => {
             if (msg.id === messageId) {
