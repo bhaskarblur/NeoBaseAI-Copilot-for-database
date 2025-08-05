@@ -5,6 +5,7 @@ import {
   Clock,
   Copy,
   HelpCircle,
+  Link,
   Loader2,
   MoreVertical,
   PanelLeft,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../../contexts/UserContext';
 import chatService from '../../services/chatService';
 import analyticsService, { trackViewGuideTutorial } from '../../services/analyticsService';
@@ -172,6 +174,8 @@ export default function Sidebar({
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [isTutorialClosed, setIsTutorialClosed] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
   
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -223,6 +227,7 @@ export default function Sidebar({
     
     onLogout();
     setShowLogoutConfirm(false);
+    navigate('/'); // Navigate to root on logout
   };
 
   const handleEditConnection = (connection: Chat) => {
@@ -286,6 +291,9 @@ export default function Sidebar({
     try {
       console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
+      // Navigate to the chat URL
+      navigate(`/chat/${id}`);
+
       if (id === currentConnectedChatId) {
         onSelectConnection(id);
         return;
@@ -312,7 +320,7 @@ export default function Sidebar({
       onConnectionStatusChange?.(id, false, 'sidebar-select-connection');
       toast.error('Failed to connect to database');
     }
-  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections]);
+  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections, navigate]);
 
   const handleOpenMenu = (e: React.MouseEvent, connectionId: string) => {
     e.preventDefault();
@@ -341,6 +349,36 @@ export default function Sidebar({
   const handleDuplicateConnection = (connection: Chat) => {
     setOpenConnectionMenu(null);
     setConnectionToDuplicate(connection);
+  };
+
+  const handleCopyLink = (chatId: string) => {
+    const url = `${window.location.origin}/chat/${chatId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      toast.success('Link copied to clipboard!', {
+        style: {
+          background: '#000',
+          color: '#fff',
+          border: '4px solid #000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: '500',
+        },
+        icon: '📋',
+        duration: 2000,
+      });
+    }).catch(() => {
+      toast.error('Failed to copy link', {
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+        },
+      });
+    });
   };
 
   const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean) => {
@@ -668,6 +706,20 @@ export default function Sidebar({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="py-1">
+          <button 
+              onClick={() => {
+                if (openConnectionMenu) {
+                  handleCopyLink(openConnectionMenu);
+                }
+                setOpenConnectionMenu(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+            >
+              <Link className="w-4 h-4 mr-2 text-black" />
+              Copy Link
+            </button>
+            <div className="h-px bg-gray-200 mx-2"></div>
             <button 
               onClick={() => {
                 const connection = connections.find(c => c.id === openConnectionMenu);

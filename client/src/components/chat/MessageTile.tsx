@@ -2220,7 +2220,11 @@ export default function MessageTile({
                                                     return null;
                                                 }
                                                 
-                                                return renderQuery(message.is_streaming || false, query, index);
+                                                return (
+                                                    <div key={query.id || `query-${index}`}>
+                                                        {renderQuery(message.is_streaming || false, query, index)}
+                                                    </div>
+                                                );
                                             })}
                                         </div>
                                     )}
