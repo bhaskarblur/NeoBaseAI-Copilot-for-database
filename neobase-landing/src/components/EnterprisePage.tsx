@@ -13,8 +13,17 @@ const EnterprisePage = () => {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [forks, setForks] = useState(0)
 
-  // Smooth scroll to top on page load
+  // Set document title and smooth scroll to top on page load
   useEffect(() => {
+    // Set document title for SEO
+    document.title = 'NeoBase Enterprise - Copilot for Organizations Data sources'
+    
+    // Set meta description
+    const metaDescription = document.querySelector('meta[name="description"]')
+    if (metaDescription) {
+      metaDescription.setAttribute('content', 'NeoBase Enterprise - Advanced data sources, database management platform with enterprise-grade security, on-premise deployment, and dedicated support for organizations.')
+    }
+    
     // Small delay to ensure page is rendered
     const scrollToTop = () => {
       window.scrollTo({
@@ -29,7 +38,14 @@ const EnterprisePage = () => {
     // Also try immediate scroll as fallback
     window.scrollTo(0, 0)
     
-    return () => clearTimeout(timer)
+    // Cleanup: restore original title when leaving the page
+    return () => {
+      clearTimeout(timer)
+      document.title = 'NeoBase - AI Copilot for Database'
+      if (metaDescription) {
+        metaDescription.setAttribute('content', 'NeoBase is an AI Copilot for Database that helps you query, analyze, and manage your databases with natural language. Connect to PostgreSQL, MySQL, and more.')
+      }
+    }
   }, [])
 
   // Fetch GitHub stats
