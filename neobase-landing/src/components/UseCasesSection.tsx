@@ -211,7 +211,7 @@ const UseCasesSection: React.FC = () => {
             </div>
           </div>
         </div>
-        <p className='text-center text-gray-500 mt-8 text-lg'>NeoBase fits anywhere & everywhere - <span className='text-black font-medium'>FinTech, E-Commerce, SaaS, Big-Data, etc.</span></p>
+        <p className='text-center text-gray-500 mt-8 text-lg'>NeoBase fits anywhere & everywhere - <span className='text-black font-medium'>FinTech, E-Commerce, SaaS, Big-Data, and more.</span></p>
       </div>
     </section>
   );
