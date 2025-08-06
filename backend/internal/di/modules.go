@@ -105,6 +105,27 @@ func Initialize() {
 		log.Fatalf("Failed to provide email service: %v", err)
 	}
 
+	// Provide waitlist repository
+	if err := DiContainer.Provide(func(db *mongodb.MongoDBClient) *repositories.WaitlistRepository {
+		return repositories.NewWaitlistRepository(db.Client.Database(db.Config.DatabaseName))
+	}); err != nil {
+		log.Fatalf("Failed to provide waitlist repository: %v", err)
+	}
+
+	// Provide waitlist service
+	if err := DiContainer.Provide(func(waitlistRepo *repositories.WaitlistRepository, emailService services.EmailService) *services.WaitlistService {
+		return services.NewWaitlistService(waitlistRepo, emailService)
+	}); err != nil {
+		log.Fatalf("Failed to provide waitlist service: %v", err)
+	}
+
+	// Provide waitlist handler
+	if err := DiContainer.Provide(func(waitlistService *services.WaitlistService) *handlers.WaitlistHandler {
+		return handlers.NewWaitlistHandler(waitlistService)
+	}); err != nil {
+		log.Fatalf("Failed to provide waitlist handler: %v", err)
+	}
+
 	// Provide services
 	if err := DiContainer.Provide(func(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepository, jwt utils.JWTService, emailService services.EmailService) services.AuthService {
 		return services.NewAuthService(userRepo, jwt, tokenRepo, emailService)
@@ -290,6 +311,18 @@ func GetChatHandler() (*handlers.ChatHandler, error) {
 func GetGitHubHandler() (*handlers.GitHubHandler, error) {
 	var handler *handlers.GitHubHandler
 	err := DiContainer.Invoke(func(h *handlers.GitHubHandler) {
+		handler = h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+// GetWaitlistHandler retrieves the WaitlistHandler from the DI container
+func GetWaitlistHandler() (*handlers.WaitlistHandler, error) {
+	var handler *handlers.WaitlistHandler
+	err := DiContainer.Invoke(func(h *handlers.WaitlistHandler) {
 		handler = h
 	})
 	if err != nil {

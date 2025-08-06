@@ -38,9 +38,15 @@ func main() {
 	ginApp.Use(gin.Logger())
 
 	// Add CORS middleware
+	// Build allowed origins list
+	allowedOrigins := []string{config.Env.CorsAllowedOrigin}
+	if config.Env.LandingPageCorsAllowedOrigin != "" {
+		allowedOrigins = append(allowedOrigins, config.Env.LandingPageCorsAllowedOrigin)
+	}
+
 	// CORS
 	ginApp.Use(cors.New(cors.Config{
-		AllowOrigins: []string{config.Env.CorsAllowedOrigin},
+		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 		AllowHeaders: []string{
 			"Origin",
@@ -72,7 +78,12 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		log.Printf("Starting server on port %s", config.Env.Port)
-		fmt.Println("✨ Welcome to NeoBase! Running in", config.Env.Environment, "Mode. You can access your client UI at", config.Env.CorsAllowedOrigin)
+		fmt.Printf("✨ Welcome to NeoBase! Running in %s Mode\n", config.Env.Environment)
+		fmt.Printf("📱 Client UI: %s\n", config.Env.CorsAllowedOrigin)
+		if config.Env.LandingPageCorsAllowedOrigin != "" {
+			fmt.Printf("🌐 Landing Page: %s\n", config.Env.LandingPageCorsAllowedOrigin)
+		}
+		fmt.Printf("🚀 CORS Origins: %v\n", allowedOrigins)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("NeoBase failed to start: %v", err)
 		}

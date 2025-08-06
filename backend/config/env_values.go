@@ -11,17 +11,18 @@ import (
 
 type Environment struct {
 	// Server configs
-	IsDocker                bool
-	Port                    string
-	Environment             string
-	MaxChatsPerUser         int
-	CorsAllowedOrigin       string
-	ExampleDatabaseType     string
-	ExampleDatabaseHost     string
-	ExampleDatabasePort     string
-	ExampleDatabaseName     string
-	ExampleDatabaseUsername string
-	ExampleDatabasePassword string
+	IsDocker                     bool
+	Port                         string
+	Environment                  string
+	MaxChatsPerUser              int
+	CorsAllowedOrigin            string
+	LandingPageCorsAllowedOrigin string
+	ExampleDatabaseType          string
+	ExampleDatabaseHost          string
+	ExampleDatabasePort          string
+	ExampleDatabaseName          string
+	ExampleDatabaseUsername      string
+	ExampleDatabasePassword      string
 	// Auth configs
 	SchemaEncryptionKey              string
 	JWTSecret                        string
@@ -54,12 +55,12 @@ type Environment struct {
 	GeminiTemperature         float64
 
 	// SMTP Email configs
-	SMTPHost     string
-	SMTPPort     int
-	SMTPSecure   bool
-	SMTPUser     string
-	SMTPPassword string
-	SMTPFromName string
+	SMTPHost      string
+	SMTPPort      int
+	SMTPSecure    bool
+	SMTPUser      string
+	SMTPPassword  string
+	SMTPFromName  string
 	SMTPFromEmail string
 }
 
@@ -83,6 +84,7 @@ func LoadEnv() error {
 	Env.Environment = getEnvWithDefault("ENVIRONMENT", "DEVELOPMENT")
 	Env.MaxChatsPerUser = getIntEnvWithDefault("MAX_CHATS_PER_USER", 1)
 	Env.CorsAllowedOrigin = getEnvWithDefault("CORS_ALLOWED_ORIGIN", "http://localhost:5173")
+	Env.LandingPageCorsAllowedOrigin = getEnvWithDefault("LANDING_PAGE_CORS_ALLOWED_ORIGIN", "")
 	// Auth configs
 	Env.SchemaEncryptionKey = getRequiredEnv("SCHEMA_ENCRYPTION_KEY", "neobase_schema_encryption_key")
 	Env.JWTSecret = getRequiredEnv("JWT_SECRET", "neobase_jwt_secret")

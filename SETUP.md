@@ -206,6 +206,7 @@ For production deployment on a server:
 
    - Set `ENVIRONMENT=PRODUCTION` and `VITE_ENVIRONMENT=PRODUCTION`
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
+   - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
    - Add your OpenAI or Gemini API key
 
@@ -246,6 +247,7 @@ Just follow these steps:
 
    - Set `ENVIRONMENT=PRODUCTION` and `VITE_ENVIRONMENT=PRODUCTION`
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
+   - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
    - Add your OpenAI or Gemini API key
 

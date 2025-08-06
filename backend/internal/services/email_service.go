@@ -16,6 +16,7 @@ type EmailService interface {
 	SendEmail(to, subject, body string) error
 	SendPasswordResetOTP(email, username, otp string) error
 	SendWelcomeEmail(email, username string) error
+	SendEnterpriseWaitlistEmail(email string) error
 	TestConnection() error
 }
 
@@ -39,7 +40,7 @@ func NewEmailService() EmailService {
 		fromEmail:    config.Env.SMTPFromEmail,
 		smtpSecure:   config.Env.SMTPSecure,
 	}
-	
+
 	// Check if SMTP configuration is missing or contains default/placeholder values
 	if service.isConfigurationMissing() {
 		log.Println("⚠️  SMTP not configured properly. Email features will be disabled.")
@@ -56,7 +57,7 @@ func NewEmailService() EmailService {
 		log.Printf("   🌐 Host: %s:%d", service.smtpHost, service.smtpPort)
 		log.Printf("   🔒 Secure: %t", service.smtpSecure)
 	}
-	
+
 	return service
 }
 
@@ -66,7 +67,7 @@ func (s *emailService) isConfigurationMissing() bool {
 	if s.smtpHost == "" || s.smtpUser == "" || s.smtpPassword == "" {
 		return true
 	}
-	
+
 	// Check for common default/placeholder values
 	defaultValues := []string{
 		"your-email@gmail.com",
@@ -78,28 +79,28 @@ func (s *emailService) isConfigurationMissing() bool {
 		"your-password",
 		"your-smtp-password",
 	}
-	
+
 	// Check SMTP user for default values
 	for _, defaultValue := range defaultValues {
 		if strings.ToLower(s.smtpUser) == strings.ToLower(defaultValue) {
 			return true
 		}
 	}
-	
+
 	// Check SMTP password for default values
 	for _, defaultValue := range defaultValues {
 		if strings.ToLower(s.smtpPassword) == strings.ToLower(defaultValue) {
 			return true
 		}
 	}
-	
+
 	// Check if from email is still a placeholder
 	for _, defaultValue := range defaultValues {
 		if strings.ToLower(s.fromEmail) == strings.ToLower(defaultValue) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -111,7 +112,7 @@ func (s *emailService) SendEmail(to, subject, body string) error {
 
 	// Create properly formatted sender with display name
 	from := fmt.Sprintf("%s <%s>", s.fromName, s.fromEmail)
-	
+
 	// Create message
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
@@ -138,7 +139,7 @@ func (s *emailService) SendEmail(to, subject, body string) error {
 
 func (s *emailService) SendPasswordResetOTP(email, username, otp string) error {
 	subject := "Reset Your NeoBase Password"
-	
+
 	// Load and process template
 	body, err := s.loadTemplate("password_reset", map[string]string{
 		"username": username,
@@ -148,13 +149,13 @@ func (s *emailService) SendPasswordResetOTP(email, username, otp string) error {
 		log.Printf("⚠️  Failed to load password reset template: %v", err)
 		return nil // Return nil to not block the application flow
 	}
-	
+
 	return s.SendEmail(email, subject, body)
 }
 
 func (s *emailService) SendWelcomeEmail(email, username string) error {
 	subject := "Welcome to NeoBase - Your AI Database Copilot!"
-	
+
 	// Load and process template
 	body, err := s.loadTemplate("welcome", map[string]string{
 		"username": username,
@@ -163,7 +164,20 @@ func (s *emailService) SendWelcomeEmail(email, username string) error {
 		log.Printf("⚠️  Failed to load welcome template: %v", err)
 		return nil // Return nil to not block the application flow
 	}
-	
+
+	return s.SendEmail(email, subject, body)
+}
+
+func (s *emailService) SendEnterpriseWaitlistEmail(email string) error {
+	subject := "You're on the NeoBase Enterprise Waitlist! 🚀"
+
+	// Load and process template
+	body, err := s.loadTemplate("enterprise_waitlist", map[string]string{})
+	if err != nil {
+		log.Printf("⚠️  Failed to load enterprise waitlist template: %v", err)
+		return nil // Return nil to not block the application flow
+	}
+
 	return s.SendEmail(email, subject, body)
 }
 
@@ -172,13 +186,13 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 	// Get current working directory for debugging
 	cwd, _ := os.Getwd()
 	log.Printf("📁 Current working directory: %s", cwd)
-	
+
 	// Check if we're running in Docker (working directory is /app)
 	isDocker := cwd == "/app"
-	
+
 	// Build possible paths based on environment
 	var possiblePaths []string
-	
+
 	if isDocker {
 		// Docker environment paths
 		possiblePaths = []string{
@@ -195,11 +209,11 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 			filepath.Join(cwd, "backend", "internal", "email_templates", templateName+".html"),
 		}
 	}
-	
+
 	var templateBytes []byte
 	var err error
 	var templatePath string
-	
+
 	// Try each possible path
 	for _, path := range possiblePaths {
 		templateBytes, err = ioutil.ReadFile(path)
@@ -209,7 +223,7 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 			break
 		}
 	}
-	
+
 	// If all paths failed, use fallback
 	if err != nil {
 		log.Printf("⚠️  Failed to read template file from any of the following paths:")
@@ -220,15 +234,15 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 		// Return a simple fallback template
 		return s.createFallbackTemplate(templateName, placeholders), nil
 	}
-	
+
 	// Convert to string
 	template := string(templateBytes)
-	
+
 	// Replace placeholders with actual values
 	for placeholder, value := range placeholders {
 		template = strings.ReplaceAll(template, "{{"+placeholder+"}}", value)
 	}
-	
+
 	return template, nil
 }
 
@@ -348,7 +362,7 @@ func (s *emailService) createFallbackTemplate(templateName string, placeholders 
 // applyTemplate applies template substitution with enhanced support for complex patterns
 func (s *emailService) applyTemplate(template string, data map[string]string) string {
 	result := template
-	
+
 	// Helper function to safely convert values to strings
 	safeString := func(value interface{}) string {
 		if value == nil {
@@ -356,13 +370,13 @@ func (s *emailService) applyTemplate(template string, data map[string]string) st
 		}
 		return fmt.Sprintf("%v", value)
 	}
-	
+
 	// Replace simple variable substitutions {{variableName}}
 	for key, value := range data {
 		placeholder := fmt.Sprintf("{{%s}}", key)
 		result = strings.ReplaceAll(result, placeholder, safeString(value))
 	}
-	
+
 	return result
 }
 
@@ -375,7 +389,7 @@ func (s *emailService) TestConnection() error {
 	// Test SMTP connection
 	smtpAddr := fmt.Sprintf("%s:%s", s.smtpHost, strconv.Itoa(s.smtpPort))
 	auth := smtp.PlainAuth("", s.smtpUser, s.smtpPassword, s.smtpHost)
-	
+
 	// Try to connect and authenticate
 	client, err := smtp.Dial(smtpAddr)
 	if err != nil {

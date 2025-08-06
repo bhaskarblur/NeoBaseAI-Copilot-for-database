@@ -6,7 +6,7 @@ const HowItWorksSection: React.FC = () => {
   const steps = [
     {
         icon: <Database className="w-6 h-6" />,
-        title: "Connect to Your Database",
+        title: "Connect to Your Data Source",
         description: "NeoBase connects securely to your database, whether it's PostgreSQL, MySQL, MongoDB, or others, keeping your data safe."
       },
     {
