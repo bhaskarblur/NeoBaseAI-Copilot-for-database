@@ -155,7 +155,7 @@ const EnterprisePage = () => {
               </div>
               
               <h1 className="text-4xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight mb-6">
-                Enterprise <span className="text-green-500">Coming Soon</span>
+                Enterprises -<span className="text-green-500"> On The Way</span>
               </h1>
               
               <p className="text-lg sm:text-lg md:text-xl text-gray-700 mb-8 max-w-3xl mx-auto">

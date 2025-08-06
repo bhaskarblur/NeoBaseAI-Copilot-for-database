@@ -88,7 +88,7 @@ const Navbar = ({ forks }: { forks: number }) => {
           {isMenuOpen && (
             <div className="md:hidden mt-4 py-4 border-t border-gray-200">
               <div className="flex flex-col gap-4">
-                <Link to="/enterprise" onClick={() => setIsMenuOpen(false)} className="font-medium text-green-500 hover:text-gray-600 transition-colors py-2">Enterprise</Link>
+                <Link to="/enterprise" onClick={() => setIsMenuOpen(false)} className="font-medium text-yellow-600 hover:text-yellow-800 transition-colors py-2">Enterprise</Link>
                 <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Features</a>
                 <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Technologies</a>
                 <a href='#use-cases' onClick={(e) => handleSmoothScroll(e, '#use-cases')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Use-Cases</a>
