@@ -46,6 +46,7 @@ services:
       - PORT=${PORT} # 3000
       - ENVIRONMENT=${ENVIRONMENT} # DEVELOPMENT, PRODUCTION
       - CORS_ALLOWED_ORIGIN=${CORS_ALLOWED_ORIGIN} # Frontend exposed base url
+      - LANDING_PAGE_CORS_ALLOWED_ORIGIN=${LANDING_PAGE_CORS_ALLOWED_ORIGIN} # Landing page exposed base url (optional)
       - MAX_CHATS_PER_USER=${MAX_CHATS_PER_USER} # 0 for trial/development mode(max 2 connection), 1 for unlimited
       - NEOBASE_ADMIN_USERNAME=${NEOBASE_ADMIN_USERNAME} # admin username
       - NEOBASE_ADMIN_PASSWORD=${NEOBASE_ADMIN_PASSWORD} # admin password

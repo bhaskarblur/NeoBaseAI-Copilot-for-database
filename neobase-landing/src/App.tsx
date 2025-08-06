@@ -1,3 +1,4 @@
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import HeroSection from './components/HeroSection'
 import VideoSection from './components/VideoSection'
@@ -8,6 +9,9 @@ import HowItWorksSection from './components/HowItWorksSection'
 import ComparisonSection from './components/ComparisonSection'
 import UseCasesSection from './components/UseCasesSection'
 import FAQSection from './components/FAQSection'
+import ContributeSection from './components/ContributeSection'
+import EnterprisePage from './components/EnterprisePage'
+import ScrollToTop from './components/ScrollToTop'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
 import { getAnalytics, logEvent } from "firebase/analytics";
@@ -51,20 +55,29 @@ function fetchStats() {
 
 
   return (
-    <div className="min-h-screen bg-[#FFDB58]/10 overflow-hidden">
-      <Navbar forks={forks}/>
-      <main className="flex flex-col space-y-8 md:space-y-0">
-        <HeroSection />
-        <VideoSection />
-        <UseCasesSection />
-        <SupportedTechnologiesSection />
-        <CompactFeaturesSection stars={stars}/>
-        <HowItWorksSection />
-        <ComparisonSection />
-        <FAQSection />
-      </main>
-      <Footer />
-    </div>
+    <Router>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/" element={
+          <div className="min-h-screen bg-[#FFDB58]/10 overflow-hidden">
+            <Navbar forks={forks}/>
+            <main className="flex flex-col space-y-8 md:space-y-0">
+              <HeroSection />
+              <VideoSection />
+              <UseCasesSection />
+              <SupportedTechnologiesSection />
+              <CompactFeaturesSection stars={stars}/>
+              <HowItWorksSection />
+              <ComparisonSection />
+              <FAQSection />
+              <ContributeSection />
+            </main>
+            <Footer />
+          </div>
+        } />
+        <Route path="/enterprise" element={<EnterprisePage />} />
+      </Routes>
+    </Router>
   )
 }
 
@@ -113,7 +126,8 @@ function trackSectionViews(analytics: any) {
     { id: 'how-it-works', name: 'how_it_works_section_view' },
     { id: 'comparison', name: 'comparison_section_view' },
     { id: 'use-cases', name: 'use_cases_section_view' },
-    { id: 'faq', name: 'faq_section_view' }
+    { id: 'faq', name: 'faq_section_view' },
+    { id: 'contribute', name: 'contribute_section_view' }
   ];
 
   sections.forEach(section => {

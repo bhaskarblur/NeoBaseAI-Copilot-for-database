@@ -1,4 +1,4 @@
-import { Github, Linkedin } from 'lucide-react';
+import { Github } from 'lucide-react';
 import FloatingBackground from './FloatingBackground';
 
 const Footer = () => {
@@ -23,6 +23,15 @@ const Footer = () => {
             >
               <Github className="w-5 h-5" />
               <span>GitHub</span>
+            </a>
+            <a 
+              href="https://discord.gg/VT9NRub86D" // Official Discord Server
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 hover:text-[#5865F2] transition-colors group"
+            >
+              <img src="https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/discord-white-icon.png" alt="Discord" className="w-5 h-5 transition-all group-hover:[filter:brightness(0)_saturate(100%)_invert(37%)_sepia(68%)_saturate(1920%)_hue-rotate(220deg)_brightness(99%)_contrast(95%)]" />
+              <span>Discord</span>
             </a>
             <a 
               href={import.meta.env.VITE_PRODUCT_HUNT_URL}
@@ -60,7 +69,7 @@ const Footer = () => {
               &copy; {currentYear} NeoBase - AI Copilot for Database
             </p>
             <div className="flex items-center text-gray-400 mt-4 md:mt-0">
-              <span className="mr-1">Made with ❤️ by </span>
+              <span className="mr-1">Crafted with ❤️ by </span>
               <a 
                 href="https://www.linkedin.com/in/ankit-apk/" 
                 target="_blank" 

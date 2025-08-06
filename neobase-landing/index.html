@@ -47,6 +47,46 @@
       }
     }
   </script>
+  
+  <!-- Structured Data for Sitelinks -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "url": "https://neobase.cloud",
+      "name": "NeoBase",
+      "description": "AI Copilot for Database, Data sources",
+      "logo": "https://neobase.cloud/neobase-logo.svg",
+      "sameAs": [
+        "https://github.com/bhaskarblur/neobase-ai-dba",
+        "https://discord.gg/VT9NRub86D"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "customer support",
+        "email": "support@neobase.cloud"
+      }
+    }
+  </script>
+  
+  <!-- Breadcrumb for Enterprise Page -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [{
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://neobase.cloud"
+      },{
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Enterprise",
+        "item": "https://neobase.cloud/enterprise"
+      }]
+    }
+  </script>
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -54,14 +94,34 @@
       "name": "NeoBase",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Web",
-      "offers": {
+      "offers": [{
         "@type": "Offer",
+        "name": "NeoBase Community",
         "price": "0",
-        "priceCurrency": "USD"
-      },
+        "priceCurrency": "USD",
+        "description": "Free tier for individual developers and small teams"
+      },{
+        "@type": "Offer",
+        "name": "NeoBase Enterprise",
+        "priceSpecification": {
+          "@type": "PriceSpecification",
+          "price": "Contact us",
+          "priceCurrency": "USD"
+        },
+        "description": "Enterprise solution with advanced features, security, and support",
+        "url": "https://neobase.cloud/enterprise"
+      }],
       "description": "NeoBase is an AI Copilot for Database that helps you query, analyze, and manage your databases with natural language.",
       "screenshot": "https://www.neobase.cloud/neobase-banner.png",
-      "softwareVersion": "1.0"
+      "softwareVersion": "1.0",
+      "featureList": [
+        "Natural Language Database Queries",
+        "Multi-Datasource Support (Data Pipelines, Analytics, Storage buckets and more)",
+        "AI-Powered Query Generation",
+        "Real-time Datasources Monitoring",
+        "Enterprise Security & Compliance",
+        "On-Premise Deployment Options"
+      ]
     }
   </script>
 </head>

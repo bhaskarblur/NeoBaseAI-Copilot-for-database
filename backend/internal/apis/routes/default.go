@@ -28,7 +28,9 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	}
 	// Github repository statistics route
 	router.GET("/api/github/stats", githubHandler.GetGitHubStats)
+
 	// Setup all route groups
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
+	SetupWaitlistRoutes(router)
 }
