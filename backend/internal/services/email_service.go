@@ -8,6 +8,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -187,6 +188,15 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 	cwd, _ := os.Getwd()
 	log.Printf("📁 Current working directory: %s", cwd)
 
+	// Get the directory of the current source file
+	_, filename, _, ok := runtime.Caller(0)
+	var sourceDir string
+	if ok {
+		// Get the directory containing this source file (email_service.go)
+		sourceDir = filepath.Dir(filename)
+		log.Printf("📂 Source file directory: %s", sourceDir)
+	}
+
 	// Check if we're running in Docker (working directory is /app)
 	isDocker := cwd == "/app"
 
@@ -202,11 +212,17 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 	} else {
 		// Local development paths
 		possiblePaths = []string{
+			// First try relative to the source file location
+			filepath.Join(sourceDir, "..", "email_templates", templateName+".html"),
+			// Then try from current working directory
 			filepath.Join("internal", "email_templates", templateName+".html"),
 			filepath.Join(cwd, "internal", "email_templates", templateName+".html"),
 			// If running from project root instead of backend directory
 			filepath.Join("backend", "internal", "email_templates", templateName+".html"),
 			filepath.Join(cwd, "backend", "internal", "email_templates", templateName+".html"),
+			// If running from cmd directory
+			filepath.Join("..", "internal", "email_templates", templateName+".html"),
+			filepath.Join("..", "..", "internal", "email_templates", templateName+".html"),
 		}
 	}
 
@@ -216,9 +232,11 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 
 	// Try each possible path
 	for _, path := range possiblePaths {
-		templateBytes, err = ioutil.ReadFile(path)
+		// Clean the path to handle .. properly
+		cleanPath := filepath.Clean(path)
+		templateBytes, err = ioutil.ReadFile(cleanPath)
 		if err == nil {
-			templatePath = path
+			templatePath = cleanPath
 			log.Printf("✅ Successfully loaded template from: %s", templatePath)
 			break
 		}
@@ -231,7 +249,7 @@ func (s *emailService) loadTemplate(templateName string, placeholders map[string
 			log.Printf("   - %s", path)
 		}
 		log.Printf("⚠️  Using fallback template for %s", templateName)
-		// Return a simple fallback template
+		// Return a simple fallback template for enterprise waitlist
 		return s.createFallbackTemplate(templateName, placeholders), nil
 	}
 
@@ -314,6 +332,31 @@ func (s *emailService) createFallbackTemplate(templateName string, placeholders 
 	</div>
 </body>
 </html>`, baseStyles, username, otp)
+	case "enterprise_waitlist":
+		return fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+	<title>You're on the NeoBase Enterprise Waitlist!</title>
+	<style>%s</style>
+</head>
+<body>
+	<div class="container">
+		<div class="logo">NeoBase</div>
+		<h2>You're on the Enterprise Waitlist! 🎉</h2>
+		<p>Thank you for your interest in <strong>NeoBase Enterprise</strong>!</p>
+		<p>You've been successfully added to our exclusive waitlist. We'll notify you as soon as Enterprise is available.</p>
+		<p><strong>What happens next?</strong></p>
+		<ul>
+			<li>Get early access to NeoBase Enterprise</li>
+			<li>Receive exclusive launch pricing</li>
+			<li>Participate in our beta program</li>
+			<li>Shape the product with your feedback</li>
+		</ul>
+		<p>Best regards,<br><strong>The NeoBase Team</strong></p>
+	</div>
+</body>
+</html>`, baseStyles)
 	case "welcome":
 		username := placeholders["username"]
 		return fmt.Sprintf(`
