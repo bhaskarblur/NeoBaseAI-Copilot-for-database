@@ -7,7 +7,7 @@ const Footer = () => {
   return (
     <footer className="bg-black text-white py-12 relative overflow-hidden">
       <FloatingBackground count={8} opacity={0.1} />
-      <div className="container mx-auto px-6 md:px-8 max-w-7xl">
+      <div className="container mx-auto px-6 md:px-8 lg:px-0 max-w-7xl">
         <div className="flex flex-col md:flex-row justify-between items-center">
           <div className="flex items-center mb-6 md:mb-0">
             <img src="/neobase-logo.svg" alt="NeoBase Logo" className="w-10 h-10 filter invert" />
@@ -69,7 +69,7 @@ const Footer = () => {
               &copy; {currentYear} NeoBase - AI Copilot for Database
             </p>
             <div className="flex items-center text-gray-400 mt-4 md:mt-0">
-              <span className="mr-1">Crafted with ❤️ by </span>
+              <span className="mr-1">Crafted with ❤️  by </span>
               <a 
                 href="https://www.linkedin.com/in/ankit-apk/" 
                 target="_blank" 

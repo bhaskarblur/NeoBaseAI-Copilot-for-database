@@ -30,7 +30,7 @@ const ContributeSection = () => {
             >
               {/* <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5" /> */}
               <img src="https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/discord-white-icon.png" alt="Discord" className="w-5 h-5 sm:w-5 sm:h-5" />
-              <span>Join us on Discord</span>
+              <span>Join our Discord</span>
             </a>
             
             <a
