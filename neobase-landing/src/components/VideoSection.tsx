@@ -78,7 +78,7 @@ const VideoSection = () => {
                 
                 <video 
                   ref={videoRef}
-                  className="w-full h-full object-contain absolute inset-0 rounded-lg"
+                  className="w-full h-full object-cover absolute inset-0 rounded-lg"
                   poster=""
                   muted={isMuted}
                 >

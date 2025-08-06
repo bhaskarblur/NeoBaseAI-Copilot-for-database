@@ -5,6 +5,10 @@
 
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  
   body {
     font-family: 'Archivo', sans-serif;
     /**Can use Archivo**/

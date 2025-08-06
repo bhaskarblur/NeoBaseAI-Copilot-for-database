@@ -145,18 +145,18 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if err != nil {
 			return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 		}
-		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 2)
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 3) // Trying to fetch 3 chats
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 1 {
-			return nil, http.StatusBadRequest, fmt.Errorf("user cannot have more than 2 chats")
+		if len(chats) >= 3 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
 		}
 	}
 
 	// Validate database type
 	if !isValidDBType(req.Connection.Type) {
-		return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
+		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported database type: %s", req.Connection.Type)
 	}
 
 	// Test connection without creating a persistent connection
@@ -232,18 +232,18 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		if err != nil {
 			return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 		}
-		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 2)
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 3) // Trying to fetch 3 chats
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) > 1 {
-			return nil, http.StatusBadRequest, fmt.Errorf("user cannot have more than 2 chats")
+		if len(chats) >= 3 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
 		}
 	}
 
 	// Validate database type
 	if !isValidDBType(req.Connection.Type) {
-		return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
+		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported database type: %s", req.Connection.Type)
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
@@ -753,17 +753,19 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 
 // Duplicate a chat
 func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error) {
+	// Validate user ID
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
 	}
 
+	// Validate chat ID
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
 	}
 
-	// Verify chat ownership
+	// Verify chat ownership & check if chat exists
 	chat, err := s.chatRepo.FindByID(chatObjID)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
@@ -775,6 +777,16 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
 	}
 
+	// If trial mode, check if user already has 2 chats, return error
+	if config.Env.MaxChatsPerUser == 0 { // 0 == Trial Mode
+		chats, _, err := s.chatRepo.FindByUserID(userObjID, 1, 3) // Trying to fetch 3 chats
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+		}
+		if len(chats) >= 3 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
+		}
+	}
 	// Duplicate the chat
 	newChat := &models.Chat{
 		UserID:              userObjID,

@@ -8,6 +8,7 @@ import HowItWorksSection from './components/HowItWorksSection'
 import ComparisonSection from './components/ComparisonSection'
 import UseCasesSection from './components/UseCasesSection'
 import FAQSection from './components/FAQSection'
+import ContributeSection from './components/ContributeSection'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
 import { getAnalytics, logEvent } from "firebase/analytics";
@@ -62,6 +63,7 @@ function fetchStats() {
         <HowItWorksSection />
         <ComparisonSection />
         <FAQSection />
+        <ContributeSection />
       </main>
       <Footer />
     </div>
@@ -113,7 +115,8 @@ function trackSectionViews(analytics: any) {
     { id: 'how-it-works', name: 'how_it_works_section_view' },
     { id: 'comparison', name: 'comparison_section_view' },
     { id: 'use-cases', name: 'use_cases_section_view' },
-    { id: 'faq', name: 'faq_section_view' }
+    { id: 'faq', name: 'faq_section_view' },
+    { id: 'contribute', name: 'contribute_section_view' }
   ];
 
   sections.forEach(section => {

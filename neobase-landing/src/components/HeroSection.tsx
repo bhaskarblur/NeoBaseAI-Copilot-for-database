@@ -29,7 +29,7 @@ const HeroSection = () => {
                 className="neo-button flex items-center justify-center gap-2 py-2 sm:py-3 px-6 sm:px-8 text-base sm:text-lg"
               >
                 <Boxes className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Try NeoBase</span>
+                <span>Try NeoBase - It's Free!</span>
               </a>
               <a 
                 href="https://github.com/bhaskarblur/neobase-ai-dba" 

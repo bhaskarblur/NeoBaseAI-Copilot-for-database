@@ -16,6 +16,25 @@ const Navbar = ({ forks }: { forks: number }) => {
     setIsMenuOpen(!isMenuOpen)
   }
 
+  const handleSmoothScroll = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    e.preventDefault()
+    const element = document.querySelector(targetId)
+    if (element) {
+      const offset = 80 // Account for fixed navbar height
+      const elementPosition = element.getBoundingClientRect().top
+      const offsetPosition = elementPosition + window.pageYOffset - offset
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      })
+    }
+    // Close mobile menu if open
+    if (isMenuOpen) {
+      setIsMenuOpen(false)
+    }
+  }
+
   return (
     <>
       <nav className="py-4 px-6 md:px-8 lg:px-12 border-b-4 border-black bg-white fixed top-0 left-0 right-0 z-[100] shadow-md">
@@ -29,8 +48,9 @@ const Navbar = ({ forks }: { forks: number }) => {
 
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center gap-6">
-              <a href="#features" className="font-medium hover:text-gray-600 transition-colors">Features</a>
-              <a href="#technologies" className="font-medium hover:text-gray-600 transition-colors">Technologies</a>
+              <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Features</a>
+              <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Technologies</a>
+              <a href="#contribute" onClick={(e) => handleSmoothScroll(e, '#contribute')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Contribute</a>
               
               {/* Product Hunt Button */}
               <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{width: '220px', height: '48px'}} width="220" height="48" /></a>
@@ -65,8 +85,9 @@ const Navbar = ({ forks }: { forks: number }) => {
           {isMenuOpen && (
             <div className="md:hidden mt-4 py-4 border-t border-gray-200">
               <div className="flex flex-col gap-4">
-                <a href="#features" className="font-medium hover:text-gray-600 transition-colors py-2">Features</a>
-                <a href="#technologies" className="font-medium hover:text-gray-600 transition-colors py-2">Technologies</a>
+                <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Features</a>
+                <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Technologies</a>
+                <a href="#contribute" onClick={(e) => handleSmoothScroll(e, '#contribute')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Contribute</a>
                 
                 <div className="flex flex-col gap-3 mt-2">
                   {/* Product Hunt Button */}
