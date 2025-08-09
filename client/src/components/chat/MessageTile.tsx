@@ -11,6 +11,7 @@ import { Message, QueryResult } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import { formatActionAt } from '../../utils/message';
 import analyticsService from '../../services/analyticsService';
+import { highlightSearchText } from '../../utils/highlightSearch';
 
 interface QueryState {
     isExecuting: boolean;
@@ -48,6 +49,10 @@ interface MessageTileProps {
     isFirstMessage?: boolean;
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
+    searchQuery?: string;
+    isSearchResult?: boolean;
+    isCurrentSearchResult?: boolean;
+    searchResultRefs?: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
     buttonCallback?: (action: string) => void;
     userId?: string;
     userName?: string;
@@ -101,6 +106,10 @@ export default function MessageTile({
     buttonCallback,
     userId,
     userName,
+    searchQuery,
+    isSearchResult,
+    isCurrentSearchResult,
+    searchResultRefs,
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json'>>({});
@@ -893,7 +902,7 @@ export default function MessageTile({
 
             if (value.length > 140) {
                 const maxLength = Math.min(250, value.length);
-                const truncatedText = isExpanded ? value : value.substring(0, maxLength);
+                const truncatedText = isExpanded ? value : value.substring(0, maxLength);    
                 return (
                     <span onClick={() => toggleCellExpansion(cellId)} className="cursor-pointer">
                         <span className="text-green-400">"{truncatedText}</span>
@@ -1362,12 +1371,33 @@ export default function MessageTile({
 
         return (
             <div>
-                <p className="mb-4 mt-4 font-base text-base">
-                    <span className="text-black font-semibold">Explanation:</span> {isCurrentlyStreaming && isDescriptionStreaming
-                        ? currentDescription
-                        : query.description}
+                <p className="mb-4 mt-4 font-base text-base"
+                    ref={el => {
+                        if (searchResultRefs && el) {
+                            searchResultRefs.current[`explanation-${message.id}-${index}`] = el;
+                        }
+                    }}>
+                    <span className="text-black font-semibold">Explanation:</span> {searchQuery 
+                        ? highlightSearchText(
+                            isCurrentlyStreaming && isDescriptionStreaming
+                                ? currentDescription
+                                : query.description,
+                            searchQuery
+                        )
+                        : (isCurrentlyStreaming && isDescriptionStreaming
+                            ? currentDescription
+                            : query.description)
+                    }
                 </p>
-                <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
+                <div 
+                    key={index} 
+                    className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" 
+                    style={{ minWidth: '100%' }}
+                    ref={el => {
+                        if (searchResultRefs && el) {
+                            searchResultRefs.current[`query-${message.id}-${index}`] = el;
+                        }
+                    }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
                         <div className="flex justify-between items-center md:justify-centre gap-2">
                             <span>Query {index + 1}:</span>
@@ -1522,14 +1552,28 @@ export default function MessageTile({
                         ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
                     `}>
                             <code className="whitespace-pre-wrap break-words">
-                                {isCurrentlyStreaming && isQueryStreaming
-                                    ? removeDuplicateQueries(currentQuery)
-                                    : removeDuplicateQueries(query.query)}
+                                {searchQuery 
+                                    ? highlightSearchText(
+                                        isCurrentlyStreaming && isQueryStreaming
+                                            ? removeDuplicateQueries(currentQuery)
+                                            : removeDuplicateQueries(query.query),
+                                        searchQuery
+                                    )
+                                    : (isCurrentlyStreaming && isQueryStreaming
+                                        ? removeDuplicateQueries(currentQuery)
+                                        : removeDuplicateQueries(query.query))
+                                }
                             </code>
                         </pre>
                     )}
                     {(query.execution_result || query.example_result || query.error || queryState.isExecuting) && (
-                        <div className="border-t border-gray-700 mt-2 w-full">
+                        <div 
+                            className="border-t border-gray-700 mt-2 w-full"
+                            ref={el => {
+                                if (searchResultRefs && el) {
+                                    searchResultRefs.current[`result-${message.id}-${index}`] = el;
+                                }
+                            }}>
                             {queryState.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">
                                     <Loader className="w-8 h-8 animate-spin text-gray-400" />
@@ -1784,11 +1828,11 @@ export default function MessageTile({
                                         <>
                                             {query.error ? (
                                                 <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
-                                                    <div className="font-bold mb-2">{query.error.code}</div>
-                                                    {query.error.message != query.error.details && <div className="mb-2">{query.error.message}</div>}
+                                                    <div className="font-bold mb-2">{searchQuery ? highlightSearchText(query.error.code, searchQuery) : query.error.code}</div>
+                                                    {query.error.message != query.error.details && <div className="mb-2">{searchQuery ? highlightSearchText(query.error.message, searchQuery) : query.error.message}</div>}
                                                     {query.error.details && (
                                                         <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
-                                                            {query.error.details}
+                                                            {searchQuery ? highlightSearchText(query.error.details, searchQuery) : query.error.details}
                                                         </div>
                                                     )}
                                                 </div>
@@ -2002,12 +2046,18 @@ export default function MessageTile({
     };
 
     return (
-        <div className={`
+        <div 
+            className={`
                 py-4 md:py-6
                 ${isFirstMessage ? 'first:pt-0' : ''}
                 w-full
                 relative
-              `}>
+              `}
+            ref={el => {
+                if (searchResultRefs && el) {
+                    searchResultRefs.current[`msg-${message.id}`] = el;
+                }
+            }}>
             <div className={`
         group flex items-center relative
         ${message.type === 'user' ? 'justify-end' : 'justify-start'}
@@ -2199,9 +2249,12 @@ export default function MessageTile({
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                  <div className='flex flex-col gap-1'>
                                     {message.type === 'user' ? (
-                                        <p className='text-lg whitespace-pre-wrap break-words'>{removeDuplicateContent(message.content)}</p>) :
+                                        <p className='text-lg whitespace-pre-wrap break-words'>
+                                            {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
+                                        </p>) :
                                     (   <MarkdownRenderer 
                                             markdown={removeDuplicateContent(message.content)}
+                                            searchQuery={searchQuery}
                                         />
                                     )
                                     }

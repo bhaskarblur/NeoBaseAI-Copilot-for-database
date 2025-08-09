@@ -1,4 +1,4 @@
-import { Eraser, ListRestart, Loader, Pencil, PlugZap, RefreshCw } from 'lucide-react';
+import { Eraser, ListRestart, Loader, Pencil, PlugZap, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
@@ -14,6 +14,7 @@ interface ChatHeaderProps {
     onShowCloseConfirm: () => void;
     onReconnect: () => void;
     setShowRefreshSchema: (show: boolean) => void;
+    onToggleSearch: () => void;
 }
 
 export default function ChatHeader({
@@ -25,6 +26,7 @@ export default function ChatHeader({
     onShowCloseConfirm,
     onReconnect,
     setShowRefreshSchema,
+    onToggleSearch,
 }: ChatHeaderProps) {
     const [showDisconnectionTooltip, setShowDisconnectionTooltip] = useState(false);
 
@@ -124,6 +126,19 @@ export default function ChatHeader({
                 {/* Desktop buttons with borders */}
                 <div className="relative group hidden md:block">
                     <button
+                        onClick={onToggleSearch}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
+                        aria-label="Search messages"
+                    >
+                        <Search className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Search messages
+                    </div>
+                </div>
+
+                <div className="relative group hidden md:block">
+                    <button
                         onClick={handleShowRefreshSchema}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
                         aria-label="Refresh Knowledge Base"
@@ -148,7 +163,7 @@ export default function ChatHeader({
                     </div>
                 </div>
 
-                <div className="relative group hidden md:block">
+                {/* <div className="relative group hidden md:block">
                     <button
                         onClick={handleEditConnection}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors neo-border text-gray-800"
@@ -159,7 +174,7 @@ export default function ChatHeader({
                     <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
                         Edit connection
                     </div>
-                </div>
+                </div> */}
 
                 {isConnected ? (
                     <div className="relative group hidden md:block">
@@ -196,6 +211,19 @@ export default function ChatHeader({
                 {/* Mobile buttons without borders */}
                 <div className="relative group md:hidden">
                     <button
+                        onClick={onToggleSearch}
+                        className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
+                        aria-label="Search messages"
+                    >
+                        <Search className="w-5 h-5" />
+                    </button>
+                    <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                        Search messages
+                    </div>
+                </div>
+
+                <div className="relative group md:hidden">
+                    <button
                         onClick={handleShowRefreshSchema}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
                         aria-label="Refresh Knowledge Base"
@@ -220,7 +248,7 @@ export default function ChatHeader({
                     </div>
                 </div>
 
-                <div className="relative group md:hidden">
+                {/* <div className="relative group md:hidden">
                     <button
                         onClick={handleEditConnection}
                         className="p-2 hover:bg-neo-gray rounded-lg transition-colors"
@@ -231,7 +259,7 @@ export default function ChatHeader({
                     <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
                         Edit connection
                     </div>
-                </div>
+                </div> */}
 
                 {isConnected ? (
                     <div className="relative group md:hidden">

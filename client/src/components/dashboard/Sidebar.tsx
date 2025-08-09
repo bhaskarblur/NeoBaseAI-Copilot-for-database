@@ -311,12 +311,17 @@ export default function Sidebar({
       onSelectConnection(id);
       onConnectionStatusChange?.(id, false, 'sidebar-connecting');
 
+      // Auto-collapse sidebar on mobile devices
+      if (window.innerWidth < 768 && isExpanded) {
+        onToggleExpand();
+      }
+
     } catch (error) {
       console.error('Failed to setup connection:', error);
       onConnectionStatusChange?.(id, false, 'sidebar-select-connection');
       toast.error('Failed to connect to database');
     }
-  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections]);
+  }, [currentConnectedChatId, onSelectConnection, onConnectionStatusChange, connections, isExpanded, onToggleExpand]);
 
   const handleOpenMenu = (e: React.MouseEvent, connectionId: string) => {
     e.preventDefault();

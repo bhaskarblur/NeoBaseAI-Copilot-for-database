@@ -12,6 +12,7 @@ import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
+import SearchBar from './SearchBar';
 import { Message } from './types';
 import { ChatSettings } from '../../types/chat';
 interface ChatWindowProps {
@@ -132,6 +133,11 @@ export default function ChatWindow({
   const scrollPositionRef = useRef<number>(0);
   const isScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
+  const searchResultRefs = useRef<{ [key: string]: HTMLElement | null }>({});
   const [showEditQueryConfirm, setShowEditQueryConfirm] = useState<{
     show: boolean;
     messageId: string | null;
@@ -145,6 +151,108 @@ export default function ChatWindow({
   });
   const wasStreamingRef = useRef<boolean>(false);
   const currentChatIdRef = useRef<string | null>(null);
+
+  // Search functionality
+  const performSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    
+    if (!query.trim()) {
+      setSearchResults([]);
+      setCurrentSearchIndex(0);
+      return;
+    }
+
+    const results: string[] = [];
+    const lowerQuery = query.toLowerCase();
+    const messageMatches = new Set<string>(); // Track which messages have matches
+
+    messages.forEach(message => {
+      let messageHasMatch = false;
+      
+      // Search in message content
+      if (message.content.toLowerCase().includes(lowerQuery)) {
+        messageHasMatch = true;
+      }
+
+      // Search in queries
+      message.queries?.forEach((query) => {
+        if (query.query.toLowerCase().includes(lowerQuery)) {
+          messageHasMatch = true;
+        }
+        // Search in error messages
+        if (query.error) {
+          if ((query.error.message && query.error.message.toLowerCase().includes(lowerQuery)) ||
+              (query.error.code && query.error.code.toLowerCase().includes(lowerQuery)) ||
+              (query.error.details && query.error.details.toLowerCase().includes(lowerQuery))) {
+            messageHasMatch = true;
+          }
+        }
+        // Search in description (explanation)
+        if (query.description && query.description.toLowerCase().includes(lowerQuery)) {
+          messageHasMatch = true;
+        }
+      });
+      
+      // Add only one result per message
+      if (messageHasMatch) {
+        results.push(`msg-${message.id}`);
+        messageMatches.add(message.id);
+      }
+    });
+
+    setSearchResults(results);
+    setCurrentSearchIndex(0);
+    
+    // Scroll to first result if found
+    if (results.length > 0) {
+      scrollToSearchResult(0, results);
+    }
+  }, [messages]);
+
+  const scrollToSearchResult = useCallback((index: number, results?: string[]) => {
+    const searchList = results || searchResults;
+    if (searchList.length === 0 || index < 0 || index >= searchList.length) return;
+
+    const resultId = searchList[index];
+    const element = searchResultRefs.current[resultId];
+    
+    if (element) {
+      element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+  }, [searchResults]);
+
+  const navigateSearchUp = useCallback(() => {
+    if (searchResults.length === 0) return;
+    // Since messages are displayed newest at bottom, "up" should go to previous (older) result
+    const newIndex = currentSearchIndex < searchResults.length - 1 ? currentSearchIndex + 1 : 0;
+    setCurrentSearchIndex(newIndex);
+    scrollToSearchResult(newIndex);
+  }, [currentSearchIndex, searchResults, scrollToSearchResult]);
+
+  const navigateSearchDown = useCallback(() => {
+    if (searchResults.length === 0) return;
+    // Since messages are displayed newest at bottom, "down" should go to next (newer) result
+    const newIndex = currentSearchIndex > 0 ? currentSearchIndex - 1 : searchResults.length - 1;
+    setCurrentSearchIndex(newIndex);
+    scrollToSearchResult(newIndex);
+  }, [currentSearchIndex, searchResults, scrollToSearchResult]);
+
+  const handleToggleSearch = useCallback(() => {
+    setShowSearch(prev => !prev);
+    if (showSearch) {
+      // Don't clear search query, just clear results
+      setSearchResults([]);
+      setCurrentSearchIndex(0);
+    } else {
+      // Re-run search when opening if there's a query
+      if (searchQuery) {
+        performSearch(searchQuery);
+      }
+    }
+  }, [showSearch, searchQuery, performSearch]);
 
   useEffect(() => {
     if (isConnected) {
@@ -556,6 +664,14 @@ export default function ChatWindow({
       // Update current chat ID
       currentChatIdRef.current = chat.id;
 
+      // Close search when changing chats
+      if (showSearch) {
+        setShowSearch(false);
+        setSearchQuery('');
+        setSearchResults([]);
+        setCurrentSearchIndex(0);
+      }
+
       // Reset all scroll-related state
       isInitialLoad.current = true;
       isScrollingRef.current = false;
@@ -578,7 +694,7 @@ export default function ChatWindow({
       }, 50);
       fetchMessages(1);
     }
-  }, [chat?.id, fetchMessages]);
+  }, [chat?.id, fetchMessages, showSearch]);
 
   // Update the message update effect with better timing control
   useEffect(() => {
@@ -931,22 +1047,37 @@ export default function ChatWindow({
       duration-300 
       ${isExpanded ? 'md:ml-80' : 'md:ml-20'}
     `}>
-      <ChatHeader
-        chat={chat}
-        isConnecting={isConnecting}
-        isConnected={isConnected}
-        onClearChat={() => setShowClearConfirm(true)}
-        onEditConnection={() => {
-          if (onEditConnectionFromChatWindow) {
-            onEditConnectionFromChatWindow();
-          } else {
-            setShowEditConnection(true);
-          }
-        }}
-        onShowCloseConfirm={() => setShowCloseConfirm(true)}
-        onReconnect={handleReconnect}
-        setShowRefreshSchema={() => setShowRefreshSchema(true)}
-      />
+      <div className="relative">
+        <ChatHeader
+          chat={chat}
+          isConnecting={isConnecting}
+          isConnected={isConnected}
+          onClearChat={() => setShowClearConfirm(true)}
+          onEditConnection={() => {
+            if (onEditConnectionFromChatWindow) {
+              onEditConnectionFromChatWindow();
+            } else {
+              setShowEditConnection(true);
+            }
+          }}
+          onShowCloseConfirm={() => setShowCloseConfirm(true)}
+          onReconnect={handleReconnect}
+          setShowRefreshSchema={() => setShowRefreshSchema(true)}
+          onToggleSearch={handleToggleSearch}
+        />
+        
+        {showSearch && (
+          <SearchBar
+            onSearch={performSearch}
+            onClose={handleToggleSearch}
+            onNavigateUp={navigateSearchUp}
+            onNavigateDown={navigateSearchDown}
+            currentResultIndex={currentSearchIndex}
+            totalResults={searchResults.length}
+            initialQuery={searchQuery}
+          />
+        )}
+      </div>
 
       <div
         ref={chatContainerRef}
@@ -1033,6 +1164,10 @@ export default function ChatWindow({
                   onEditQuery={handleEditQuery}
                   userId={userId || ''}
                   userName={userName || ''}
+                  searchQuery={showSearch ? searchQuery : ''}
+                  isSearchResult={showSearch && searchResults.some(r => r === `msg-${message.id}`)}
+                  isCurrentSearchResult={showSearch && searchResults[currentSearchIndex] === `msg-${message.id}`}
+                  searchResultRefs={searchResultRefs}
                   buttonCallback={(action) => {
                     if (action === "refresh_schema") {
                       setShowRefreshSchema(true);
@@ -1095,6 +1230,10 @@ export default function ChatWindow({
                 onEditQuery={handleEditQuery}
                 userId={userId || ''}
                 userName={userName || ''}
+                searchQuery={showSearch ? searchQuery : ''}
+                isSearchResult={false}
+                isCurrentSearchResult={false}
+                searchResultRefs={searchResultRefs}
                 buttonCallback={(action) => {
                   if (action === "refresh_schema") {
                     setShowRefreshSchema(true);
