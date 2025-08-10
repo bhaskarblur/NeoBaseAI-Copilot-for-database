@@ -2332,41 +2332,47 @@ export default function MessageTile({
                                     
                                     {message.type === 'assistant' && message.content.length > 0 && message.id !== 'welcome-message' && (
                                         <div className="mt-4 group/tooltip">
-                                            <p className="text-sm text-gray-700 flex items-center gap-1">
-                                                <span className="inline-flex items-center">
+                                            <div className="text-sm text-gray-700 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-1">
+                                                <span className="inline-flex items-center w-full sm:w-auto">
                                                     <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                     </svg>
-                                                    This response was generated in 
+                                                    This response was generated
                                                 </span>
-                                                <div className="relative inline-block">
-                                                    <span 
-                                                        className={`font-semibold px-2 py-0.5 rounded cursor-help ${message.non_tech_mode ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}
-                                                    >
-                                                        {message.non_tech_mode ? 'Non-Technical' : 'Technical'}
-                                                    </span>
-                                                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover/tooltip:visible group-hover/tooltip:opacity-100 transition-all duration-200 w-64 z-50 pointer-events-none">
-                                                        {message.non_tech_mode 
-                                                            ? 'Non-Technical Mode: Generates simple, natural language queries that are easy to understand. Perfect for users who want to interact with data without knowing database syntax.'
-                                                            : 'Technical Mode: Generates raw database queries with full syntax. Ideal for developers and technical users who want direct control over database operations.'
-                                                        }
-                                                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
-                                                            <div className="border-4 border-transparent border-t-gray-900"></div>
+                                                <span className="inline-flex items-center gap-x-1 w-full sm:w-auto">
+                                                    <span>in</span>
+                                                    <div className="relative inline-block">
+                                                        <span 
+                                                            className={`font-semibold px-2 py-0.5 rounded cursor-help ${message.non_tech_mode ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}
+                                                        >
+                                                            {message.non_tech_mode ? 'Non-Technical' : 'Technical'}
+                                                        </span>
+                                                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover/tooltip:visible group-hover/tooltip:opacity-100 transition-all duration-200 w-64 z-50 pointer-events-none">
+                                                            {message.non_tech_mode 
+                                                                ? 'Non-Technical Mode: Generates simple, natural language queries that are easy to understand. Perfect for users who want to interact with data without knowing database syntax.'
+                                                                : 'Technical Mode: Generates raw database queries with full syntax. Ideal for developers and technical users who want direct control over database operations.'
+                                                            }
+                                                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+                                                                <div className="border-4 border-transparent border-t-gray-900"></div>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                Mode. You can change it for this chat from
-                                                <button 
-                                                    onClick={() => {
-                                                        if (buttonCallback) {
-                                                            buttonCallback('open_settings');
-                                                        }
-                                                    }}
-                                                    className="text-blue-600 hover:text-blue-700 underline text-sm"
-                                                >
-                                                    here
-                                                </button>
-                                            </p>
+                                                    <span>Mode.</span>
+                                                </span>
+                                                <span className="inline-flex items-center gap-x-1 w-full sm:w-auto">
+                                                    <span>You can change it for this chat from</span>
+                                                    <button 
+                                                        onClick={() => {
+                                                            if (buttonCallback) {
+                                                                buttonCallback('open_settings');
+                                                            }
+                                                        }}
+                                                        className="text-blue-600 hover:text-blue-700 underline text-sm"
+                                                    >
+                                                        here
+                                                    </button>
+                                                </span>
+                                            </div>
                                         </div>
                                     )}
                         
