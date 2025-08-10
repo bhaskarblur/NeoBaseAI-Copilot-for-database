@@ -3,19 +3,21 @@ package dtos
 type CreateChatSettings struct {
 	AutoExecuteQuery *bool `json:"auto_execute_query"`
 	ShareDataWithAI  *bool `json:"share_data_with_ai"`
+	NonTechMode      *bool `json:"non_tech_mode"`
 }
 
 type ChatSettingsResponse struct {
 	AutoExecuteQuery bool `json:"auto_execute_query"`
 	ShareDataWithAI  bool `json:"share_data_with_ai"`
+	NonTechMode      bool `json:"non_tech_mode"`
 }
 type CreateConnectionRequest struct {
-	Type     string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra"`
-	Host     string  `json:"host" binding:"required"`
-	Port     *string `json:"port"`
-	Username string  `json:"username" binding:"required"`
-	Password *string `json:"password"`
-	Database string  `json:"database" binding:"required"`
+	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra"`
+	Host         string  `json:"host" binding:"required"`
+	Port         *string `json:"port"`
+	Username     string  `json:"username" binding:"required"`
+	Password     *string `json:"password"`
+	Database     string  `json:"database" binding:"required"`
 	AuthDatabase *string `json:"auth_database,omitempty"` // Database to authenticate against (for MongoDB)
 
 	// SSL/TLS Configuration
@@ -88,6 +90,7 @@ type ColumnInfo struct {
 type TablesResponse struct {
 	Tables []TableInfo `json:"tables"`
 }
+
 // Query Recommendations DTOs
 type QueryRecommendation struct {
 	Text string `json:"text"`

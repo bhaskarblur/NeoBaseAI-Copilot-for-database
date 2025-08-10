@@ -44,7 +44,7 @@ func NewGeminiClient(config Config) (*GeminiClient, error) {
 	}, nil
 }
 
-func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error) {
 	// Check if the context is cancelled
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -53,13 +53,14 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Convert messages into parts for the Gemini API.
 	geminiMessages := make([]*genai.Content, 0)
 
-	// Add system prompt first
-	systemPrompt := ""
+	// Get the system prompt with non-tech mode if enabled
+	systemPrompt := constants.GetSystemPrompt(constants.Gemini, dbType, nonTechMode)
 	var responseSchema *genai.Schema
 
 	for _, dbConfig := range c.DBConfigs {
 		if dbConfig.DBType == dbType {
-			systemPrompt = dbConfig.SystemPrompt
+			// Use the dynamically generated prompt instead of the stored one
+			// systemPrompt = dbConfig.SystemPrompt
 			responseSchema = dbConfig.Schema.(*genai.Schema)
 			break
 		}

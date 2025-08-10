@@ -39,7 +39,8 @@ const chatService = {
                 connection: connectionToSend,
                 settings: {
                     auto_execute_query: settings.auto_execute_query,
-                    share_data_with_ai: settings.share_data_with_ai
+                    share_data_with_ai: settings.share_data_with_ai,
+                    non_tech_mode: settings.non_tech_mode
                 }
             });
 
@@ -66,7 +67,8 @@ const chatService = {
             
             const payload: any = { connection: connection ? connectionToSend : undefined, settings: {
                 auto_execute_query: settings?.auto_execute_query,
-                share_data_with_ai: settings?.share_data_with_ai
+                share_data_with_ai: settings?.share_data_with_ai,
+                non_tech_mode: settings?.non_tech_mode
             } };
             
             const response = await axios.patch<CreateChatResponse>(

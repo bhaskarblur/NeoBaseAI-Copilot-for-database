@@ -114,6 +114,40 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB query params: %s", paramsStr)
 
+	// Special handling for MongoDB operators that should NOT be quoted
+	mongoOperators := []string{
+		"$dateToString", "$dateFromString", "$dateToParts", "$dateFromParts",
+		"$year", "$month", "$dayOfMonth", "$hour", "$minute", "$second",
+		"$dayOfWeek", "$dayOfYear", "$week", "$isoDayOfWeek", "$isoWeek",
+		"$project", "$match", "$group", "$sort", "$limit", "$skip",
+		"$lookup", "$unwind", "$out", "$merge", "$facet", "$bucket",
+		"$addFields", "$set", "$replaceRoot", "$replaceWith", "$count",
+		"$sortByCount", "$redact", "$geoNear", "$sample", "$union",
+		"$add", "$subtract", "$multiply", "$divide", "$mod", "$pow",
+		"$sqrt", "$abs", "$ceil", "$floor", "$round", "$exp", "$ln",
+		"$log", "$log10", "$trunc", "$size", "$slice", "$in", "$nin",
+		"$arrayElemAt", "$concatArrays", "$filter", "$first", "$last",
+		"$max", "$min", "$avg", "$sum", "$stdDevPop", "$stdDevSamp",
+		"$push", "$addToSet", "$pull", "$pullAll", "$pop", "$each",
+		"$concat", "$substr", "$toLower", "$toUpper", "$strcasecmp",
+		"$split", "$strLenBytes", "$strLenCP", "$indexOfBytes",
+		"$indexOfCP", "$ltrim", "$rtrim", "$trim", "$regexMatch",
+		"$regexFind", "$regexFindAll", "$replaceOne", "$replaceAll",
+		"$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$cmp",
+		"$and", "$or", "$not", "$nor", "$exists", "$type",
+		"$expr", "$jsonSchema", "$text", "$where", "$all",
+		"$elemMatch", "$regex", "$options", "$geoIntersects",
+		"$geoWithin", "$near", "$nearSphere", "$box", "$center",
+		"$centerSphere", "$geometry", "$maxDistance", "$minDistance",
+		"$polygon", "$uniqueDocs", "$objectToArray", "$arrayToObject",
+		"$literal", "$mergeObjects", "$setField", "$getField",
+		"$setEquals", "$setIntersection", "$setUnion", "$setDifference",
+		"$setIsSubset", "$anyElementTrue", "$allElementsTrue",
+		"$cond", "$ifNull", "$switch", "$coalesce",
+		"$toObjectId", "$toString", "$toDate", "$toDecimal", "$toDouble",
+		"$toInt", "$toLong", "$toBool", "$type", "$convert",
+	}
+
 	// Handle JavaScript-style regex patterns like /pattern/flags
 	// Convert to MongoDB Extended JSON format: {"$regex":"pattern","$options":"flags"}
 	regexPattern := regexp.MustCompile(`/([^/]+)/([gimsuy]*)`)
@@ -335,14 +369,21 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the processed string for debugging
 	log.Printf("After ObjectId and Date replacement: %s", paramsStr)
 
-	// Temporarily replace $oid and $date with placeholders to prevent them from being modified
+	// Create placeholders for all MongoDB operators to prevent them from being modified
+	operatorPlaceholders := make(map[string]string)
+	placeholderIndex := 0
+
+	// Replace all MongoDB operators with placeholders
+	for _, op := range mongoOperators {
+		placeholder := fmt.Sprintf("__MONGO_OP_%d__", placeholderIndex)
+		operatorPlaceholders[placeholder] = op
+		paramsStr = strings.ReplaceAll(paramsStr, op, placeholder)
+		placeholderIndex++
+	}
+
+	// Also temporarily replace $oid and $date with placeholders
 	paramsStr = strings.ReplaceAll(paramsStr, "$oid", "__MONGODB_OID__")
 	paramsStr = strings.ReplaceAll(paramsStr, "$date", "__MONGODB_DATE__")
-
-	// Handle MongoDB operators ($gt, $lt, $in, etc.) throughout the entire document
-	// This is a more comprehensive approach than just handling them at the beginning of objects
-	operatorRegex := regexp.MustCompile(`(\s*)(\$[a-zA-Z0-9]+)(\s*):`)
-	paramsStr = operatorRegex.ReplaceAllString(paramsStr, `$1"$2"$3:`)
 
 	// First pass: Quote all field names in objects
 	// This regex matches field names followed by a colon, ensuring they're properly quoted
@@ -350,12 +391,24 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	fieldNameRegex := regexp.MustCompile(`(^|[,{])\s*([a-zA-Z0-9_]+)\s*:`)
 	paramsStr = fieldNameRegex.ReplaceAllString(paramsStr, `$1"$2":`)
 
+	// Handle fancy/smart quotes that LLMs sometimes generate
+	// Do this BEFORE handling regular quotes
+	paramsStr = strings.ReplaceAll(paramsStr, "\u2018", "'")  // Replace left smart quote
+	paramsStr = strings.ReplaceAll(paramsStr, "\u2019", "'")  // Replace right smart quote
+	paramsStr = strings.ReplaceAll(paramsStr, "\u201C", "\"") // Replace left smart double quote
+	paramsStr = strings.ReplaceAll(paramsStr, "\u201D", "\"") // Replace right smart double quote
+	
 	// Handle single quotes for string values
 	// Use a standard approach instead of negative lookbehind which isn't supported in Go
 	singleQuoteRegex := regexp.MustCompile(`'([^']*)'`)
 	paramsStr = singleQuoteRegex.ReplaceAllString(paramsStr, `"$1"`)
 
-	// Restore placeholders
+	// Restore all MongoDB operator placeholders
+	for placeholder, op := range operatorPlaceholders {
+		paramsStr = strings.ReplaceAll(paramsStr, placeholder, op)
+	}
+
+	// Restore $oid and $date placeholders
 	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_OID__", "$oid")
 	paramsStr = strings.ReplaceAll(paramsStr, "__MONGODB_DATE__", "$date")
 
@@ -658,6 +711,9 @@ func processAggregationResultsFromCursor(cursor *mongo.Cursor, ctx context.Conte
 			},
 		}
 	}
+	
+	// Debug logging for aggregation results
+	log.Printf("processAggregationResultsFromCursor -> Decoded %d results from aggregation", len(results))
 
 	// Create a wrapper for the results to maintain compatibility with existing code
 	resultMap := map[string]interface{}{
@@ -963,6 +1019,55 @@ func NewStageRegex() *regexp.Regexp {
 	return regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
 }
 
+// formatDateFields recursively formats date fields in MongoDB results
+func formatDateFields(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Process each field in the map
+		for key, value := range v {
+			// Check if this is a date field
+			if t, ok := value.(primitive.DateTime); ok {
+				// Format the date to a human-readable string
+				v[key] = t.Time().Format("January 2, 2006 at 3:04 PM")
+			} else if t, ok := value.(time.Time); ok {
+				v[key] = t.Format("January 2, 2006 at 3:04 PM")
+			} else {
+				// Recursively process nested structures
+				v[key] = formatDateFields(value)
+			}
+		}
+		return v
+	case bson.M:
+		// Convert to map[string]interface{} and process
+		m := make(map[string]interface{})
+		for key, value := range v {
+			if t, ok := value.(primitive.DateTime); ok {
+				m[key] = t.Time().Format("January 2, 2006 at 3:04 PM")
+			} else if t, ok := value.(time.Time); ok {
+				m[key] = t.Format("January 2, 2006 at 3:04 PM")
+			} else {
+				m[key] = formatDateFields(value)
+			}
+		}
+		return m
+	case []interface{}:
+		// Process each element in the array
+		for i, item := range v {
+			v[i] = formatDateFields(item)
+		}
+		return v
+	case []bson.M:
+		// Process each element in the array
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = formatDateFields(item)
+		}
+		return result
+	default:
+		return v
+	}
+}
+
 // FormatQueryResult formats MongoDB result for consistent JSON response
 func FormatQueryResult(result interface{}) (string, error) {
 	// Handle nil results
@@ -1232,6 +1337,101 @@ func processDotNotationInAggregation(pipeline []bson.M) error {
 	}
 
 	return nil
+}
+
+// ParseAggregationPipeline parses a MongoDB aggregation pipeline string into structured stages
+// Exported for testing
+func ParseAggregationPipeline(pipelineStr string) ([]string, error) {
+	pipelineStr = strings.TrimSpace(pipelineStr)
+
+	// Remove surrounding brackets if present
+	if strings.HasPrefix(pipelineStr, "[") && strings.HasSuffix(pipelineStr, "]") {
+		pipelineStr = pipelineStr[1 : len(pipelineStr)-1]
+	}
+
+	var stages []string
+	var currentStage strings.Builder
+	braceCount := 0
+	inString := false
+	var stringChar rune
+	escapeNext := false
+
+	runes := []rune(pipelineStr)
+	for i := 0; i < len(runes); i++ {
+		char := runes[i]
+		
+		if escapeNext {
+			currentStage.WriteRune(char)
+			escapeNext = false
+			continue
+		}
+
+		if char == '\\' {
+			currentStage.WriteRune(char)
+			escapeNext = true
+			continue
+		}
+
+		// Handle string boundaries
+		if (char == '"' || char == '\'') && !inString {
+			inString = true
+			stringChar = char
+			currentStage.WriteRune(char)
+			continue
+		} else if inString && char == stringChar {
+			inString = false
+			currentStage.WriteRune(char)
+			continue
+		}
+
+		// If we're inside a string, just add the character
+		if inString {
+			currentStage.WriteRune(char)
+			continue
+		}
+
+		// Track brace depth
+		if char == '{' {
+			braceCount++
+		} else if char == '}' {
+			braceCount--
+		}
+
+		currentStage.WriteRune(char)
+
+		// When we reach the end of a stage (braceCount returns to 0)
+		if braceCount == 0 && char == '}' {
+			// Look ahead to see if there's a comma
+			if i+1 < len(runes) {
+				// Skip whitespace
+				j := i + 1
+				for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n') {
+					j++
+				}
+				// If we find a comma, skip it by advancing i
+				if j < len(runes) && runes[j] == ',' {
+					i = j // This will skip the comma in the next iteration
+				}
+			}
+
+			// Add the completed stage
+			stage := strings.TrimSpace(currentStage.String())
+			if stage != "" {
+				stages = append(stages, stage)
+			}
+			currentStage.Reset()
+		}
+	}
+
+	// Add any remaining content as a stage
+	if currentStage.Len() > 0 {
+		stage := strings.TrimSpace(currentStage.String())
+		if stage != "" && stage != "," { // Don't add if it's just a comma
+			stages = append(stages, stage)
+		}
+		}
+
+	return stages, nil
 }
 
 // extractParenthesisContent extracts the content between matching parentheses,

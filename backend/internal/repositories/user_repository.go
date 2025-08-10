@@ -134,14 +134,14 @@ func (r *userRepository) UpdatePassword(userID, newPassword string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	update := bson.M{
 		"$set": bson.M{
 			"password":   newPassword,
 			"updated_at": primitive.NewDateTimeFromTime(time.Now()),
 		},
 	}
-	
+
 	_, err = r.userCollection.UpdateOne(
 		context.Background(),
 		bson.M{"_id": userIDPrimitive},

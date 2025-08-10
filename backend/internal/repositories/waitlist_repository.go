@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"neobase-ai/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"neobase-ai/internal/models"
 )
 
 type WaitlistRepository struct {

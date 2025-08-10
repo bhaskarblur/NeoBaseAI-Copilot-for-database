@@ -7,17 +7,18 @@ import (
 type ChatSettings struct {
 	AutoExecuteQuery bool `bson:"auto_execute_query" json:"auto_execute_query,omitempty"` // default is false, Execute query automatically when LLM response is received
 	ShareDataWithAI  bool `bson:"share_data_with_ai" json:"share_data_with_ai,omitempty"` // default is false, Don't share data with AI
+	NonTechMode      bool `bson:"non_tech_mode" json:"non_tech_mode,omitempty"`           // default is false, Enable non-technical mode for simplified responses
 }
 
 type Connection struct {
-	Type        string  `bson:"type" json:"type"`
-	Host        string  `bson:"host" json:"host"`
-	Port        *string `bson:"port" json:"port"`
-	Username    *string `bson:"username" json:"username"`
-	Password    *string `bson:"password" json:"-"` // Hide in JSON
-	Database    string  `bson:"database" json:"database"`
+	Type         string  `bson:"type" json:"type"`
+	Host         string  `bson:"host" json:"host"`
+	Port         *string `bson:"port" json:"port"`
+	Username     *string `bson:"username" json:"username"`
+	Password     *string `bson:"password" json:"-"` // Hide in JSON
+	Database     string  `bson:"database" json:"database"`
 	AuthDatabase *string `bson:"auth_database" json:"auth_database"` // Database to authenticate against
-	IsExampleDB bool    `bson:"is_example_db" json:"is_example_db"` // default is false, if true, then the database is an example database configs setup from environment variables
+	IsExampleDB  bool    `bson:"is_example_db" json:"is_example_db"` // default is false, if true, then the database is an example database configs setup from environment variables
 
 	// SSL/TLS Configuration
 	UseSSL         bool    `bson:"use_ssl" json:"use_ssl"`
@@ -51,5 +52,6 @@ func DefaultChatSettings() ChatSettings {
 	return ChatSettings{
 		AutoExecuteQuery: true,  // default is true, Execute query automatically when LLM response is received
 		ShareDataWithAI:  false, // default is false, Don't share data with AI
+		NonTechMode:      false, // default is false, Technical mode enabled by default
 	}
 }

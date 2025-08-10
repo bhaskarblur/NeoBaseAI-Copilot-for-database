@@ -39,7 +39,7 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 	}, nil
 }
 
-func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error) {
 	// Check if the context is cancelled
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -48,12 +48,15 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Convert messages to OpenAI format
 	openAIMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 
-	systemPrompt := ""
+	// Get the system prompt with non-tech mode if enabled
+	log.Printf("OpenAI GenerateResponse -> nonTechMode parameter: %v", nonTechMode)
+	systemPrompt := constants.GetSystemPrompt(constants.OpenAI, dbType, nonTechMode)
 	responseSchema := ""
 
 	for _, dbConfig := range c.DBConfigs {
 		if dbConfig.DBType == dbType {
-			systemPrompt = dbConfig.SystemPrompt
+			// Use the dynamically generated prompt instead of the stored one
+			// systemPrompt = dbConfig.SystemPrompt
 			responseSchema = dbConfig.Schema.(string)
 			break
 		}

@@ -8,7 +8,7 @@ import analyticsService from '../../services/analyticsService';
 import { Chat, Connection } from '../../types/chat';
 import { transformBackendMessage } from '../../types/messages';
 import ConfirmationModal from '../modals/ConfirmationModal';
-import ConnectionModal from '../modals/ConnectionModal';
+import ConnectionModal, { ModalTab } from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
@@ -120,6 +120,7 @@ export default function ChatWindow({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showEditConnection, setShowEditConnection] = useState(false);
+  const [openWithSettingsTab, setOpenWithSettingsTab] = useState(false);
   const { streamId, generateStreamId } = useStream();
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -1177,6 +1178,9 @@ export default function ChatWindow({
                     } else if (action === "fix_rollback_error") {
                       // Handle fix_rollback_error action
                       handleFixRollbackErrorAction(message);
+                    } else if (action === "open_settings") {
+                      setOpenWithSettingsTab(true);
+                      setShowEditConnection(true);
                     } else {
                       console.log(`Action not implemented: ${action}`);
                       toast.error(`There is no available action for this button: ${action}`);
@@ -1237,6 +1241,9 @@ export default function ChatWindow({
                 buttonCallback={(action) => {
                   if (action === "refresh_schema") {
                     setShowRefreshSchema(true);
+                  } else if (action === "open_settings") {
+                    setOpenWithSettingsTab(true);
+                    setShowEditConnection(true);
                   }
                 }}
               />
@@ -1331,7 +1338,11 @@ export default function ChatWindow({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <ConnectionModal
             initialData={chat}
-            onClose={() => setShowEditConnection(false)}
+            initialTab={openWithSettingsTab ? 'settings' : undefined}
+            onClose={() => {
+              setShowEditConnection(false);
+              setOpenWithSettingsTab(false);
+            }}
             onEdit={async (data, autoExecuteQuery) => {
               const result = await onEditConnection?.(chat.id, data!, autoExecuteQuery!);
               return { success: result?.success || false, error: result?.error };

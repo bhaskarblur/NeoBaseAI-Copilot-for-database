@@ -70,6 +70,16 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		})
 	}
 
+	// Get chat to access settings
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return nil, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	
+	log.Printf("ChatService -> Execute -> Chat settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+		chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
+
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
@@ -141,7 +151,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	}
 
 	// Generate LLM response
-	response, err := s.llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type)
+	response, err := s.llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode)
 	if err != nil {
 		if !synchronous || allowSSEUpdates {
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -411,6 +421,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			Queries:       dtos.ToQueryDto(existingMessage.Queries),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
+			NonTechMode:   existingMessage.NonTechMode,
 			CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
 			IsEdited:      existingMessage.IsEdited,
@@ -418,6 +429,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	}
 
 	log.Printf("processLLMResponse -> saving new message actionButtonsPtr: %v", actionButtonsPtr)
+	log.Printf("processLLMResponse -> Creating assistant message with NonTechMode=%v from chat settings", chat.Settings.NonTechMode)
 	// If no existing message found, create a new one
 	// Use the messageObjID that was already defined above
 	chatResponseMsg := &models.Message{
@@ -429,7 +441,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		Queries:       queriesPtr,
 		ActionButtons: actionButtonsPtr,
 		IsEdited:      false,
-		UserMessageId: &userMessageObjID, // Set the user message ID that this AI message is responding to
+		UserMessageId: &userMessageObjID,         // Set the user message ID that this AI message is responding to
+		NonTechMode:   chat.Settings.NonTechMode, // Store the non-tech mode setting with the message
 	}
 
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
@@ -464,6 +477,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
+				NonTechMode:   chatResponseMsg.NonTechMode,
 				CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
 			},
@@ -477,6 +491,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
+		NonTechMode:   chatResponseMsg.NonTechMode,
 		CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
 	}, nil
@@ -1420,8 +1435,9 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		// Get rollback query from LLM
 		llmResponse, err := s.llmClient.GenerateResponse(
 			ctx,
-			llmMessages,      // Pass the LLM messages array
-			conn.Config.Type, // Pass the database type
+			llmMessages,               // Pass the LLM messages array
+			conn.Config.Type,          // Pass the database type
+			chat.Settings.NonTechMode, // Pass the non-tech mode setting
 		)
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate rollback query: %v", err)

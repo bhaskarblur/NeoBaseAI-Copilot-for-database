@@ -891,6 +891,7 @@ func (h *ChatHandler) GetTables(c *gin.Context) {
 		Data:    response,
 	})
 }
+
 // @Summary Get query recommendations
 // @Description Get 3 AI-generated query recommendations based on database schema and context
 // @Produce json

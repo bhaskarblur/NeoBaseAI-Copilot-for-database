@@ -18,6 +18,7 @@ export interface BackendMessage {
     content: string;
     user_message_id?: string;
     is_edited: boolean;
+    non_tech_mode?: boolean;
     action_buttons?: ActionButton[];
     queries?: {
         id: string;
@@ -64,7 +65,8 @@ export const transformBackendMessage = (msg: BackendMessage): Message => {
         is_streaming: false,
         is_edited: msg.is_edited,
         created_at: msg.created_at,
-        action_buttons: msg.action_buttons || []
+        action_buttons: msg.action_buttons || [],
+        non_tech_mode: msg.non_tech_mode
     };
 };
 

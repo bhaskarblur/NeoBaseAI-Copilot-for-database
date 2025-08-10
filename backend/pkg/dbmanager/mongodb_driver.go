@@ -1904,14 +1904,8 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 					}
 				}
 
-				// Replace "new Date(...)" with string placeholder before JSON parsing
-				// First clean up the format to ensure it's valid JSON
-				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
-				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
-
-				// Also replace any remaining date objects
-				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
-				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+				// Don't replace dates with placeholders - let processObjectIds handle them
+				// This preserves the date values for proper BSON conversion
 
 				log.Printf("MongoDBDriver -> ExecuteQuery -> Processed stage: %s", processedStage)
 				processedStages = append(processedStages, processedStage)
@@ -1921,14 +1915,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			jsonStr := "[" + strings.Join(processedStages, ",") + "]"
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
 
-			// Fix any remaining date expressions that might have slipped through
-			// This ensures we don't have "new Date(...)" in the JSON string
-			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
-			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
-
-			// Extra fix for the specific pattern seen in logs
-			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
-			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+			// Don't replace dates - processObjectIds will handle them properly
 
 			// Fix any corrupted field names with extra double quotes
 			// This matches patterns like ""user.email"" and replaces them with "user.email"
@@ -1937,10 +1924,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
-			// Make sure to catch any other variations
-			for strings.Contains(jsonStr, "new Date") {
-				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
-			}
+			// Don't replace dates - let processObjectIds handle proper BSON conversion
 
 			// Try to parse the cleaned-up JSON
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
@@ -1963,6 +1947,17 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		if err := processDotNotationInAggregation(pipeline); err != nil {
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
+		
+		// Process ObjectIds and Dates in the pipeline
+		for _, stage := range pipeline {
+			if err := processObjectIds(stage); err != nil {
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing ObjectIds/Dates in pipeline: %v", err)
+			}
+		}
+		
+		// Debug: Log the final pipeline before execution
+		pipelineJSON, _ := json.Marshal(pipeline)
+		log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline: %s", string(pipelineJSON))
 
 		// Execute the aggregation
 		cursor, err := collection.Aggregate(ctx, pipeline)
