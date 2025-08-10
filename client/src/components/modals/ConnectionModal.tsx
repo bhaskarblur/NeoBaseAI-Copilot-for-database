@@ -1158,7 +1158,7 @@ SSH_PRIVATE_KEY=your_private_key`}
               className="neo-button-secondary flex-1"
               disabled={isLoading}
             >
-              Cancel
+              Close
             </button>
           </div>
           </>

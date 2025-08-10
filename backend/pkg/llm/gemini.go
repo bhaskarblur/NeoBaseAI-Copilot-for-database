@@ -84,10 +84,26 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		case "user":
 			if userMsg, ok := msg.Content["user_message"].(string); ok {
 				content = userMsg
+				// Add non-tech mode context if the mode differs from current request
+				if msg.NonTechMode != nonTechMode {
+					if msg.NonTechMode {
+						content = "[This message was sent in NON-TECHNICAL MODE] " + content
+					} else {
+						content = "[This message was sent in TECHNICAL MODE] " + content
+					}
+				}
 			}
 		case "assistant":
 			if assistantMsg, ok := msg.Content["assistant_response"].(map[string]interface{}); ok {
 				content = formatAssistantResponse(assistantMsg)
+				// Add non-tech mode context if the mode differs from current request
+				if msg.NonTechMode != nonTechMode {
+					if msg.NonTechMode {
+						content = "[This response was generated in NON-TECHNICAL MODE]\n" + content
+					} else {
+						content = "[This response was generated in TECHNICAL MODE]\n" + content
+					}
+				}
 			}
 		case "system":
 			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {

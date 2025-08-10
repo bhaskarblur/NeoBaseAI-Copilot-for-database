@@ -454,12 +454,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		"assistant_response": jsonResponse,
 	}
 	llmMsg := &models.LLMMessage{
-		Base:      models.NewBase(),
-		UserID:    userObjID,
-		ChatID:    chatObjID,
-		MessageID: chatResponseMsg.ID,
-		Content:   formattedJsonResponse,
-		Role:      string(constants.MessageTypeAssistant),
+		Base:        models.NewBase(),
+		UserID:      userObjID,
+		ChatID:      chatObjID,
+		MessageID:   chatResponseMsg.ID,
+		NonTechMode: chat.Settings.NonTechMode, // Store the non-tech mode setting with the LLM message
+		Content:     formattedJsonResponse,
+		Role:        string(constants.MessageTypeAssistant),
 	}
 	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
 		log.Printf("processLLMResponse -> Error saving LLM message: %v", err)

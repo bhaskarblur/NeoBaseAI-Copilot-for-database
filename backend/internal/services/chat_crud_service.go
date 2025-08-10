@@ -597,11 +597,12 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), content)
 	
 	llmMsg := &models.LLMMessage{
-		Base:      models.NewBase(),
-		UserID:    userObjID,
-		ChatID:    chatObjID,
-		MessageID: msg.ID,
-		Role:      string(constants.MessageTypeUser),
+		Base:        models.NewBase(),
+		UserID:      userObjID,
+		ChatID:      chatObjID,
+		MessageID:   msg.ID,
+		Role:        string(constants.MessageTypeUser),
+		NonTechMode: chat.Settings.NonTechMode, // Store the non-tech mode setting with the LLM message
 		Content: map[string]interface{}{
 			"user_message": contentWithTimestamp,
 		},
@@ -953,12 +954,13 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 			for i, llmMsg := range allLLMMessages {
 				// Create a new LLM message with the same content but for the new chat
 				newLLMMsg := &models.LLMMessage{
-					ChatID:   newChat.ID,
-					UserID:   userObjID,
-					Role:     llmMsg.Role,
-					Content:  llmMsg.Content, // Copy the content map
-					IsEdited: llmMsg.IsEdited,
-					Base:     models.NewBase(), // Create a new Base with new ID and timestamps
+					ChatID:      newChat.ID,
+					UserID:      userObjID,
+					Role:        llmMsg.Role,
+					Content:     llmMsg.Content, // Copy the content map
+					IsEdited:    llmMsg.IsEdited,
+					NonTechMode: llmMsg.NonTechMode, // Preserve the non-tech mode setting
+					Base:        models.NewBase(),    // Create a new Base with new ID and timestamps
 				}
 
 				// Set unique timestamps
