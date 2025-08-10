@@ -15,6 +15,7 @@ type Message struct {
 	IsEdited      bool                `bson:"is_edited" json:"is_edited"` // if the message content has been edited, only for user messages
 	Queries       *[]Query            `bson:"queries,omitempty" json:"queries,omitempty"`
 	ActionButtons *[]ActionButton     `bson:"action_buttons,omitempty" json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
+	NonTechMode   bool                `bson:"non_tech_mode" json:"non_tech_mode"`                       // Whether this message was generated in non-tech mode
 	Base          `bson:",inline"`
 }
 

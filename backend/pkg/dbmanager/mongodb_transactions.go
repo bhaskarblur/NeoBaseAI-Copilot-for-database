@@ -1360,24 +1360,30 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 			// If direct parsing fails, handle MongoDB syntax with unquoted keys
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
-			// Process each stage of the pipeline individually
-			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
-			stageMatches := stagesRegex.FindAllStringSubmatch(paramsStr, -1)
+			// Use the new parser to properly extract stages
+			stages, parseErr := ParseAggregationPipeline(paramsStr)
+			if parseErr != nil {
+				return &QueryExecutionResult{
+					Error: &dtos.QueryError{
+						Message: fmt.Sprintf("Failed to parse aggregation pipeline: %v", parseErr),
+						Code:    "INVALID_PARAMETERS",
+					},
+				}
+			}
 
 			// Create an array of processed stages
-			processedStages := make([]string, 0, len(stageMatches))
+			processedStages := make([]string, 0, len(stages))
 
-			for _, match := range stageMatches {
-				if len(match) < 2 {
-					continue
-				}
-
-				// Get the stage content and wrap it in curly braces
-				stageContent := "{" + match[1] + "}"
-
+			for i, stageContent := range stages {
+				// Trim any whitespace and trailing commas from the stage
+				stageContent = strings.TrimSpace(stageContent)
+				stageContent = strings.TrimSuffix(stageContent, ",")
+				
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processing stage %d: %s", i, stageContent)
+				
 				// Check if this is a $project stage
 				if strings.Contains(stageContent, "$project") {
-					log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected $project stage in pipeline: %s", stageContent)
+					log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected $project stage in pipeline")
 				}
 
 				// Process the stage content
@@ -1391,29 +1397,26 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					}
 				}
 
-				// Replace "new Date(...)" with string placeholder before JSON parsing
-				dateObjPattern := regexp.MustCompile(`new\s+Date\(([^)]*)\)`)
-				processedStage = dateObjPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
+				// Clean up the processed stage - remove any trailing commas or whitespace
+				processedStage = strings.TrimSpace(processedStage)
+				processedStage = strings.TrimSuffix(processedStage, ",")
+				
+				// Don't replace dates with placeholders - let processObjectIds handle them
+				// This preserves the date values for proper BSON conversion
 
-				// Also replace any remaining date objects
-				dateJsonPattern := regexp.MustCompile(`\{\s*"\$date"\s*:\s*"[^"]+"\s*\}`)
-				processedStage = dateJsonPattern.ReplaceAllString(processedStage, `"__DATE_PLACEHOLDER__"`)
-
-				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage: %s", processedStage)
-				processedStages = append(processedStages, processedStage)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage %d: %s", i, processedStage)
+				
+				// Only add non-empty stages
+				if processedStage != "" && processedStage != "," {
+					processedStages = append(processedStages, processedStage)
+				}
 			}
 
 			// Combine the processed stages into a valid JSON array
-			jsonStr := "[" + strings.Join(processedStages, ",") + "]"
+			jsonStr := "[" + strings.Join(processedStages, ", ") + "]"
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted aggregation pipeline: %s", jsonStr)
 
-			// Fix any remaining date expressions that might have slipped through
-			dateRegex := regexp.MustCompile(`new\s+Date\((?:[^)]*)\)`)
-			jsonStr = dateRegex.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
-
-			// Extra fix for the specific pattern seen in logs
-			specificDatePattern := regexp.MustCompile(`new\s+Date\(["']__DATE_PLACEHOLDER__["']\)`)
-			jsonStr = specificDatePattern.ReplaceAllString(jsonStr, `"__DATE_PLACEHOLDER__"`)
+			// Don't replace dates - processObjectIds will handle them properly
 
 			// Fix any corrupted field names with extra double quotes
 			// This matches patterns like ""user.email"" and replaces them with "user.email"
@@ -1422,10 +1425,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
-			// Make sure to catch any other variations of date expressions
-			for strings.Contains(jsonStr, "new Date") {
-				jsonStr = strings.Replace(jsonStr, "new Date", `"__DATE_PLACEHOLDER__"`, -1)
-			}
+			// Don't replace dates - let processObjectIds handle proper BSON conversion
 
 			// Try to parse the cleaned-up JSON
 			if err := json.Unmarshal([]byte(jsonStr), &pipeline); err != nil {
@@ -1448,14 +1448,34 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		if err := processDotNotationInAggregation(pipeline); err != nil {
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
+		
+		// Process ObjectIds and Dates in the pipeline
+		for _, stage := range pipeline {
+			if err := processObjectIds(stage); err != nil {
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing ObjectIds/Dates in pipeline: %v", err)
+			}
+		}
 
 		// Execute the aggregation
 		cursor, err := collection.Aggregate(ctx, pipeline)
 		if err != nil {
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error executing aggregation: %v", err)
+			
+			// Log the actual pipeline that failed for debugging
+			pipelineJSON, _ := json.Marshal(pipeline)
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> Failed pipeline: %s", string(pipelineJSON))
+			
+			// Check for specific MongoDB errors and provide better error messages
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "$dateToString is not allowed") {
+				errMsg = "Date formatting operators like $dateToString may not be supported in this MongoDB deployment. Consider using application-level date formatting instead."
+			} else if strings.Contains(errMsg, "unknown operator") {
+				errMsg = fmt.Sprintf("MongoDB operator error: %v. Some operators may not be supported in your MongoDB version or deployment type.", err)
+			}
+			
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
-					Message: fmt.Sprintf("Failed to execute aggregation: %v", err),
+					Message: errMsg,
 					Code:    "EXECUTION_ERROR",
 				},
 			}

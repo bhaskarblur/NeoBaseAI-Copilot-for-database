@@ -213,6 +213,11 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	if req.Settings.ShareDataWithAI != nil {
 		settings.ShareDataWithAI = *req.Settings.ShareDataWithAI
 	}
+	if req.Settings.NonTechMode != nil {
+		settings.NonTechMode = *req.Settings.NonTechMode
+	}
+	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode)
 	// Create chat with connection
 	chat := models.NewChat(userObjID, connection, settings)
 	if err := s.chatRepo.Create(chat); err != nil {
@@ -420,6 +425,10 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			log.Printf("ChatService -> Update -> ShareDataWithAI: %v", *req.Settings.ShareDataWithAI)
 			chat.Settings.ShareDataWithAI = *req.Settings.ShareDataWithAI
 		}
+		if req.Settings.NonTechMode != nil {
+			log.Printf("ChatService -> Update -> NonTechMode: %v", *req.Settings.NonTechMode)
+			chat.Settings.NonTechMode = *req.Settings.NonTechMode
+		}
 	}
 
 	// Update the chat
@@ -540,6 +549,8 @@ func (s *chatService) List(userID string, page, pageSize int) (*dtos.ChatListRes
 	}
 
 	for i, chat := range chats {
+		log.Printf("ChatService -> List -> Chat %s settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+			chat.ID.Hex(), chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
 		response.Chats[i] = *s.buildChatResponse(chat)
 	}
 
@@ -581,14 +592,19 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}
 
 	// Make LLM Message
+	// Add current timestamp context to help LLM understand relative dates
+	currentTime := time.Now()
+	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), content)
+	
 	llmMsg := &models.LLMMessage{
-		Base:      models.NewBase(),
-		UserID:    userObjID,
-		ChatID:    chatObjID,
-		MessageID: msg.ID,
-		Role:      string(constants.MessageTypeUser),
+		Base:        models.NewBase(),
+		UserID:      userObjID,
+		ChatID:      chatObjID,
+		MessageID:   msg.ID,
+		Role:        string(constants.MessageTypeUser),
+		NonTechMode: chat.Settings.NonTechMode, // Store the non-tech mode setting with the LLM message
 		Content: map[string]interface{}{
-			"user_message": content,
+			"user_message": contentWithTimestamp,
 		},
 	}
 	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
@@ -693,8 +709,12 @@ func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, message
 	}
 
 	log.Printf("UpdateMessage -> llmMsg: %+v", llmMsg)
+	// Add current timestamp context to help LLM understand relative dates
+	currentTime := time.Now()
+	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), req.Content)
+	
 	llmMsg.Content = map[string]interface{}{
-		"user_message": req.Content,
+		"user_message": contentWithTimestamp,
 	}
 
 	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
@@ -934,12 +954,13 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 			for i, llmMsg := range allLLMMessages {
 				// Create a new LLM message with the same content but for the new chat
 				newLLMMsg := &models.LLMMessage{
-					ChatID:   newChat.ID,
-					UserID:   userObjID,
-					Role:     llmMsg.Role,
-					Content:  llmMsg.Content, // Copy the content map
-					IsEdited: llmMsg.IsEdited,
-					Base:     models.NewBase(), // Create a new Base with new ID and timestamps
+					ChatID:      newChat.ID,
+					UserID:      userObjID,
+					Role:        llmMsg.Role,
+					Content:     llmMsg.Content, // Copy the content map
+					IsEdited:    llmMsg.IsEdited,
+					NonTechMode: llmMsg.NonTechMode, // Preserve the non-tech mode setting
+					Base:        models.NewBase(),    // Create a new Base with new ID and timestamps
 				}
 
 				// Set unique timestamps
@@ -1299,6 +1320,9 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 	// Decrypt connection details for the response
 	utils.DecryptConnection(&connectionCopy)
 
+	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v", 
+		chat.ID.Hex(), chat.Settings.NonTechMode)
+
 	return &dtos.ChatResponse{
 		ID:     chat.ID.Hex(),
 		UserID: chat.UserID.Hex(),
@@ -1322,6 +1346,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 		Settings: dtos.ChatSettingsResponse{
 			AutoExecuteQuery: chat.Settings.AutoExecuteQuery,
 			ShareDataWithAI:  chat.Settings.ShareDataWithAI,
+			NonTechMode:      chat.Settings.NonTechMode,
 		},
 	}
 }
@@ -1345,6 +1370,7 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		Queries:       queriesDto,
 		ActionButtons: actionButtonsDto,
 		IsEdited:      msg.IsEdited,
+		NonTechMode:   msg.NonTechMode,
 		CreatedAt:     msg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     msg.UpdatedAt.Format(time.RFC3339),
 	}

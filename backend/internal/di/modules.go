@@ -150,27 +150,27 @@ func Initialize() {
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypePostgreSQL),
-						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypePostgreSQL, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeYugabyteDB,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
-						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMySQL),
-						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeClickhouse),
-						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeClickhouse, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeMongoDB,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMongoDB),
-						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMongoDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMongoDB, false),
 					},
 				},
 			})
@@ -189,27 +189,27 @@ func Initialize() {
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypePostgreSQL),
-						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypePostgreSQL, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeYugabyteDB,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeYugabyteDB),
-						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeMySQL),
-						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMySQL, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeClickhouse),
-						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeClickhouse, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeMongoDB,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeMongoDB),
-						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMongoDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMongoDB, false),
 					},
 				},
 			})

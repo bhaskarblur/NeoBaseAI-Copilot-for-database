@@ -564,7 +564,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 				uri += "?authSource=" + url.QueryEscape(*config.AuthDatabase)
 			}
 		}
-		
+
 		// Log the final URI (with sensitive parts masked)
 		maskedUri := uri
 		if config.Password != nil && *config.Password != "" {

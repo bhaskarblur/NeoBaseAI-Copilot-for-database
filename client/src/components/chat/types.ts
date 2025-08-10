@@ -47,6 +47,7 @@ export interface Message {
     is_streaming?: boolean;
     user_message_id?: string;
     action_at?: string;
+    non_tech_mode?: boolean;
 }
 
 export interface LoadingStep {

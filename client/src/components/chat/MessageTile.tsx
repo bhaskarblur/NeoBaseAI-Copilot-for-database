@@ -11,6 +11,7 @@ import { Message, QueryResult } from './types';
 import MarkdownRenderer from './MarkdownRenderer';
 import { formatActionAt } from '../../utils/message';
 import analyticsService from '../../services/analyticsService';
+import { highlightSearchText } from '../../utils/highlightSearch';
 
 interface QueryState {
     isExecuting: boolean;
@@ -48,6 +49,10 @@ interface MessageTileProps {
     isFirstMessage?: boolean;
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
+    searchQuery?: string;
+    isSearchResult?: boolean;
+    isCurrentSearchResult?: boolean;
+    searchResultRefs?: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
     buttonCallback?: (action: string) => void;
     userId?: string;
     userName?: string;
@@ -101,6 +106,10 @@ export default function MessageTile({
     buttonCallback,
     userId,
     userName,
+    searchQuery,
+    isSearchResult,
+    isCurrentSearchResult,
+    searchResultRefs,
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json'>>({});
@@ -871,8 +880,19 @@ export default function MessageTile({
         const cellId = `${rowId}-${column}`;
         const isExpanded = expandedCells[cellId];
 
-        if (value === null) return <span className="text-yellow-400">null</span>;
-        if (value === undefined) return <span className="text-yellow-400">undefined</span>;
+        if (value === null) {
+            // Show "No Data found" in non-tech mode
+            // Show "-" in non-tech mode for null values in table cells
+            return message.non_tech_mode ? 
+                <span className="text-gray-400">-</span> : 
+                <span className="text-yellow-400">null</span>;
+        }
+        if (value === undefined) {
+            // Show "-" in non-tech mode for undefined values in table cells
+            return message.non_tech_mode ? 
+                <span className="text-gray-400">-</span> : 
+                <span className="text-yellow-400">undefined</span>;
+        }
 
         if (typeof value === 'object' && value !== null) {
             return <NestedJsonCell data={value} />;
@@ -893,7 +913,7 @@ export default function MessageTile({
 
             if (value.length > 140) {
                 const maxLength = Math.min(250, value.length);
-                const truncatedText = isExpanded ? value : value.substring(0, maxLength);
+                const truncatedText = isExpanded ? value : value.substring(0, maxLength);    
                 return (
                     <span onClick={() => toggleCellExpansion(cellId)} className="cursor-pointer">
                         <span className="text-green-400">"{truncatedText}</span>
@@ -920,7 +940,9 @@ export default function MessageTile({
 
     const renderTableView = (data: any[]) => {
         if (!data || data.length === 0) {
-            return <div className="text-gray-500">No data to display</div>;
+            // Show "No Data found" in non-tech mode
+            const displayMessage = message.non_tech_mode ? "No Data found" : "No data to display";
+            return <div className="text-gray-500">{displayMessage}</div>;
         }
 
         const columns = Object.keys(data[0]);
@@ -1025,7 +1047,7 @@ export default function MessageTile({
                             currentPageData.length > 0 ? (
                                 renderTableView(currentPageData)
                             ) : (
-                                <div className="text-gray-500">No data to display</div>
+                                <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No data to display"}</div>
                             )
                         ) : (
                             <pre className="overflow-x-auto whitespace-pre-wrap">
@@ -1233,8 +1255,14 @@ export default function MessageTile({
         }
 
         if (result && typeof result === 'object') {
-            if ('results' in result && Array.isArray(result.results)) {
-                return result.results;
+            if ('results' in result) {
+                // Handle null results in non-tech mode
+                if (result.results === null && message.non_tech_mode) {
+                    return [];
+                }
+                if (Array.isArray(result.results)) {
+                    return result.results;
+                }
             }
             if ('rowsAffected' in result || 'message' in result) {
                 // For DML queries that return rowsAffected or message
@@ -1253,6 +1281,10 @@ export default function MessageTile({
         const indentStr = '  '.repeat(indent);
         
         if (data === null) {
+            // Show "No Data found" for null in non-tech mode
+            if (message.non_tech_mode) {
+                return <span className="text-gray-400">No Data found</span>;
+            }
             return <span className="text-yellow-400">null</span>;
         }
         
@@ -1362,15 +1394,36 @@ export default function MessageTile({
 
         return (
             <div>
-                <p className="mb-4 mt-4 font-base text-base">
-                    <span className="text-black font-semibold">Explanation:</span> {isCurrentlyStreaming && isDescriptionStreaming
-                        ? currentDescription
-                        : query.description}
+                <p className="mb-4 mt-4 font-base text-base"
+                    ref={el => {
+                        if (searchResultRefs && el) {
+                            searchResultRefs.current[`explanation-${message.id}-${index}`] = el;
+                        }
+                    }}>
+                    <span className="text-black font-semibold">Explanation:</span> {searchQuery 
+                        ? highlightSearchText(
+                            isCurrentlyStreaming && isDescriptionStreaming
+                                ? currentDescription
+                                : query.description,
+                            searchQuery
+                        )
+                        : (isCurrentlyStreaming && isDescriptionStreaming
+                            ? currentDescription
+                            : query.description)
+                    }
                 </p>
-                <div key={index} className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" style={{ minWidth: '100%' }}>
+                <div 
+                    key={index} 
+                    className="mt-4 bg-black text-white rounded-lg font-mono text-sm overflow-hidden w-full" 
+                    style={{ minWidth: '100%' }}
+                    ref={el => {
+                        if (searchResultRefs && el) {
+                            searchResultRefs.current[`query-${message.id}-${index}`] = el;
+                        }
+                    }}>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-4 pt-4">
                         <div className="flex justify-between items-center md:justify-centre gap-2">
-                            <span>Query {index + 1}:</span>
+                            <span>{message.non_tech_mode ? `Action ${index + 1}:` : `Query ${index + 1}:`}</span>
                             {query.is_edited && (
                                 <span className="text-xs bg-gray-500/20 text-gray-300 px-2 py-0.5 rounded">
                                     Edited
@@ -1517,19 +1570,38 @@ export default function MessageTile({
                             </div>
                         </div>
                     ) : (
-                        <pre className={`
-                    text-sm overflow-x-auto p-4 border-t border-gray-700
-                        ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
-                    `}>
-                            <code className="whitespace-pre-wrap break-words">
-                                {isCurrentlyStreaming && isQueryStreaming
-                                    ? removeDuplicateQueries(currentQuery)
-                                    : removeDuplicateQueries(query.query)}
-                            </code>
-                        </pre>
+                        !message.non_tech_mode ? (
+                            <pre className={`
+                        text-sm overflow-x-auto p-4 border-t border-gray-700
+                            ${isCurrentlyStreaming && isQueryStreaming ? 'animate-pulse duration-300' : ''}
+                        `}>
+                                <code className="whitespace-pre-wrap break-words">
+                                    {searchQuery 
+                                        ? highlightSearchText(
+                                            isCurrentlyStreaming && isQueryStreaming
+                                                ? removeDuplicateQueries(currentQuery)
+                                                : removeDuplicateQueries(query.query),
+                                            searchQuery
+                                        )
+                                        : (isCurrentlyStreaming && isQueryStreaming
+                                            ? removeDuplicateQueries(currentQuery)
+                                            : removeDuplicateQueries(query.query))
+                                    }
+                                </code>
+                            </pre>
+                        ) : (
+                            <div>
+                            </div>
+                        )
                     )}
                     {(query.execution_result || query.example_result || query.error || queryState.isExecuting) && (
-                        <div className="border-t border-gray-700 mt-2 w-full">
+                        <div 
+                            className="border-t border-gray-700 mt-2 w-full"
+                            ref={el => {
+                                if (searchResultRefs && el) {
+                                    searchResultRefs.current[`result-${message.id}-${index}`] = el;
+                                }
+                            }}>
                             {queryState.isExecuting ? (
                                 <div className="flex items-center justify-center p-8">
                                     <Loader className="w-8 h-8 animate-spin text-gray-400" />
@@ -1784,11 +1856,11 @@ export default function MessageTile({
                                         <>
                                             {query.error ? (
                                                 <div className="bg-neo-error/10 text-neo-error p-4 rounded-lg mb-6">
-                                                    <div className="font-bold mb-2">{query.error.code}</div>
-                                                    {query.error.message != query.error.details && <div className="mb-2">{query.error.message}</div>}
+                                                    <div className="font-bold mb-2">{searchQuery ? highlightSearchText(query.error.code, searchQuery) : query.error.code}</div>
+                                                    {query.error.message != query.error.details && <div className="mb-2">{searchQuery ? highlightSearchText(query.error.message, searchQuery) : query.error.message}</div>}
                                                     {query.error.details && (
                                                         <div className="text-sm opacity-80 border-t border-neo-error/20 pt-2 mt-2">
-                                                            {query.error.details}
+                                                            {searchQuery ? highlightSearchText(query.error.details, searchQuery) : query.error.details}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1802,13 +1874,13 @@ export default function MessageTile({
                                                             <div className="w-full">
                                                                 {shouldShowExampleResult ? (
                                                                     resultToShow ? renderTableView(parseResults(resultToShow)) : (
-                                                                        <div className="text-gray-500">No example data available</div>
+                                                                        <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No example data available"}</div>
                                                                     )
                                                                 ) : (
                                                                     resultToShow ? (
                                                                         renderQueryResult(resultToShow, query.id)
                                                                     ) : (
-                                                                        <div className="text-gray-500">No data to display</div>
+                                                                        <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No data to display"}</div>
                                                                     )
                                                                 )}
                                                             </div>
@@ -1820,13 +1892,13 @@ export default function MessageTile({
                                                                             {renderColoredJson(parseResults(resultToShow))}
                                                                         </pre>
                                                                     ) : (
-                                                                        <div className="text-gray-500">No example data available</div>
+                                                                        <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No example data available"}</div>
                                                                     )
                                                                 ) : (
                                                                     resultToShow ? (
                                                                         renderQueryResult(resultToShow, query.id)
                                                                     ) : (
-                                                                        <div className="text-gray-500">No data to display</div>
+                                                                        <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No data to display"}</div>
                                                                     )
                                                                 )}
                                                             </div>
@@ -2002,12 +2074,18 @@ export default function MessageTile({
     };
 
     return (
-        <div className={`
+        <div 
+            className={`
                 py-4 md:py-6
                 ${isFirstMessage ? 'first:pt-0' : ''}
                 w-full
                 relative
-              `}>
+              `}
+            ref={el => {
+                if (searchResultRefs && el) {
+                    searchResultRefs.current[`msg-${message.id}`] = el;
+                }
+            }}>
             <div className={`
         group flex items-center relative
         ${message.type === 'user' ? 'justify-end' : 'justify-start'}
@@ -2199,9 +2277,12 @@ export default function MessageTile({
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                  <div className='flex flex-col gap-1'>
                                     {message.type === 'user' ? (
-                                        <p className='text-lg whitespace-pre-wrap break-words'>{removeDuplicateContent(message.content)}</p>) :
+                                        <p className='text-lg whitespace-pre-wrap break-words'>
+                                            {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
+                                        </p>) :
                                     (   <MarkdownRenderer 
                                             markdown={removeDuplicateContent(message.content)}
+                                            searchQuery={searchQuery}
                                         />
                                     )
                                     }
@@ -2246,6 +2327,46 @@ export default function MessageTile({
                                                     {button.label}
                                                 </button>
                                             ))}
+                                        </div>
+                                    )}
+                                    
+                                    {message.type === 'assistant' && message.content.length > 0 && message.id !== 'welcome-message' && (
+                                        <div className="mt-4 group/tooltip">
+                                            <p className="text-sm text-gray-700 flex items-center gap-1">
+                                                <span className="inline-flex items-center">
+                                                    <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                    This response was generated in 
+                                                </span>
+                                                <div className="relative inline-block">
+                                                    <span 
+                                                        className={`font-semibold px-2 py-0.5 rounded cursor-help ${message.non_tech_mode ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}
+                                                    >
+                                                        {message.non_tech_mode ? 'Non-Technical' : 'Technical'}
+                                                    </span>
+                                                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover/tooltip:visible group-hover/tooltip:opacity-100 transition-all duration-200 w-64 z-50 pointer-events-none">
+                                                        {message.non_tech_mode 
+                                                            ? 'Non-Technical Mode: Generates simple, natural language queries that are easy to understand. Perfect for users who want to interact with data without knowing database syntax.'
+                                                            : 'Technical Mode: Generates raw database queries with full syntax. Ideal for developers and technical users who want direct control over database operations.'
+                                                        }
+                                                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+                                                            <div className="border-4 border-transparent border-t-gray-900"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                Mode. You can change it for this chat from
+                                                <button 
+                                                    onClick={() => {
+                                                        if (buttonCallback) {
+                                                            buttonCallback('open_settings');
+                                                        }
+                                                    }}
+                                                    className="text-blue-600 hover:text-blue-700 underline text-sm"
+                                                >
+                                                    here
+                                                </button>
+                                            </p>
                                         </div>
                                     )}
                         

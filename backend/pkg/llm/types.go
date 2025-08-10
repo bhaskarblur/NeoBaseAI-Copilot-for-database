@@ -15,7 +15,7 @@ type Message struct {
 
 // Client defines the interface for LLM interactions
 type Client interface {
-	GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error)
+	GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error)
 	GenerateRecommendations(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error)
 	GetModelInfo() ModelInfo
 }

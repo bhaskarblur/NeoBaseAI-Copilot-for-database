@@ -374,8 +374,8 @@ function AppContent() {
     });
 
     try {
-      // Check if connection details have changed
-      const credentialsChanged = selectedConnection &&
+      // Check if connection details have changed (only if data is provided)
+      const credentialsChanged = data && selectedConnection &&
         (selectedConnection.connection.database !== data.database ||
         selectedConnection.connection.host !== data.host ||
         selectedConnection.connection.port !== data.port ||
@@ -1009,7 +1009,8 @@ function AppContent() {
                         is_streaming: true,
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
-                        action_at: response.data.action_at
+                        action_at: response.data.action_at,
+                        non_tech_mode: response.data.non_tech_mode
                       };
                     }
                     return msg;
@@ -1053,7 +1054,8 @@ function AppContent() {
                   is_streaming: true,
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
-                  action_at: response.data.action_at
+                  action_at: response.data.action_at,
+                  non_tech_mode: response.data.non_tech_mode
                 };
 
                 // Add the new message to the array

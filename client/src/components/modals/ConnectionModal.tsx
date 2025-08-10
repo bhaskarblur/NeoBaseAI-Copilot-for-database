@@ -8,10 +8,11 @@ import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab } from './
 type ConnectionType = 'basic' | 'ssh';
 
 // Modal tab type
-type ModalTab = 'connection' | 'schema' | 'settings';
+export type ModalTab = 'connection' | 'schema' | 'settings';
 
 interface ConnectionModalProps {
   initialData?: Chat;
+  initialTab?: ModalTab;
   onClose: () => void;
   onEdit?: (data?: Connection, settings?: ChatSettings) => Promise<{ success: boolean, error?: string }>;
   onSubmit: (data: Connection, settings: ChatSettings) => Promise<{ 
@@ -39,13 +40,14 @@ export interface FormErrors {
 
 export default function ConnectionModal({ 
   initialData, 
+  initialTab,
   onClose, 
   onEdit, 
   onSubmit,
   onUpdateSelectedCollections,
 }: ConnectionModalProps) {
   // Modal tab state to toggle between Connection, Schema, and Settings
-  const [activeTab, setActiveTab] = useState<ModalTab>('connection');
+  const [activeTab, setActiveTab] = useState<ModalTab>(initialTab || 'connection');
   
   // Connection type state to toggle between basic and SSH tabs (within Connection tab)
   const [connectionType, setConnectionType] = useState<ConnectionType>('basic');
@@ -105,6 +107,11 @@ export default function ConnectionModal({
       ? initialData.settings.share_data_with_ai 
       : false
   );
+  const [nonTechMode, setNonTechMode] = useState<boolean>(
+    initialData?.settings.non_tech_mode !== undefined 
+      ? initialData.settings.non_tech_mode 
+      : false
+  );
   // Refs for MongoDB URI inputs
   const mongoUriInputRef = useRef<HTMLInputElement>(null);
   const mongoUriSshInputRef = useRef<HTMLInputElement>(null);
@@ -132,6 +139,9 @@ export default function ConnectionModal({
       }
       if (initialData.settings.share_data_with_ai !== undefined) {
         setShareWithAI(initialData.settings.share_data_with_ai);
+      }
+      if (initialData.settings.non_tech_mode !== undefined) {
+        setNonTechMode(initialData.settings.non_tech_mode);
       }
       // Set the connection type tab based on whether SSH is enabled
       if (initialData.connection.ssh_enabled) {
@@ -376,7 +386,8 @@ export default function ConnectionModal({
       // Update the settings via the API
       const result = await onEdit(undefined, {
         auto_execute_query: autoExecuteQuery,
-        share_data_with_ai: shareWithAI
+        share_data_with_ai: shareWithAI,
+        non_tech_mode: nonTechMode
       });
       
       if (result?.success) {
@@ -505,7 +516,8 @@ export default function ConnectionModal({
 
         const result = await onEdit?.(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
-          share_data_with_ai: shareWithAI 
+          share_data_with_ai: shareWithAI,
+          non_tech_mode: nonTechMode 
         });
         console.log("edit result in connection modal", result);
         if (result?.success) {
@@ -525,7 +537,8 @@ export default function ConnectionModal({
         // For new connections, pass settings to onSubmit
         const result = await onSubmit(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
-          share_data_with_ai: shareWithAI 
+          share_data_with_ai: shareWithAI,
+          non_tech_mode: nonTechMode 
         });
         console.log("submit result in connection modal", result);
         if (result?.success) {
@@ -991,8 +1004,10 @@ SSH_PRIVATE_KEY=your_private_key`}
           <SettingsTab
             autoExecuteQuery={autoExecuteQuery}
             shareWithAI={shareWithAI}
+            nonTechMode={nonTechMode}
             setAutoExecuteQuery={setAutoExecuteQuery}
             setShareWithAI={setShareWithAI}
+            setNonTechMode={setNonTechMode}
           />
         );
       default:
@@ -1143,7 +1158,7 @@ SSH_PRIVATE_KEY=your_private_key`}
               className="neo-button-secondary flex-1"
               disabled={isLoading}
             >
-              Cancel
+              Close
             </button>
           </div>
           </>

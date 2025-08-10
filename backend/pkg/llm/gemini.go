@@ -44,7 +44,7 @@ func NewGeminiClient(config Config) (*GeminiClient, error) {
 	}, nil
 }
 
-func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string) (string, error) {
+func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error) {
 	// Check if the context is cancelled
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -53,13 +53,14 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	// Convert messages into parts for the Gemini API.
 	geminiMessages := make([]*genai.Content, 0)
 
-	// Add system prompt first
-	systemPrompt := ""
+	// Get the system prompt with non-tech mode if enabled
+	systemPrompt := constants.GetSystemPrompt(constants.Gemini, dbType, nonTechMode)
 	var responseSchema *genai.Schema
 
 	for _, dbConfig := range c.DBConfigs {
 		if dbConfig.DBType == dbType {
-			systemPrompt = dbConfig.SystemPrompt
+			// Use the dynamically generated prompt instead of the stored one
+			// systemPrompt = dbConfig.SystemPrompt
 			responseSchema = dbConfig.Schema.(*genai.Schema)
 			break
 		}
@@ -83,10 +84,26 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		case "user":
 			if userMsg, ok := msg.Content["user_message"].(string); ok {
 				content = userMsg
+				// Add non-tech mode context if the mode differs from current request
+				if msg.NonTechMode != nonTechMode {
+					if msg.NonTechMode {
+						content = "[This message was sent in NON-TECHNICAL MODE] " + content
+					} else {
+						content = "[This message was sent in TECHNICAL MODE] " + content
+					}
+				}
 			}
 		case "assistant":
 			if assistantMsg, ok := msg.Content["assistant_response"].(map[string]interface{}); ok {
 				content = formatAssistantResponse(assistantMsg)
+				// Add non-tech mode context if the mode differs from current request
+				if msg.NonTechMode != nonTechMode {
+					if msg.NonTechMode {
+						content = "[This response was generated in NON-TECHNICAL MODE]\n" + content
+					} else {
+						content = "[This response was generated in TECHNICAL MODE]\n" + content
+					}
+				}
 			}
 		case "system":
 			if schemaUpdate, ok := msg.Content["schema_update"].(string); ok {

@@ -20,6 +20,7 @@ type MessageResponse struct {
 	Queries       *[]Query        `json:"queries,omitempty"`
 	ActionButtons *[]ActionButton `json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
 	IsEdited      bool            `json:"is_edited"`
+	NonTechMode   bool            `json:"non_tech_mode"` // Whether this message was generated in non-tech mode
 	CreatedAt     string          `json:"created_at"`
 	UpdatedAt     string          `json:"updated_at"`
 }

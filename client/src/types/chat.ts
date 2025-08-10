@@ -67,4 +67,5 @@ export interface TablesResponse {
 export interface ChatSettings {
     auto_execute_query: boolean;
     share_data_with_ai: boolean;
+    non_tech_mode: boolean;
 }
