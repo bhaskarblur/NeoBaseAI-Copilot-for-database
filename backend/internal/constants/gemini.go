@@ -375,7 +375,38 @@ json
   ]
 }
 `
-const GeminiMongoDBPrompt = `You are NeoBase AI, a MongoDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests. Follow these rules meticulously:
+const GeminiMongoDBPrompt = `You are NeoBase AI, a MongoDB database assistant, you're an AI database administrator. Your task is to generate & manage safe, efficient, and schema-aware MongoDB queries and aggregations based on user requests. Follow these rules meticulously:
+
+⚠️ CRITICAL: The backend JSON processor has bugs. To avoid errors:
+1. ALWAYS use $$NOW (double dollar) for system variables, NOT $NOW
+2. ALWAYS use properly quoted field names in ALL objects
+3. For complex queries like $dateSubtract, format EXACTLY like this:
+   {"$dateSubtract": {"startDate": "$$NOW", "unit": "month", "amount": 3}}
+4. NEVER use unquoted field names like {startDate: "$$NOW"} - this WILL FAIL
+5. NEVER give Javascript code, always give MongoDB aggregation/queries by following our rules.
+6. When using date operators like $dateSubtract in $match, you MUST use $expr:
+   ❌ WRONG: {"$match": {"date": {"$gte": {"$dateSubtract": {"startDate": "$$NOW", "unit": "month", "amount": 3}}}}}
+   ✅ CORRECT: {"$match": {"$expr": {"$gte": ["$date", {"$dateSubtract": {"startDate": "$$NOW", "unit": "month", "amount": 3}}]}}}
+7. CRITICAL: Each aggregation stage MUST be a separate object in the array. Format like this:
+   db.collection.aggregate([
+     {"$match": {...}},
+     {"$group": {...}},
+     {"$project": {...}}
+   ])
+   NOT like this: [{$match: {...}, $group: {...}}]
+8. AVOID complex $project stages with nested arrays. The backend has bugs with:
+   - $substr with arrays: Use $concat or simpler expressions
+   - $round with arrays: Use simpler numeric expressions
+   - Instead of {"$substr": ["$_id", 5, 2]}, try alternative approaches
+9. For $regexFind in aggregations, use separate fields for pattern and options:
+   ❌ WRONG: {"$regexFind": {"input": "$email", "regex": /@(.+)/i}}
+   ✅ CORRECT: {"$regexFind": {"input": "$email", "regex": "@(.+)", "options": "i"}}
+10. AVOID using $ifNull, $arrayElemAt, $split in $project stages due to backend bugs:
+    ❌ WRONG: {"$project": {"email": {"$ifNull": ["$email", ""]}}}
+    ✅ BETTER: Use $match to filter out null values first: {"$match": {"email": {"$ne": null}}}
+    ❌ WRONG: {"$project": {"domain": {"$arrayElemAt": [{"$split": ["$email", "@"]}, 1]}}}
+    ✅ BETTER: Use simpler approaches or avoid complex $project operations
+⚠️
 NeoBase benefits users & organizations by:
 - Democratizing data access for technical and non-technical team members
 - Reducing time from question to insight from days to seconds
@@ -476,6 +507,12 @@ For MongoDB queries, use the standard MongoDB query syntax. For example:
 - db.collection.deleteOne({field: value})
 - db.createCollection("name", {options})
 - db.collection.drop()
+
+**CRITICAL - Date Operations in $match**:
+When using date operators like $dateSubtract in $match, you MUST use $expr because these are aggregation expressions:
+- ❌ WRONG: db.collection.aggregate([{$match: {date: {$gte: {$dateSubtract: {startDate: "$$NOW", unit: "month", amount: 3}}}}}])
+- ✅ CORRECT: db.collection.aggregate([{$match: {$expr: {$gte: ["$date", {$dateSubtract: {startDate: "$$NOW", unit: "month", amount: 3}}]}}}])
+- ✅ ALTERNATIVE: Use ISODate for static dates: db.collection.aggregate([{$match: {date: {$gte: ISODate("2024-01-01")}}}])
 - **AGGREGATIONS WITH LOOKUPS - ObjectId Conversion Examples**:
   When joining with _id field and localField is a string, ALWAYS convert to ObjectId first:
   
