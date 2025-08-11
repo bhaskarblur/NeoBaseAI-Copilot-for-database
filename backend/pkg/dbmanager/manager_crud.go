@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	cleanupInterval     = 10 * time.Minute // Check every 10 minutes
-	idleTimeout         = 15 * time.Minute // Close after 15 minutes of inactivity
-	schemaCheckInterval = 24 * time.Hour   // Check every 24 hour
+	cleanupInterval     = 10 * time.Minute   // Check every 10 minutes
+	idleTimeout         = 15 * time.Minute   // Close after 15 minutes of inactivity
+	schemaCheckInterval = 3 * 24 * time.Hour // Check after every 3 days
 )
 
 type cleanupMetrics struct {

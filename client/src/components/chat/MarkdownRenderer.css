@@ -114,8 +114,11 @@
 
 .markdown-renderer ul li,
 .markdown-renderer ol li {
+  display: list-item;
   margin-bottom: 4px;
   color: #000000; /* Explicitly black text for list items */
+  list-style-position: outside;
+  clear: both;
 }
 
 .markdown-renderer table {
