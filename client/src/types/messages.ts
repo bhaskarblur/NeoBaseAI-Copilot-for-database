@@ -19,6 +19,8 @@ export interface BackendMessage {
     user_message_id?: string;
     is_edited: boolean;
     non_tech_mode?: boolean;
+    is_pinned?: boolean;
+    pinned_at?: string;
     action_buttons?: ActionButton[];
     queries?: {
         id: string;
@@ -66,7 +68,9 @@ export const transformBackendMessage = (msg: BackendMessage): Message => {
         is_edited: msg.is_edited,
         created_at: msg.created_at,
         action_buttons: msg.action_buttons || [],
-        non_tech_mode: msg.non_tech_mode
+        non_tech_mode: msg.non_tech_mode,
+        is_pinned: msg.is_pinned,
+        pinned_at: msg.pinned_at
     };
 };
 

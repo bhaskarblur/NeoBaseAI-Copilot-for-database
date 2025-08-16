@@ -14,7 +14,7 @@ interface ConnectionModalProps {
   initialData?: Chat;
   initialTab?: ModalTab;
   onClose: () => void;
-  onEdit?: (data?: Connection, settings?: ChatSettings) => Promise<{ success: boolean, error?: string }>;
+  onEdit?: (data?: Connection, settings?: ChatSettings) => Promise<{ success: boolean, error?: string, updatedChat?: Chat }>;
   onSubmit: (data: Connection, settings: ChatSettings) => Promise<{ 
     success: boolean;
     error?: string;
@@ -391,6 +391,13 @@ export default function ConnectionModal({
       });
       
       if (result?.success) {
+        // If we have updated chat data, sync our local state with it
+        if (result.updatedChat) {
+          setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
+          setShareWithAI(result.updatedChat.settings.share_data_with_ai);
+          setNonTechMode(result.updatedChat.settings.non_tech_mode);
+        }
+        
         // Show success message - will auto-dismiss after 3 seconds
         setSuccessMessage("Settings updated successfully");
       } else if (result?.error) {
@@ -521,6 +528,13 @@ export default function ConnectionModal({
         });
         console.log("edit result in connection modal", result);
         if (result?.success) {
+          // If we have updated chat data, sync our local state with it
+          if (result.updatedChat) {
+            setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
+            setShareWithAI(result.updatedChat.settings.share_data_with_ai);
+            setNonTechMode(result.updatedChat.settings.non_tech_mode);
+          }
+          
           // If credentials changed and we're in the connection tab, switch to schema tab
           if (credentialsChanged && activeTab === 'connection') {
             setActiveTab('schema');

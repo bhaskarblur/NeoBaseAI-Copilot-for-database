@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Pin, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -56,6 +56,7 @@ interface MessageTileProps {
     buttonCallback?: (action: string) => void;
     userId?: string;
     userName?: string;
+    onPinMessage?: (messageId: string, isPinned: boolean) => Promise<void>;
 }
 
 const toastStyle = {
@@ -110,6 +111,7 @@ export default function MessageTile({
     isSearchResult,
     isCurrentSearchResult,
     searchResultRefs,
+    onPinMessage,
 }: MessageTileProps) {
     const { streamId } = useStream();
     const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json'>>({});
@@ -327,6 +329,46 @@ export default function MessageTile({
             } else if (context.type === 'result' && context.queryId) {
                 analyticsService.trackResultCopyClick(chatId, context.queryId, userId, userName);
             }
+        }
+    };
+
+    const handlePinMessage = async () => {
+        try {
+            if (onPinMessage) {
+                // Use the callback from parent to handle pin/unpin
+                await onPinMessage(message.id, !message.is_pinned);
+            } else {
+                // Fallback to direct API call
+                if (message.is_pinned) {
+                    await chatService.unpinMessage(chatId, message.id);
+                    setMessage({ ...message, is_pinned: false, pinned_at: undefined });
+                    toast('Message unpinned', {
+                        ...toastStyle,
+                        icon: '📌',
+                    });
+                } else {
+                    await chatService.pinMessage(chatId, message.id);
+                    setMessage({ ...message, is_pinned: true, pinned_at: new Date().toISOString() });
+                    toast('Message pinned', {
+                        ...toastStyle,
+                        icon: '📌',
+                    });
+                }
+            }
+            
+            // Note: The backend handles cluster pinning logic
+            // When pinning a user message, the backend also pins the AI response below it
+            // When pinning an AI message, the backend also pins the user message above it
+        } catch (error) {
+            console.error('Failed to pin/unpin message:', error);
+            toast.error('Failed to update pin status', {
+                ...toastStyle,
+                style: {
+                    ...toastStyle.style,
+                    background: '#ff4444',
+                    border: '4px solid #cc0000',
+                },
+            });
         }
     };
 
@@ -2127,6 +2169,27 @@ export default function MessageTile({
                         >
                             <Copy className="w-4 h-4 text-gray-800" />
                         </button>
+                        <button
+                            onClick={handlePinMessage}
+                            className="
+                -translate-y-1/2
+                p-1.5
+                md:p-2 
+                group-hover:opacity-100 
+                transition-colors
+                hover:bg-neo-gray
+                rounded-lg
+                flex-shrink-0
+                border-0
+                bg-white/80
+                backdrop-blur-sm
+                hover-tooltip-messagetile
+              "
+                            data-tooltip={message.is_pinned ? "Unpin message" : "Pin message"}
+                            title={message.is_pinned ? "Unpin message" : "Pin message"}
+                        >
+                            <Pin className={`w-4 h-4 rotate-45 ${message.is_pinned ? 'text-black fill-black' : 'text-gray-800'}`} />
+                        </button>
                         {onEdit && (
                             <button
                                 onClick={(e) => {
@@ -2195,6 +2258,27 @@ export default function MessageTile({
                             title="Copy message"
                         >
                             <Copy className="w-4 h-4 text-gray-800" />
+                        </button>
+                        <button
+                            onClick={handlePinMessage}
+                            className="
+                -translate-y-1/2
+                p-1.5
+                md:p-2 
+                group-hover:opacity-100 
+                transition-colors
+                hover:bg-neo-gray
+                rounded-lg
+                flex-shrink-0
+                border-0
+                bg-white/80
+                backdrop-blur-sm
+                hover-tooltip-messagetile
+              "
+                            data-tooltip={message.is_pinned ? "Unpin message" : "Pin message"}
+                            title={message.is_pinned ? "Unpin message" : "Pin message"}
+                        >
+                            <Pin className={`w-4 h-4 rotate-45 ${message.is_pinned ? 'text-black fill-black' : 'text-gray-800'}`} />
                         </button>
                     </div>
                 )}

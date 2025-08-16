@@ -366,7 +366,7 @@ function AppContent() {
     }
   };
 
-  const handleEditConnection = async (id: string, data: Connection, settings: ChatSettings): Promise<{ success: boolean; error?: string }> => {
+  const handleEditConnection = async (id: string, data: Connection, settings: ChatSettings): Promise<{ success: boolean; error?: string; updatedChat?: Chat }> => {
     let loadingToastId: string | undefined;
     loadingToastId = toast.loading('Updating connection...', {
       style: {
@@ -454,7 +454,7 @@ function AppContent() {
           toast.dismiss(loadingToastId);
         }
 
-        return { success: true };
+        return { success: true, updatedChat: response };
       }
 
       if (loadingToastId) {

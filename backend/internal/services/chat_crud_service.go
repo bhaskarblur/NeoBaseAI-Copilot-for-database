@@ -43,6 +43,9 @@ type ChatService interface {
 	DeleteMessages(userID, chatID string) (uint32, error)
 	Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
+	PinMessage(userID, chatID, messageID string) (interface{}, uint32, error)
+	UnpinMessage(userID, chatID, messageID string) (interface{}, uint32, error)
+	ListPinnedMessages(userID, chatID string) (*dtos.MessageListResponse, uint32, error)
 	EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
 	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
@@ -1064,6 +1067,201 @@ func (s *chatService) ListMessages(userID, chatID string, page, pageSize int) (*
 	return response, http.StatusOK, nil
 }
 
+// PinMessage pins a message and its related message in the cluster
+func (s *chatService) PinMessage(userID, chatID, messageID string) (interface{}, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	messageObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid message ID format")
+	}
+
+	// Verify chat ownership
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Get the message
+	message, err := s.chatRepo.FindMessageByID(messageObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch message: %v", err)
+	}
+	if message == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("message not found")
+	}
+
+	// Pin the message
+	message.IsPinned = true
+	now := time.Now()
+	message.PinnedAt = &now
+	if err := s.chatRepo.UpdateMessage(message.ID, message); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to pin message: %v", err)
+	}
+
+	// Handle cluster pinning logic
+	if message.Type == string(constants.MessageTypeUser) {
+		// If pinning a user message, also pin the AI response below it
+		messages, _, err := s.chatRepo.FindMessagesByChatAfterTime(chatObjID, message.CreatedAt, 1, 2)
+		if err == nil && len(messages) > 1 {
+			for _, msg := range messages {
+				if msg.ID != message.ID && msg.Type == string(constants.MessageTypeAssistant) {
+					msg.IsPinned = true
+					msg.PinnedAt = &now
+					s.chatRepo.UpdateMessage(msg.ID, &msg)
+					break
+				}
+			}
+		}
+	} else if message.Type == string(constants.MessageTypeAssistant) {
+		// If pinning an AI message, also pin the user message above it
+		if message.UserMessageId != nil {
+			userMsg, err := s.chatRepo.FindMessageByID(*message.UserMessageId)
+			if err == nil && userMsg != nil {
+				userMsg.IsPinned = true
+				userMsg.PinnedAt = &now
+				s.chatRepo.UpdateMessage(userMsg.ID, userMsg)
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"message": "Message pinned successfully",
+	}, http.StatusOK, nil
+}
+
+// UnpinMessage unpins a message and its related message in the cluster
+func (s *chatService) UnpinMessage(userID, chatID, messageID string) (interface{}, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	messageObjID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid message ID format")
+	}
+
+	// Verify chat ownership
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Get the message
+	message, err := s.chatRepo.FindMessageByID(messageObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch message: %v", err)
+	}
+	if message == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("message not found")
+	}
+
+	// Unpin the message
+	message.IsPinned = false
+	message.PinnedAt = nil
+	if err := s.chatRepo.UpdateMessage(message.ID, message); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to unpin message: %v", err)
+	}
+
+	// Handle cluster unpinning logic
+	if message.Type == string(constants.MessageTypeUser) {
+		// If unpinning a user message, also unpin the AI response below it
+		messages, _, err := s.chatRepo.FindMessagesByChatAfterTime(chatObjID, message.CreatedAt, 1, 2)
+		if err == nil && len(messages) > 1 {
+			for _, msg := range messages {
+				if msg.ID != message.ID && msg.Type == string(constants.MessageTypeAssistant) {
+					msg.IsPinned = false
+					msg.PinnedAt = nil
+					s.chatRepo.UpdateMessage(msg.ID, &msg)
+					break
+				}
+			}
+		}
+	} else if message.Type == string(constants.MessageTypeAssistant) {
+		// If unpinning an AI message, also unpin the user message above it
+		if message.UserMessageId != nil {
+			userMsg, err := s.chatRepo.FindMessageByID(*message.UserMessageId)
+			if err == nil && userMsg != nil {
+				userMsg.IsPinned = false
+				userMsg.PinnedAt = nil
+				s.chatRepo.UpdateMessage(userMsg.ID, userMsg)
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"message": "Message unpinned successfully",
+	}, http.StatusOK, nil
+}
+
+// ListPinnedMessages lists all pinned messages for a chat
+func (s *chatService) ListPinnedMessages(userID, chatID string) (*dtos.MessageListResponse, uint32, error) {
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	// Verify chat ownership
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Get all pinned messages
+	messages, err := s.chatRepo.FindPinnedMessagesByChat(chatObjID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch pinned messages: %v", err)
+	}
+
+	response := &dtos.MessageListResponse{
+		Messages: make([]dtos.MessageResponse, len(messages)),
+		Total:    int64(len(messages)),
+	}
+
+	for i, msg := range messages {
+		response.Messages[i] = *s.buildMessageResponse(&msg)
+	}
+
+	return response, http.StatusOK, nil
+}
+
 // Edit a query, this can be done only before the query is executed
 func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error) {
 	log.Printf("ChatService -> EditQuery -> userID: %s, chatID: %s, messageID: %s, queryID: %s, query: %s", userID, chatID, messageID, queryID, query)
@@ -1358,6 +1556,12 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		userMessageID = &id
 	}
 
+	var pinnedAt *string
+	if msg.PinnedAt != nil {
+		pinnedAtStr := msg.PinnedAt.Format(time.RFC3339)
+		pinnedAt = &pinnedAtStr
+	}
+
 	queriesDto := dtos.ToQueryDto(msg.Queries)
 	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
 
@@ -1371,6 +1575,8 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		ActionButtons: actionButtonsDto,
 		IsEdited:      msg.IsEdited,
 		NonTechMode:   msg.NonTechMode,
+		IsPinned:      msg.IsPinned,
+		PinnedAt:      pinnedAt,
 		CreatedAt:     msg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     msg.UpdatedAt.Format(time.RFC3339),
 	}

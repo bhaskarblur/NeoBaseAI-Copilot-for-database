@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, RefreshCcw, XCircle } from 'lucide-react';
+import { ArrowDown, Loader2, MessageSquare, Pin, RefreshCcw, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -24,7 +24,7 @@ interface ChatWindowProps {
   onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
-  onEditConnection?: (id: string, connection: Connection, settings: ChatSettings) => Promise<{ success: boolean, error?: string }>;
+  onEditConnection?: (id: string, connection: Connection, settings: ChatSettings) => Promise<{ success: boolean, error?: string, updatedChat?: Chat }>;
   onConnectionStatusChange?: (chatId: string, isConnected: boolean, from: string) => void;
   isConnected: boolean;
   onCancelStream: () => void;
@@ -152,6 +152,9 @@ export default function ChatWindow({
   });
   const wasStreamingRef = useRef<boolean>(false);
   const currentChatIdRef = useRef<string | null>(null);
+  const [viewMode, setViewMode] = useState<'chats' | 'pinned'>('chats');
+  const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
+  const scrollPositions = useRef<{ chats: number; pinned: number }>({ chats: 0, pinned: 0 });
 
   // Search functionality
   const performSearch = useCallback((query: string) => {
@@ -264,6 +267,11 @@ export default function ChatWindow({
   const setMessage = (message: Message) => {
     console.log('setMessage called with message:', message);
     setMessages(prev => prev.map(m => m.id === message.id ? message : m));
+    
+    // If the message was pinned/unpinned, update pinned messages
+    if (message.is_pinned !== undefined) {
+      fetchPinnedMessages();
+    }
   };
 
   const scrollToBottom = (origin: string, force: boolean = false) => {
@@ -367,12 +375,14 @@ export default function ChatWindow({
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
 
       scrollPositionRef.current = scrollTop;
+      // Save scroll position for current view mode
+      scrollPositions.current[viewMode] = scrollTop;
       setShowScrollButton(!isAtBottom);
     };
 
     chatContainer.addEventListener('scroll', handleScroll);
     return () => chatContainer.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     const chatContainer = chatContainerRef.current;
@@ -633,13 +643,112 @@ export default function ChatWindow({
     }
   }, [chat?.id, pageSize]);
 
+  const fetchPinnedMessages = useCallback(async () => {
+    if (!chat?.id) return;
+
+    try {
+      const response = await chatService.getPinnedMessages(chat.id);
+      if (response.success) {
+        const pinned = response.data.messages.map(transformBackendMessage);
+        // Backend already sorts by pinned_at descending, so we keep that order
+        // This means latest pinned messages come first in the array
+        setPinnedMessages(pinned);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pinned messages:', error);
+      toast.error('Failed to load pinned messages');
+    }
+  }, [chat?.id]);
+
+  const handlePinMessage = useCallback(async (messageId: string, shouldPin: boolean) => {
+    try {
+      if (shouldPin) {
+        await chatService.pinMessage(chat.id, messageId);
+        toast('Message pinned', {
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '14px',
+            fontWeight: '500',
+          },
+          position: 'bottom-center' as const,
+          duration: 2000,
+          icon: '📌',
+        });
+      } else {
+        await chatService.unpinMessage(chat.id, messageId);
+        toast('Message unpinned', {
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '14px',
+            fontWeight: '500',
+          },
+          position: 'bottom-center' as const,
+          duration: 2000,
+          icon: '📌',
+        });
+      }
+      
+      // Update messages locally to reflect cluster pinning
+      const currentMessage = messages.find(m => m.id === messageId);
+      if (currentMessage) {
+        const updatedMessages = messages.map(msg => {
+          // Update the clicked message
+          if (msg.id === messageId) {
+            return { ...msg, is_pinned: shouldPin, pinned_at: shouldPin ? new Date().toISOString() : undefined };
+          }
+          
+          // Handle cluster pinning
+          if (currentMessage.type === 'user' && msg.user_message_id === messageId) {
+            // Pin/unpin the AI response that belongs to this user message
+            return { ...msg, is_pinned: shouldPin, pinned_at: shouldPin ? new Date().toISOString() : undefined };
+          } else if (currentMessage.type === 'assistant' && currentMessage.user_message_id && msg.id === currentMessage.user_message_id) {
+            // Pin/unpin the user message that this AI response belongs to
+            return { ...msg, is_pinned: shouldPin, pinned_at: shouldPin ? new Date().toISOString() : undefined };
+          }
+          
+          return msg;
+        });
+        
+        setMessages(updatedMessages);
+        
+        // Update pinned messages list
+        if (shouldPin) {
+          // Add newly pinned messages to the list at the beginning (latest first)
+          const newPinnedMessages = updatedMessages.filter(msg => msg.is_pinned && !pinnedMessages.some(pm => pm.id === msg.id));
+          // Put newly pinned messages at the start of the array (latest first)
+          setPinnedMessages([...newPinnedMessages, ...pinnedMessages]);
+        } else {
+          // Remove unpinned messages from the list (including cluster messages)
+          const unpinnedIds = updatedMessages
+            .filter(msg => !msg.is_pinned)
+            .map(msg => msg.id);
+          setPinnedMessages(pinnedMessages.filter(msg => !unpinnedIds.includes(msg.id)));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to pin/unpin message:', error);
+      toast.error('Failed to update pin status');
+    }
+  }, [chat?.id, messages, pinnedMessages, setMessages]);
+
   // Update intersection observer effect
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting &&
           hasMore &&
-          !isLoadingMessages) {
+          !isLoadingMessages &&
+          viewMode === 'chats') {  // Only paginate regular messages in chat view
           console.log('Loading more messages, current page:', page);
           setPage(prev => prev + 1);
           fetchMessages(page + 1);  // Fetch next page immediately
@@ -652,12 +761,12 @@ export default function ChatWindow({
       }
     );
 
-    if (loadingRef.current) {
+    if (loadingRef.current && viewMode === 'chats') {
       observer.observe(loadingRef.current);
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoadingMessages, page, fetchMessages, chat?.id]);
+  }, [hasMore, isLoadingMessages, page, fetchMessages, chat?.id, viewMode]);
 
   // Keep only necessary effects
   useEffect(() => {
@@ -688,14 +797,31 @@ export default function ChatWindow({
       setPage(1);
       setHasMore(true);
       setMessages([]);
+      setPinnedMessages([]); // Reset pinned messages when changing chats
       
       // Immediate scroll for welcome message or empty state
       setTimeout(() => {
         scrollToBottom('chat-mounted', true);
       }, 50);
       fetchMessages(1);
+      fetchPinnedMessages();
     }
-  }, [chat?.id, fetchMessages, showSearch]);
+  }, [chat?.id, fetchMessages, fetchPinnedMessages, showSearch]);
+
+  // Fetch pinned messages when view mode changes and restore scroll position
+  useEffect(() => {
+    if (viewMode === 'pinned' && chat?.id && pinnedMessages.length === 0) {
+      // Only fetch if we don't have pinned messages yet
+      fetchPinnedMessages();
+    }
+    
+    // Restore scroll position after a small delay to ensure content is rendered
+    setTimeout(() => {
+      if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTop = scrollPositions.current[viewMode];
+      }
+    }, 50);
+  }, [viewMode, chat?.id, pinnedMessages.length, fetchPinnedMessages]);
 
   // Update the message update effect with better timing control
   useEffect(() => {
@@ -1078,35 +1204,80 @@ export default function ChatWindow({
             initialQuery={searchQuery}
           />
         )}
+        
+      </div>
+
+      {/* Tab Switch - Overlay style */}
+      <div className="absolute top-[76px] right-4 z-20">
+        <div className="flex gap-1 p-1 bg-white border-2 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          <button
+            onClick={() => {
+              // Save current scroll position
+              if (chatContainerRef.current) {
+                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
+              }
+              setViewMode('chats');
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+              viewMode === 'chats' 
+                ? 'bg-black text-white' 
+                : 'bg-white text-black hover:bg-gray-100'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            Chats
+          </button>
+          <button
+            onClick={() => {
+              // Save current scroll position
+              if (chatContainerRef.current) {
+                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
+              }
+              setViewMode('pinned');
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+              viewMode === 'pinned' 
+                ? 'bg-black text-white' 
+                : 'bg-white text-black hover:bg-gray-100'
+            }`}
+          >
+            <Pin className="w-4 h-4 rotate-45" />
+            Pinned
+          </button>
+        </div>
       </div>
 
       <div
         ref={chatContainerRef}
         data-chat-container
-        className="
+        className={`
           flex-1 
           overflow-y-auto 
           bg-[#FFDB58]/10 
           relative 
           scroll-smooth 
-          pb-24 
-          md:pb-32 
+          ${viewMode === 'chats' ? 'pb-24 md:pb-32' : 'pb-8'} 
           mt-16
           md:mt-0
           flex-shrink
-        "
+        `}
       >
-        <div
-          ref={loadingRef}
-          className="h-20 flex items-center justify-center"
-        >
-          {isLoadingMessages && (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm text-gray-600">Loading older messages...</span>
-            </div>
-          )}
-        </div>
+        {viewMode === 'chats' ? (
+          <div
+            ref={loadingRef}
+            className="h-20 flex items-center justify-center"
+          >
+            {isLoadingMessages && (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-sm text-gray-600">Loading older messages...</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          // Add consistent spacing for pinned messages view
+          <div className="h-20" />
+        )}
 
         <div
           className={`
@@ -1125,7 +1296,7 @@ export default function ChatWindow({
             }
           `}
         >
-          {Object.entries(groupMessagesByDate(messages)).map(([date, dateMessages], index) => (
+          {Object.entries(groupMessagesByDate(viewMode === 'chats' ? messages : pinnedMessages)).map(([date, dateMessages], index) => (
             <div key={date}>
               <div className={`flex items-center justify-center ${index === 0 ? 'mb-4' : 'my-6'}`}>
                 <div className="
@@ -1161,6 +1332,7 @@ export default function ChatWindow({
                   setQueryStates={setQueryStates}
                   queryTimeouts={queryTimeouts}
                   isFirstMessage={index === 0}
+                  onPinMessage={handlePinMessage}
                   onQueryUpdate={handleQueryUpdate}
                   onEditQuery={handleEditQuery}
                   userId={userId || ''}
@@ -1190,7 +1362,7 @@ export default function ChatWindow({
               ))}
             </div>
           ))}
-          {messages.length === 0 && (
+          {(viewMode === 'chats' ? messages : pinnedMessages).length === 0 && (
             <div className="flex flex-col items-center justify-center h-full">
               <div className="
                   px-4 
@@ -1206,47 +1378,56 @@ export default function ChatWindow({
                 ">
                 {formatDateDivider(new Date().toISOString())}
               </div>
-              <MessageTile
-                key={"welcome-message"}
-                checkSSEConnection={checkSSEConnection}
-                chatId={chat.id}
-                message={{
-                  id: "welcome-message",
-                  type: "assistant",
-                  content: `Hi ${userName || 'There'}! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data. You can start by asking me what's in this database or try recommendations.`,
-                  queries: [],
-                  action_buttons: [],
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                }}
-                setMessage={setMessage}
-                onEdit={handleEditMessage}
-                editingMessageId={editingMessageId}
-                editInput={editInput}
-                setEditInput={setEditInput}
-                onSaveEdit={handleSaveEdit}
-                onCancelEdit={handleCancelEdit}
-                queryStates={queryStates}
-                setQueryStates={setQueryStates}
-                queryTimeouts={queryTimeouts}
-                isFirstMessage={false}
-                onQueryUpdate={handleQueryUpdate}
-                onEditQuery={handleEditQuery}
-                userId={userId || ''}
-                userName={userName || ''}
-                searchQuery={showSearch ? searchQuery : ''}
-                isSearchResult={false}
-                isCurrentSearchResult={false}
-                searchResultRefs={searchResultRefs}
-                buttonCallback={(action) => {
-                  if (action === "refresh_schema") {
-                    setShowRefreshSchema(true);
-                  } else if (action === "open_settings") {
-                    setOpenWithSettingsTab(true);
-                    setShowEditConnection(true);
-                  }
-                }}
-              />
+              {viewMode === 'chats' ? (
+                <MessageTile
+                  key={"welcome-message"}
+                  checkSSEConnection={checkSSEConnection}
+                  chatId={chat.id}
+                  message={{
+                    id: "welcome-message",
+                    type: "assistant",
+                    content: `Hi ${userName || 'There'}! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data. You can start by asking me what's in this database or try recommendations.`,
+                    queries: [],
+                    action_buttons: [],
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  }}
+                  setMessage={setMessage}
+                  onEdit={handleEditMessage}
+                  editingMessageId={editingMessageId}
+                  onPinMessage={handlePinMessage}
+                  editInput={editInput}
+                  setEditInput={setEditInput}
+                  onSaveEdit={handleSaveEdit}
+                  onCancelEdit={handleCancelEdit}
+                  queryStates={queryStates}
+                  setQueryStates={setQueryStates}
+                  queryTimeouts={queryTimeouts}
+                  isFirstMessage={false}
+                  onQueryUpdate={handleQueryUpdate}
+                  onEditQuery={handleEditQuery}
+                  userId={userId || ''}
+                  userName={userName || ''}
+                  searchQuery={showSearch ? searchQuery : ''}
+                  isSearchResult={false}
+                  isCurrentSearchResult={false}
+                  searchResultRefs={searchResultRefs}
+                  buttonCallback={(action) => {
+                    if (action === "refresh_schema") {
+                      setShowRefreshSchema(true);
+                    } else if (action === "open_settings") {
+                      setOpenWithSettingsTab(true);
+                      setShowEditConnection(true);
+                    }
+                  }}
+                />
+              ) : (
+                <div className="text-center text-gray-600 mt-40">
+                  <Pin className="w-12 h-12 mx-auto mb-4 text-gray-400 rotate-45" />
+                  <p className="text-lg font-medium">No Pinned Messages</p>
+                  <p className="text-sm mt-2">Pin frequently asked or important messages to access them quickly</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1294,15 +1475,17 @@ export default function ChatWindow({
         )}
       </div>
 
-      <MessageInput
-        isConnected={isConnected}
-        onSendMessage={handleMessageSubmit}
-        isExpanded={isExpanded}
-        isDisabled={isMessageSending}
-        chatId={chat.id}
-        userId={userId || ''}
-        userName={userName || ''}
-      />
+      {viewMode === 'chats' && (
+        <MessageInput
+          isConnected={isConnected}
+          onSendMessage={handleMessageSubmit}
+          isExpanded={isExpanded}
+          isDisabled={isMessageSending}
+          chatId={chat.id}
+          userId={userId || ''}
+          userName={userName || ''}
+        />
+      )}
 
       {showRefreshSchema && (
         <ConfirmationModal
@@ -1345,7 +1528,11 @@ export default function ChatWindow({
             }}
             onEdit={async (data, autoExecuteQuery) => {
               const result = await onEditConnection?.(chat.id, data!, autoExecuteQuery!);
-              return { success: result?.success || false, error: result?.error };
+              return { 
+                success: result?.success || false, 
+                error: result?.error,
+                updatedChat: result?.success ? result.updatedChat : undefined
+              };
             }}
             onSubmit={async (data, autoExecuteQuery) => {
               const result = await onEditConnection?.(chat.id, data, autoExecuteQuery);
