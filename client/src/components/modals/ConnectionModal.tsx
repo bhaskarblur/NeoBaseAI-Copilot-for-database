@@ -573,6 +573,19 @@ export default function ConnectionModal({
                   const formData = new FormData();
                   formData.append('file', fileUpload.file);
                   formData.append('tableName', fileUpload.tableName || '');
+                  formData.append('mergeStrategy', fileUpload.mergeStrategy || 'replace');
+                  
+                  // Add merge options if present
+                  if (fileUpload.mergeOptions) {
+                    formData.append('ignoreCase', String(fileUpload.mergeOptions.ignoreCase ?? true));
+                    formData.append('trimWhitespace', String(fileUpload.mergeOptions.trimWhitespace ?? true));
+                    formData.append('handleNulls', fileUpload.mergeOptions.handleNulls || 'empty');
+                    formData.append('addNewColumns', String(fileUpload.mergeOptions.addNewColumns ?? true));
+                    formData.append('dropMissingColumns', String(fileUpload.mergeOptions.dropMissingColumns ?? false));
+                    formData.append('updateExisting', String(fileUpload.mergeOptions.updateExisting ?? true));
+                    formData.append('insertNew', String(fileUpload.mergeOptions.insertNew ?? true));
+                    formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
+                  }
                   
                   const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${result.chatId}/file`, {
                     method: 'POST',
@@ -989,6 +1002,8 @@ DATABASE_PASSWORD=`; // Mask password
                   setFileUploads(files);
                   setFormData(prev => ({ ...prev, file_uploads: files }));
                 }}
+                isEditMode={!!initialData}
+                chatId={initialData?.id || newChatId}
               />
             ) : connectionType === 'basic' ? (
               <BasicConnectionTab

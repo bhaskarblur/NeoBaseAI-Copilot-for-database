@@ -64,6 +64,25 @@ func (h *UploadHandler) UploadFile(c *gin.Context) {
 		tableName = sanitizeTableName(header.Filename)
 	}
 
+	// Get merge strategy (default to "replace")
+	mergeStrategy := c.DefaultPostForm("mergeStrategy", "replace")
+	if mergeStrategy != "replace" && mergeStrategy != "append" && mergeStrategy != "merge" && mergeStrategy != "smart_merge" {
+		mergeStrategy = "replace"
+	}
+
+	// Get merge options for advanced merge
+	mergeOptions := services.MergeOptions{
+		Strategy:         mergeStrategy,
+		IgnoreCase:       c.DefaultPostForm("ignoreCase", "true") == "true",
+		TrimWhitespace:   c.DefaultPostForm("trimWhitespace", "true") == "true",
+		HandleNulls:      c.DefaultPostForm("handleNulls", "empty"),
+		AddNewCols:       c.DefaultPostForm("addNewColumns", "true") == "true",
+		DropMissingCols:  c.DefaultPostForm("dropMissingColumns", "false") == "true",
+		UpdateExisting:   c.DefaultPostForm("updateExisting", "true") == "true",
+		InsertNew:        c.DefaultPostForm("insertNew", "true") == "true",
+		DeleteMissing:    c.DefaultPostForm("deleteMissing", "false") == "true",
+	}
+
 	log.Printf("UploadHandler -> Processing file: %s as table: %s", header.Filename, tableName)
 
 	// Process the file based on type
@@ -85,7 +104,7 @@ func (h *UploadHandler) UploadFile(c *gin.Context) {
 	}
 
 	// Store the data in the spreadsheet database
-	result, statusCode, err := h.chatService.StoreSpreadsheetData(userID, chatID, tableName, columns, data)
+	result, statusCode, err := h.chatService.StoreSpreadsheetData(userID, chatID, tableName, columns, data, mergeStrategy, mergeOptions)
 	if err != nil {
 		c.JSON(int(statusCode), gin.H{"error": err.Error()})
 		return

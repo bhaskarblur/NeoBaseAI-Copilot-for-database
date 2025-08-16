@@ -61,7 +61,7 @@ type ChatService interface {
 	processLLMResponseAndRunQuery(ctx context.Context, userID, chatID string, messageID, streamID string) error
 
 	// Spreadsheet operations
-	StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string) (*dtos.SpreadsheetUploadResponse, uint32, error)
+	StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string, mergeStrategy string, mergeOptions MergeOptions) (*dtos.SpreadsheetUploadResponse, uint32, error)
 	GetSpreadsheetTableData(userID, chatID, tableName string, page, pageSize int) (*dtos.SpreadsheetTableDataResponse, uint32, error)
 	DeleteSpreadsheetTable(userID, chatID, tableName string) (uint32, error)
 	DownloadSpreadsheetTableData(userID, chatID, tableName string) (*dtos.SpreadsheetDownloadResponse, uint32, error)

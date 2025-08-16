@@ -14,8 +14,8 @@ import (
 )
 
 // StoreSpreadsheetData stores CSV/Excel data in the spreadsheet database
-func (s *chatService) StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string) (*dtos.SpreadsheetUploadResponse, uint32, error) {
-	log.Printf("ChatService -> StoreSpreadsheetData -> Starting for chatID: %s, table: %s", chatID, tableName)
+func (s *chatService) StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string, mergeStrategy string, mergeOptions MergeOptions) (*dtos.SpreadsheetUploadResponse, uint32, error) {
+	log.Printf("ChatService -> StoreSpreadsheetData -> Starting for chatID: %s, table: %s, strategy: %s", chatID, tableName, mergeStrategy)
 
 	// Validate inputs
 	if tableName == "" {
@@ -26,6 +26,11 @@ func (s *chatService) StoreSpreadsheetData(userID, chatID, tableName string, col
 	}
 	if len(data) == 0 {
 		return nil, http.StatusBadRequest, fmt.Errorf("no data provided")
+	}
+
+	// Default merge strategy
+	if mergeStrategy == "" {
+		mergeStrategy = "replace"
 	}
 
 	// Get connection info
@@ -51,29 +56,128 @@ func (s *chatService) StoreSpreadsheetData(userID, chatID, tableName string, col
 		schemaName = fmt.Sprintf("conn_%s", chatID)
 	}
 
-	// Create table with proper column types
-	columnDefs := make([]string, len(columns))
-	for i, col := range columns {
-		// Sanitize column name
-		sanitizedCol := sanitizeColumnName(col)
-		// Add internal columns for tracking
-		if i == 0 {
-			columnDefs[i] = fmt.Sprintf("_id SERIAL PRIMARY KEY, _created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, _updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, %s TEXT", sanitizedCol)
-		} else {
-			columnDefs[i] = fmt.Sprintf("%s TEXT", sanitizedCol)
+	// Check if table exists
+	tableExists := false
+	var existingRowCount int64
+	checkQuery := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = '%s' 
+			AND table_name = '%s'
+		)
+	`, schemaName, tableName)
+	
+	var rows []map[string]interface{}
+	err = conn.QueryRows(checkQuery, &rows)
+	if err == nil && len(rows) > 0 && len(rows[0]) > 0 {
+		if exists, ok := rows[0]["exists"].(bool); ok {
+			tableExists = exists
 		}
 	}
 
-	createTableQuery := fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS %s.%s (%s)",
-		schemaName,
-		tableName,
-		strings.Join(columnDefs, ", "),
-	)
+	// If table exists, handle based on merge strategy
+	if tableExists {
+		// Get existing row count for reporting
+		var countRows []map[string]interface{}
+		err := conn.QueryRows(fmt.Sprintf("SELECT COUNT(*) as count FROM %s.%s", schemaName, tableName), &countRows)
+		if err == nil && len(countRows) > 0 {
+			if count, ok := countRows[0]["count"].(int64); ok {
+				existingRowCount = count
+			}
+		}
 
-	// Execute create table
-	if err := conn.Exec(createTableQuery); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create table: %v", err)
+		// Use merge handler for complex operations
+		if mergeStrategy != "replace" {
+			mergeHandler := NewSpreadsheetMergeHandler(conn, schemaName, tableName)
+			
+			// Use provided options or defaults
+			if mergeOptions.Strategy == "" {
+				mergeOptions.Strategy = mergeStrategy
+			}
+			
+			// Execute merge
+			if err := mergeHandler.ExecuteMerge(columns, data, mergeOptions); err != nil {
+				return nil, http.StatusInternalServerError, fmt.Errorf("merge operation failed: %v", err)
+			}
+			
+			// Get final row count
+			finalCount := existingRowCount + int64(len(data))
+			if mergeStrategy == "merge" || mergeStrategy == "smart_merge" {
+				// For merge, recount as rows might have been updated
+				var countRows []map[string]interface{}
+				err := conn.QueryRows(fmt.Sprintf("SELECT COUNT(*) as count FROM %s.%s", schemaName, tableName), &countRows)
+				if err == nil && len(countRows) > 0 {
+					if count, ok := countRows[0]["count"].(int64); ok {
+						finalCount = count
+					}
+				}
+			}
+			
+			// Get table size
+			var sizeBytes int64
+			sizeQuery := fmt.Sprintf(
+				"SELECT pg_total_relation_size('%s.%s') as size",
+				schemaName,
+				tableName,
+			)
+			var sizeRows []map[string]interface{}
+			err = conn.QueryRows(sizeQuery, &sizeRows)
+			if err == nil && len(sizeRows) > 0 {
+				if size, ok := sizeRows[0]["size"].(int64); ok {
+					sizeBytes = size
+				}
+			}
+			
+			// Trigger schema refresh
+			go func() {
+				ctx := context.Background()
+				if _, err := s.RefreshSchema(ctx, userID, chatID, false); err != nil {
+					log.Printf("ChatService -> StoreSpreadsheetData -> Failed to refresh schema: %v", err)
+				}
+			}()
+			
+			return &dtos.SpreadsheetUploadResponse{
+				TableName:   tableName,
+				RowCount:    int(finalCount),
+				ColumnCount: len(columns),
+				SizeBytes:   sizeBytes,
+				UploadedAt:  time.Now(),
+			}, http.StatusOK, nil
+		}
+		
+		// Replace strategy - drop existing table
+		if mergeStrategy == "replace" {
+			dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS %s.%s CASCADE", schemaName, tableName)
+			if err := conn.Exec(dropQuery); err != nil {
+				return nil, http.StatusInternalServerError, fmt.Errorf("failed to drop existing table: %v", err)
+			}
+			tableExists = false
+		}
+	}
+
+	// Create table if it doesn't exist
+	if !tableExists {
+		// Create table with proper column types
+		columnDefs := make([]string, 0)
+		columnDefs = append(columnDefs, "_id SERIAL PRIMARY KEY")
+		columnDefs = append(columnDefs, "_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+		columnDefs = append(columnDefs, "_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+		
+		for _, col := range columns {
+			sanitizedCol := sanitizeColumnName(col)
+			columnDefs = append(columnDefs, fmt.Sprintf("%s TEXT", sanitizedCol))
+		}
+
+		createTableQuery := fmt.Sprintf(
+			"CREATE TABLE %s.%s (%s)",
+			schemaName,
+			tableName,
+			strings.Join(columnDefs, ", "),
+		)
+
+		if err := conn.Exec(createTableQuery); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to create table: %v", err)
+		}
 	}
 
 	// Insert data in batches
