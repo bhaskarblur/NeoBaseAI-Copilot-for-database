@@ -1207,8 +1207,8 @@ export default function ChatWindow({
         
       </div>
 
-      {/* Tab Switch - Overlay style */}
-      <div className="absolute top-[76px] right-4 z-20">
+      {/* Tab Switch - Overlay style - Hidden on mobile */}
+      <div className="hidden md:block absolute top-[76px] right-4 z-20">
         <div className="flex gap-1 p-1 bg-white border-2 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
           <button
             onClick={() => {
