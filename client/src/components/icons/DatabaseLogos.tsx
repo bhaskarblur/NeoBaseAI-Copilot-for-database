@@ -1,5 +1,5 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra' | 'spreadsheet';
   size?: number;
   className?: string;
 }
@@ -17,6 +17,28 @@ const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
+  // Special handling for spreadsheet type to show a custom icon
+  if (type === 'spreadsheet') {
+    return (
+      <div
+        className={`relative flex items-center justify-center ${className}`}
+        style={{ width: size, height: size }}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className="w-full h-full"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke="#10B981" strokeWidth="2"/>
+          <line x1="3" y1="9" x2="21" y2="9" stroke="#10B981" strokeWidth="2"/>
+          <line x1="3" y1="15" x2="21" y2="15" stroke="#10B981" strokeWidth="2"/>
+          <line x1="9" y1="3" x2="9" y2="21" stroke="#10B981" strokeWidth="2"/>
+          <line x1="15" y1="3" x2="15" y2="21" stroke="#10B981" strokeWidth="2"/>
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <div

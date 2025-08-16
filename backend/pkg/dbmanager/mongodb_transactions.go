@@ -147,7 +147,7 @@ func (tx *MongoDBTransaction) Rollback() error {
 }
 
 // ExecuteQuery executes a MongoDB query within a transaction
-func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
+func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing MongoDB query in transaction: %s", query)
 	startTime := time.Now()
 
@@ -164,7 +164,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: errorMsg,
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	// Check if there was an error starting the transaction
@@ -175,7 +175,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: fmt.Sprintf("Transaction error: %v", tx.Error),
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	// Check if the wrapper is nil
@@ -186,7 +186,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: "Transaction wrapper is nil",
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	// Verify the client is not nil
@@ -197,7 +197,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: "MongoDB client is nil",
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	// Verify the session is still valid by checking if the client is still connected
@@ -209,7 +209,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: "Transaction session may have expired",
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	// Special case for createCollection which has a different format
@@ -234,7 +234,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process collection options: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				if err := json.Unmarshal([]byte(jsonStr), &optionsMap); err != nil {
@@ -243,7 +243,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to parse collection options: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 			}
 
@@ -255,7 +255,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			// If collection already exists, return an error
@@ -265,7 +265,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
 						Code:    "COLLECTION_EXISTS",
 					},
-				}
+				}, nil
 			}
 
 			// Create collection options
@@ -287,7 +287,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to create collection: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			result := map[string]interface{}{
@@ -303,7 +303,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
 						Code:    "JSON_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			executionTime := int(time.Since(startTime).Milliseconds())
@@ -311,9 +311,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 			return &QueryExecutionResult{
 				Result:        result,
-				ResultJSON:    string(resultJSON),
+				StreamData:    resultJSON,
 				ExecutionTime: executionTime,
-			}
+			}, nil
 		}
 	}
 
@@ -338,7 +338,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to list collections: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			// Convert the result to a map for consistent output
@@ -354,7 +354,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to marshal result to JSON: %v", err),
 						Code:    "JSON_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			executionTime := int(time.Since(startTime).Milliseconds())
@@ -362,9 +362,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 
 			return &QueryExecutionResult{
 				Result:        result,
-				ResultJSON:    string(resultJSON),
+				StreamData:    resultJSON,
 				ExecutionTime: executionTime,
-			}
+			}, nil
 
 		// Add more database-level operations here as needed
 		default:
@@ -373,7 +373,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Unsupported database operation: %s", operation),
 					Code:    "UNSUPPORTED_OPERATION",
 				},
-			}
+			}, nil
 		}
 	}
 
@@ -386,7 +386,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: "Invalid MongoDB query format. Expected: db.collection.operation({...})",
 				Code:    "INVALID_QUERY",
 			},
-		}
+		}, nil
 	}
 
 	collectionName := parts[1]
@@ -410,7 +410,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: "Invalid MongoDB query format. Expected: operation({...})",
 				Code:    "INVALID_QUERY",
 			},
-		}
+		}, nil
 	}
 
 	// Extract the operation and parameters using the helper function that handles nested parentheses
@@ -422,7 +422,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: fmt.Sprintf("Invalid MongoDB query format: %v", extractErr),
 				Code:    "INVALID_QUERY",
 			},
-		}
+		}, nil
 	}
 
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Extracted operation: %s, params: %s", operation, paramsStr)
@@ -503,7 +503,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		if len(collections) == 0 {
@@ -512,7 +512,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
 					Code:    "COLLECTION_NOT_FOUND",
 				},
-			}
+			}, nil
 		}
 	}
 
@@ -551,7 +551,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 								Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
 								Code:    "INVALID_PARAMETERS",
 							},
-						}
+						}, nil
 					}
 
 					if err := json.Unmarshal([]byte(jsonFilterStr), &filter); err != nil {
@@ -560,7 +560,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 								Message: fmt.Sprintf("Failed to parse filter: %v", err),
 								Code:    "INVALID_PARAMETERS",
 							},
-						}
+						}, nil
 					}
 
 					// Handle ObjectId in the filter
@@ -570,7 +570,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 								Message: fmt.Sprintf("Failed to process ObjectIds in filter: %v", err),
 								Code:    "INVALID_PARAMETERS",
 							},
-						}
+						}, nil
 					}
 				}
 
@@ -583,7 +583,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				if err := json.Unmarshal([]byte(jsonProjStr), &projection); err != nil {
@@ -592,7 +592,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to parse projection: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 			} else {
 				return &QueryExecutionResult{
@@ -600,7 +600,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: "Invalid parameters format for find. Expected: find({filter}, {projection})",
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 		} else {
 			// Just a filter
@@ -616,7 +616,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process query parameters: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
@@ -627,7 +627,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				// Handle ObjectId in the filter
@@ -637,7 +637,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				// Log the final filter for debugging
@@ -659,7 +659,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to execute count operation: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
-				}
+				}, nil
 			}
 
 			result = map[string]interface{}{
@@ -701,7 +701,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process sort parameters: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				if err := json.Unmarshal([]byte(jsonStr), &sortMap); err != nil {
@@ -710,7 +710,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to parse sort parameters: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 			}
 
@@ -747,7 +747,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process projection parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			var projectionMap bson.M
@@ -757,7 +757,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse projection: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Convert the projection map to a bson.D
@@ -776,7 +776,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute find operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 		defer cursor.Close(ctx)
 
@@ -789,7 +789,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Log the execution time
 		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
 
-		return result
+		return result, nil
 
 	case "findOne":
 		// Parse the parameters as a BSON filter
@@ -806,7 +806,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
@@ -817,7 +817,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId in the filter
@@ -827,7 +827,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Log the final filter for debugging
@@ -848,7 +848,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to execute findOne operation: %v", err),
 						Code:    "EXECUTION_ERROR",
 					},
-				}
+				}, nil
 			}
 		} else {
 			result = doc
@@ -869,7 +869,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process document: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted document: %s", jsonStr)
@@ -880,7 +880,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse document: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId and other special types in the document
@@ -890,7 +890,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 		}
 
@@ -904,7 +904,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: "Document with the same unique key already exists",
 						Code:    "DUPLICATE_KEY",
 					},
-				}
+				}, nil
 			}
 
 			return &QueryExecutionResult{
@@ -912,7 +912,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute insertOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -934,7 +934,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process documents: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted documents: %s", jsonStr)
@@ -945,7 +945,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse documents after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 		}
 
@@ -957,7 +957,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute insertMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -977,7 +977,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: "Invalid parameters for updateOne. Expected format: {filter}, {update}",
 					Code:    "INVALID_PARAMETERS",
 				},
-			}
+			}, nil
 		}
 
 		// Reconstruct the filter and update objects
@@ -1010,7 +1010,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
@@ -1021,7 +1021,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse filter parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId in the filter
@@ -1031,7 +1031,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Log the final filter for debugging
@@ -1053,7 +1053,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
@@ -1064,7 +1064,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 		}
 
@@ -1076,7 +1076,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute updateOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		// Check if any document was matched
@@ -1102,7 +1102,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: "Invalid parameters for updateMany. Expected format: {filter}, {update}",
 					Code:    "INVALID_PARAMETERS",
 				},
-			}
+			}, nil
 		}
 
 		// Reconstruct the filter and update objects
@@ -1135,7 +1135,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonFilterStr)
@@ -1146,7 +1146,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse filter parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId in the filter
@@ -1156,7 +1156,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Log the final filter for debugging
@@ -1178,7 +1178,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process update parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted update: %s", jsonUpdateStr)
@@ -1189,7 +1189,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse update after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 		}
 
@@ -1201,7 +1201,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute updateMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1225,7 +1225,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process query parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted query: %s", jsonStr)
@@ -1236,7 +1236,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse query parameters after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId in the filter
@@ -1246,7 +1246,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Log the final filter for debugging
@@ -1262,7 +1262,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute deleteOne operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		// Check if any document was deleted
@@ -1290,7 +1290,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
@@ -1301,7 +1301,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse filter after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Handle ObjectId in the filter
@@ -1311,7 +1311,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Log the final filter for debugging
@@ -1327,7 +1327,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute deleteMany operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1368,7 +1368,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse aggregation pipeline: %v", parseErr),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 
 			// Create an array of processed stages
@@ -1394,7 +1394,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process aggregation stage: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				// Clean up the processed stage - remove any trailing commas or whitespace
@@ -1435,7 +1435,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Failed to parse aggregation pipeline after conversion: %v", err),
 						Code:    "INVALID_PARAMETERS",
 					},
-				}
+				}, nil
 			}
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
@@ -1478,7 +1478,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: errMsg,
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 		defer cursor.Close(ctx)
 
@@ -1491,7 +1491,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 		// Log the execution time
 		log.Printf("MongoDBTransaction -> ExecuteQuery -> MongoDB query executed in %d ms", result.ExecutionTime)
 
-		return result
+		return result, nil
 
 	case "countDocuments":
 		// Parse the parameters as a BSON filter
@@ -1515,7 +1515,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process filter parameters: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				log.Printf("MongoDBTransaction -> ExecuteQuery -> Converted filter: %s", jsonStr)
@@ -1526,7 +1526,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to parse filter: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 
 				// Handle ObjectId in the filter
@@ -1536,7 +1536,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 							Message: fmt.Sprintf("Failed to process ObjectIds: %v", err),
 							Code:    "INVALID_PARAMETERS",
 						},
-					}
+					}, nil
 				}
 			}
 		}
@@ -1549,7 +1549,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to execute countDocuments operation: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1568,7 +1568,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 						Message: fmt.Sprintf("Collection '%s' already exists", collectionName),
 						Code:    "COLLECTION_EXISTS",
 					},
-				}
+				}, nil
 			}
 
 			return &QueryExecutionResult{
@@ -1576,7 +1576,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to create collection: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1593,7 +1593,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to drop collection: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1610,7 +1610,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to check if collection exists: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		// If collection doesn't exist, return an error
@@ -1620,7 +1620,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Collection '%s' does not exist", collectionName),
 					Code:    "COLLECTION_NOT_FOUND",
 				},
-			}
+			}, nil
 		}
 
 		// Execute the drop operation
@@ -1631,7 +1631,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 					Message: fmt.Sprintf("Failed to drop collection: %v", err),
 					Code:    "EXECUTION_ERROR",
 				},
-			}
+			}, nil
 		}
 
 		result = map[string]interface{}{
@@ -1645,7 +1645,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Message: fmt.Sprintf("Unsupported MongoDB operation: %s", operation),
 				Code:    "UNSUPPORTED_OPERATION",
 			},
-		}
+		}, nil
 	}
 
 	// After creating the result map
@@ -1675,14 +1675,14 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, conn *Connection
 				Code:    "MARSHAL_ERROR",
 			},
 			ExecutionTime: executionTime,
-		}
+		}, nil
 	}
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
-		ResultJSON:    string(resultJSON),
+		StreamData:    resultJSON,
 		ExecutionTime: executionTime,
-	}
+	}, nil
 }
 
 // ExecuteCommand executes a MongoDB command and returns the result
@@ -1715,7 +1715,7 @@ func (t *MongoDBTransaction) ExecuteCommand(ctx context.Context, dbName string, 
 				Code:    "COMMAND_EXECUTION_ERROR",
 			},
 			ExecutionTime: int(executionTime.Milliseconds()),
-			ResultJSON:    "{\"results\":[]}",
+			StreamData:    []byte("{\"results\":[]}"),
 		}, err
 	}
 
@@ -1735,10 +1735,10 @@ func (t *MongoDBTransaction) ExecuteCommand(ctx context.Context, dbName string, 
 			Message: fmt.Sprintf("Error formatting command results: %v", err),
 			Code:    "COMMAND_RESULT_FORMAT_ERROR",
 		}
-		executionResult.ResultJSON = "{\"results\":[]}"
+		executionResult.StreamData = []byte("{\"results\":[]}")
 		return executionResult, err
 	}
 
-	executionResult.ResultJSON = resultJSON
+	executionResult.StreamData = []byte(resultJSON)
 	return executionResult, nil
 }

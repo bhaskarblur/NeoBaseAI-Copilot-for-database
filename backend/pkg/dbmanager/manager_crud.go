@@ -150,6 +150,14 @@ func (m *Manager) registerDefaultDrivers() {
 	m.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
 		return NewMongoDBSchemaFetcher(db)
 	})
+
+	// Register Spreadsheet (CSV/Excel) driver
+	m.RegisterDriver("spreadsheet", NewSpreadsheetDriver())
+
+	// Register Spreadsheet schema fetcher (uses PostgreSQL fetcher)
+	m.RegisterFetcher("spreadsheet", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
 }
 
 // GetPoolMetrics returns metrics about the connection pools
@@ -226,7 +234,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 	driver, exists := m.drivers[config.Type]
 	if !exists {
 		log.Printf("DBManager -> Connect -> No driver found for type: %s", config.Type)
-		return fmt.Errorf("unsupported database type: %s", config.Type)
+		return fmt.Errorf("unsupported data source type: %s", config.Type)
 	}
 
 	log.Printf("DBManager -> Connect -> Found driver for type: %s", config.Type)
@@ -429,6 +437,18 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 		log.Printf("DBManager -> Disconnect -> Cleared schema cache for chatID: %s", chatID)
 	}
 
+	// For spreadsheet connections, delete all associated data
+	if conn.Config.Type == "spreadsheet" {
+		driver := m.drivers["spreadsheet"]
+		if spreadsheetDriver, ok := driver.(*SpreadsheetDriver); ok {
+			if err := spreadsheetDriver.DeleteConnectionData(chatID); err != nil {
+				log.Printf("DBManager -> Disconnect -> Failed to delete spreadsheet data: %v", err)
+			} else {
+				log.Printf("DBManager -> Disconnect -> Deleted spreadsheet data for chatID: %s", chatID)
+			}
+		}
+	}
+
 	// Notify subscribers
 	m.notifySubscribers(chatID, userID, StatusDisconnected, "")
 	log.Printf("DBManager -> Disconnect -> Notified subscribers")
@@ -490,8 +510,11 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 			return nil, fmt.Errorf("failed to create MongoDB executor: %v", err)
 		}
 		return executor, nil
+	case "spreadsheet":
+		// For Spreadsheet, we use PostgreSQL wrapper since it's PostgreSQL underneath
+		return NewPostgresWrapper(conn.DB, m, chatID), nil
 	default:
-		return nil, fmt.Errorf("unsupported database type: %s", conn.Config.Type)
+		return nil, fmt.Errorf("unsupported data source type: %s", conn.Config.Type)
 	}
 }
 

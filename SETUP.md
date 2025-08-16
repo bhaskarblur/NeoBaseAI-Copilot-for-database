@@ -37,6 +37,7 @@ NeoBase requires the following services to function properly:
 
 - **MongoDB** - Stores user data, connections, and chat history
 - **Redis** - Manages user sessions and database schema caching
+- **PostgreSQL** (for Spreadsheet feature) - Stores uploaded CSV/Excel data with encryption
 
 ### Supported Databases (for querying)
 
@@ -45,6 +46,7 @@ NeoBase requires the following services to function properly:
 - Yugabyte
 - ClickHouse
 - MongoDB
+- Spreadsheet (CSV/Excel) - Upload and query CSV/Excel files with AES-GCM encryption
 - Cassandra (Planned)
 - Redis (Planned)
 - Neo4j (Planned)
@@ -115,13 +117,22 @@ You can set up NeoBase in several ways:
    ```
 3. Edit the `.env` file with your configuration (see `.env.example` for details)
 
+   **Important Spreadsheet Configuration:**
+   - `SPREADSHEET_POSTGRES_HOST` - PostgreSQL host for spreadsheet data storage
+   - `SPREADSHEET_POSTGRES_PORT` - PostgreSQL port (default: 5432)
+   - `SPREADSHEET_POSTGRES_DATABASE` - Database name for spreadsheet storage
+   - `SPREADSHEET_POSTGRES_USERNAME` - PostgreSQL username
+   - `SPREADSHEET_POSTGRES_PASSWORD` - PostgreSQL password
+   - `SPREADSHEET_POSTGRES_SSL_MODE` - SSL mode (disable, require, verify-ca, verify-full)
+   - `SPREADSHEET_DATA_ENCRYPTION_KEY` - 32-byte key for AES-GCM encryption of spreadsheet data
+
 4. Install dependencies:
 
    ```bash
    go mod tidy
    ```
 
-5. Ensure MongoDB and Redis are running
+5. Ensure MongoDB, Redis, and PostgreSQL (for spreadsheet feature) are running
 
 6. Start the backend:
    ```bash
@@ -164,10 +175,13 @@ This setup includes everything you need to run NeoBase locally:
 This will start:
 
 - MongoDB and Redis (dependencies) (Update the Volume path for both)
+- PostgreSQL for spreadsheet data storage (port 5433)
 - NeoBase backend
 - NeoBase frontend
 
 Access the application at http://localhost:5173
+
+**Note:** The spreadsheet PostgreSQL database runs on port 5433 to avoid conflicts with any existing PostgreSQL installations.
 
 #### Running Example Databases (Optional)
 

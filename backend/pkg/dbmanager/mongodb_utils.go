@@ -737,7 +737,7 @@ func processAggregationResultsFromCursor(cursor *mongo.Cursor, ctx context.Conte
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
-		ResultJSON:    string(resultJSON),
+		StreamData:    resultJSON,
 		ExecutionTime: executionTime,
 	}
 }
@@ -776,11 +776,11 @@ func processAggregationResults(result interface{}) (*QueryExecutionResult, error
 			Message: fmt.Sprintf("Error formatting aggregation results: %v", err),
 			Code:    "AGGREGATION_RESULT_FORMAT_ERROR",
 		}
-		executionResult.ResultJSON = "{\"results\":[]}"
+		executionResult.StreamData = []byte("{\"results\":[]}")
 		return executionResult, err
 	}
 
-	executionResult.ResultJSON = resultJSON
+	executionResult.StreamData = []byte(resultJSON)
 	return executionResult, nil
 }
 

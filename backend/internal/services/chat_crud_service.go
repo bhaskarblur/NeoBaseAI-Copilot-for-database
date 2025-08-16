@@ -45,7 +45,7 @@ type ChatService interface {
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
 	EditQuery(ctx context.Context, userID, chatID, messageID, queryID string, query string) (*dtos.EditQueryResponse, uint32, error)
 	GetDBConnectionStatus(ctx context.Context, userID, chatID string) (*dtos.ConnectionStatusResponse, uint32, error)
-	HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff)
+	HandleSchemaChange(userID, chatID, streamID string, diff interface{})
 	HandleDBEvent(userID, chatID, streamID string, response dtos.StreamResponse)
 	GetAllTables(ctx context.Context, userID, chatID string) (*dtos.TablesResponse, uint32, error)
 	GetSelectedCollections(chatID string) (string, error)
@@ -59,6 +59,12 @@ type ChatService interface {
 	CancelQueryExecution(userID, chatID, messageID, queryID, streamID string)
 	processMessage(ctx context.Context, userID, chatID string, messageID, streamID string) error
 	processLLMResponseAndRunQuery(ctx context.Context, userID, chatID string, messageID, streamID string) error
+
+	// Spreadsheet operations
+	StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string) (*dtos.SpreadsheetUploadResponse, uint32, error)
+	GetSpreadsheetTableData(userID, chatID, tableName string, page, pageSize int) (*dtos.SpreadsheetTableDataResponse, uint32, error)
+	DeleteSpreadsheetTable(userID, chatID, tableName string) (uint32, error)
+	DownloadSpreadsheetTableData(userID, chatID, tableName string) (*dtos.SpreadsheetDownloadResponse, uint32, error)
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
@@ -84,6 +90,7 @@ func isValidDBType(dbType string) bool {
 		constants.DatabaseTypeMongoDB,
 		constants.DatabaseTypeRedis,
 		constants.DatabaseTypeNeo4j,
+		constants.DatabaseTypeSpreadsheet,
 	}
 
 	for _, validType := range validTypes {
@@ -156,15 +163,17 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 
 	// Validate database type
 	if !isValidDBType(req.Connection.Type) {
-		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported database type: %s", req.Connection.Type)
+		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported data source type: %s", req.Connection.Type)
 	}
 
-	// Test connection without creating a persistent connection
-	err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
-		Type:           req.Connection.Type,
-		Host:           req.Connection.Host,
-		Port:           req.Connection.Port,
-		Username:       &req.Connection.Username,
+	// Skip connection test for spreadsheet type as it doesn't have traditional database connection
+	if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+		// Test connection without creating a persistent connection
+		err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
+			Type:           req.Connection.Type,
+			Host:           req.Connection.Host,
+			Port:           req.Connection.Port,
+			Username:       &req.Connection.Username,
 		Password:       req.Connection.Password,
 		Database:       req.Connection.Database,
 		AuthDatabase:   req.Connection.AuthDatabase,
@@ -174,8 +183,9 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		SSLKeyURL:      req.Connection.SSLKeyURL,
 		SSLRootCertURL: req.Connection.SSLRootCertURL,
 	})
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
+		if err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
+		}
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
@@ -185,19 +195,30 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 
 	// Create connection object with SSL configuration
 	connection := models.Connection{
-		Type:           req.Connection.Type,
-		Host:           req.Connection.Host,
-		Port:           req.Connection.Port,
-		Username:       &req.Connection.Username,
-		Password:       req.Connection.Password,
-		Database:       req.Connection.Database,
-		AuthDatabase:   req.Connection.AuthDatabase,
-		SSLMode:        req.Connection.SSLMode,
-		UseSSL:         req.Connection.UseSSL,
-		SSLCertURL:     req.Connection.SSLCertURL,
-		SSLKeyURL:      req.Connection.SSLKeyURL,
-		SSLRootCertURL: req.Connection.SSLRootCertURL,
-		Base:           models.NewBase(),
+		Type: req.Connection.Type,
+		Base: models.NewBase(),
+	}
+
+	// For spreadsheet connections, we don't need traditional database connection details
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+		// Set minimal required fields for spreadsheet
+		connection.IsExampleDB = false
+		// Host and Database will be set when files are uploaded
+		connection.Host = "spreadsheet"
+		connection.Database = "spreadsheet_" + userID
+	} else {
+		// For traditional database connections
+		connection.Host = req.Connection.Host
+		connection.Port = req.Connection.Port
+		connection.Username = &req.Connection.Username
+		connection.Password = req.Connection.Password
+		connection.Database = req.Connection.Database
+		connection.AuthDatabase = req.Connection.AuthDatabase
+		connection.UseSSL = req.Connection.UseSSL
+		connection.SSLMode = req.Connection.SSLMode
+		connection.SSLCertURL = req.Connection.SSLCertURL
+		connection.SSLKeyURL = req.Connection.SSLKeyURL
+		connection.SSLRootCertURL = req.Connection.SSLRootCertURL
 	}
 
 	// Encrypt connection details
@@ -216,7 +237,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	if req.Settings.NonTechMode != nil {
 		settings.NonTechMode = *req.Settings.NonTechMode
 	}
-	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
 		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode)
 	// Create chat with connection
 	chat := models.NewChat(userObjID, connection, settings)
@@ -248,7 +269,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 
 	// Validate database type
 	if !isValidDBType(req.Connection.Type) {
-		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported database type: %s", req.Connection.Type)
+		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported data source type: %s", req.Connection.Type)
 	}
 
 	userObjID, err := primitive.ObjectIDFromHex(userID)
@@ -258,20 +279,31 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 
 	// Create connection object with SSL configuration
 	connection := models.Connection{
-		Type:           req.Connection.Type,
-		Host:           req.Connection.Host,
-		Port:           req.Connection.Port,
-		Username:       &req.Connection.Username,
-		Password:       req.Connection.Password,
-		Database:       req.Connection.Database,
-		AuthDatabase:   req.Connection.AuthDatabase,
-		IsExampleDB:    true, // default is true, if false, then the database is a user's own database
-		UseSSL:         req.Connection.UseSSL,
-		SSLMode:        req.Connection.SSLMode,
-		SSLCertURL:     req.Connection.SSLCertURL,
-		SSLKeyURL:      req.Connection.SSLKeyURL,
-		SSLRootCertURL: req.Connection.SSLRootCertURL,
-		Base:           models.NewBase(),
+		Type: req.Connection.Type,
+		Base: models.NewBase(),
+	}
+
+	// For spreadsheet connections, we don't need traditional database connection details
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+		// Set minimal required fields for spreadsheet
+		connection.IsExampleDB = false
+		// Host and Database will be set when files are uploaded
+		connection.Host = "spreadsheet"
+		connection.Database = "spreadsheet_" + userID
+	} else {
+		// For traditional database connections
+		connection.Host = req.Connection.Host
+		connection.Port = req.Connection.Port
+		connection.Username = &req.Connection.Username
+		connection.Password = req.Connection.Password
+		connection.Database = req.Connection.Database
+		connection.AuthDatabase = req.Connection.AuthDatabase
+		connection.IsExampleDB = true // default is true, if false, then the database is a user's own database
+		connection.UseSSL = req.Connection.UseSSL
+		connection.SSLMode = req.Connection.SSLMode
+		connection.SSLCertURL = req.Connection.SSLCertURL
+		connection.SSLKeyURL = req.Connection.SSLKeyURL
+		connection.SSLRootCertURL = req.Connection.SSLRootCertURL
 	}
 
 	// Encrypt connection details
@@ -325,9 +357,9 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 	// Check for connection changes
 	var credentialsChanged bool
 	if req.Connection != nil {
-		// Validate database type
+		// Validate datasource type
 		if !isValidDBType(req.Connection.Type) {
-			return nil, http.StatusBadRequest, fmt.Errorf("unsupported database type: %s", req.Connection.Type)
+			return nil, http.StatusBadRequest, fmt.Errorf("unsupported data source type: %s", req.Connection.Type)
 		}
 
 		// Create a copy of the existing connection and decrypt it for comparison
@@ -549,7 +581,7 @@ func (s *chatService) List(userID string, page, pageSize int) (*dtos.ChatListRes
 	}
 
 	for i, chat := range chats {
-		log.Printf("ChatService -> List -> Chat %s settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+		log.Printf("ChatService -> List -> Chat %s settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
 			chat.ID.Hex(), chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
 		response.Chats[i] = *s.buildChatResponse(chat)
 	}
@@ -595,7 +627,7 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	// Add current timestamp context to help LLM understand relative dates
 	currentTime := time.Now()
 	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), content)
-	
+
 	llmMsg := &models.LLMMessage{
 		Base:        models.NewBase(),
 		UserID:      userObjID,
@@ -712,7 +744,7 @@ func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, message
 	// Add current timestamp context to help LLM understand relative dates
 	currentTime := time.Now()
 	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), req.Content)
-	
+
 	llmMsg.Content = map[string]interface{}{
 		"user_message": contentWithTimestamp,
 	}
@@ -960,7 +992,7 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 					Content:     llmMsg.Content, // Copy the content map
 					IsEdited:    llmMsg.IsEdited,
 					NonTechMode: llmMsg.NonTechMode, // Preserve the non-tech mode setting
-					Base:        models.NewBase(),    // Create a new Base with new ID and timestamps
+					Base:        models.NewBase(),   // Create a new Base with new ID and timestamps
 				}
 
 				// Set unique timestamps
@@ -1198,8 +1230,15 @@ func (s *chatService) GetDBConnectionStatus(ctx context.Context, userID, chatID 
 }
 
 // HandleSchemaChange handles schema changes
-func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *dbmanager.SchemaDiff) {
+func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff interface{}) {
 	log.Printf("ChatService -> HandleSchemaChange -> Starting for chatID: %s", chatID)
+
+	// Type assert to *dbmanager.SchemaDiff
+	schemaDiff, ok := diff.(*dbmanager.SchemaDiff)
+	if !ok {
+		log.Printf("ChatService -> HandleSchemaChange -> Invalid diff type: %T", diff)
+		return
+	}
 
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
@@ -1260,20 +1299,20 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff *
 	}
 
 	// Format the schema changes for LLM
-	if diff != nil {
-		log.Printf("ChatService -> HandleSchemaChange -> diff: %+v", diff)
+	if schemaDiff != nil {
+		log.Printf("ChatService -> HandleSchemaChange -> diff: %+v", schemaDiff)
 
 		// Need to update the chat LLM messages with the new schema
 		// Only do full schema comparison if changes detected
 		ctx := context.Background()
 		var schemaMsg string
-		if diff.IsFirstTime {
+		if schemaDiff.IsFirstTime {
 			// For first time, format the full schema with examples
 			schemaMsg, err = s.dbManager.FormatSchemaWithExamples(ctx, chatID, selectedCollectionsSlice)
 			if err != nil {
 				log.Printf("ChatService -> HandleSchemaChange -> Error formatting schema with examples: %v", err)
 				// Fall back to the old method if there's an error
-				schemaMsg = s.dbManager.GetSchemaManager().FormatSchemaForLLM(diff.FullSchema)
+				schemaMsg = s.dbManager.GetSchemaManager().FormatSchemaForLLM(schemaDiff.FullSchema)
 			}
 		} else {
 			// For subsequent changes, get current schema with examples and show changes
@@ -1320,8 +1359,14 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 	// Decrypt connection details for the response
 	utils.DecryptConnection(&connectionCopy)
 
-	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v", 
+	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v",
 		chat.ID.Hex(), chat.Settings.NonTechMode)
+
+	// Handle username for spreadsheet connections which might not have it
+	var username string
+	if connectionCopy.Username != nil {
+		username = *connectionCopy.Username
+	}
 
 	return &dtos.ChatResponse{
 		ID:     chat.ID.Hex(),
@@ -1331,7 +1376,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			Type:           connectionCopy.Type,
 			Host:           connectionCopy.Host,
 			Port:           connectionCopy.Port,
-			Username:       *connectionCopy.Username,
+			Username:       username,
 			Database:       connectionCopy.Database,
 			IsExampleDB:    connectionCopy.IsExampleDB,
 			UseSSL:         connectionCopy.UseSSL,

@@ -388,39 +388,19 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
 
   return (
     <>
-      <div className="mb-6">
-        <label className="block font-bold mb-2 text-lg">Database Type</label>
-        <p className="text-gray-600 text-sm mb-2">Select your database system</p>
-        <div className="relative">
-          <select
-            name="type"
-            value={formData.type}
-            onChange={handleChange}
-            className="neo-input w-full appearance-none pr-12"
-          >
-            {[
-              { value: 'postgresql', label: 'PostgreSQL' },
-              { value: 'yugabytedb', label: 'YugabyteDB' },
-              { value: 'mysql', label: 'MySQL' },
-              { value: 'clickhouse', label: 'ClickHouse' },
-              { value: 'mongodb', label: 'MongoDB' },
-              { value: 'cassandra', label: 'Cassandra (Coming Soon)' },
-              { value: 'redis', label: 'Redis (Coming Soon)' },
-              { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
-            ].map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
-            <ChevronDown className="w-5 h-5 text-gray-400" />
-          </div>
+
+      {/* Show file upload instructions for CSV/Excel */}
+      {(formData.type === 'spreadsheet') && (
+        <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
+          <p className="text-blue-800">
+            Please continue to upload your CSV/Excel files in the next step.
+            All connection details will be handled automatically.
+          </p>
         </div>
-      </div>
+      )}
 
       {/* Universal Connection URI Field - Show for supported database types */}
-      {getUriConfig(formData.type) && (
+      {getUriConfig(formData.type) && formData.type !== 'spreadsheet' && (
         <div className="mb-6">
           <label className="block font-bold mb-2 text-lg">{getUriConfig(formData.type)!.label}</label>
           <p className="text-gray-600 text-sm mb-2">{getUriConfig(formData.type)!.description}</p>
@@ -443,7 +423,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
               parseConnectionUri(uri, formData.type);
             }}
           />
-          <p className="text-gray-500 text-xs mt-2">
+          <p className="text-gray-500 text-xs mt-3">
             Connection URI will be used to auto-fill the fields below. Replace &lt;password&gt; with your actual password.
             {formData.type === 'mongodb' && ' Both standard and Atlas SRV formats supported.'}
             {formData.type === 'postgresql' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
@@ -455,7 +435,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
       )}
 
       {/* Divider between Connection URI and Manual Fields */}
-      {getUriConfig(formData.type) && (
+      {getUriConfig(formData.type) && formData.type !== 'spreadsheet' && (
         <div className="flex items-center my-6">
           <div className="flex-1 border-t border-gray-300"></div>
           <span className="px-4 text-sm font-medium text-gray-500">OR</span>
@@ -463,8 +443,10 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
         </div>
       )}
 
-      <div className="mb-6">
-        <label className="block font-bold mb-2 text-lg">Host</label>
+      {formData.type !== 'spreadsheet' && (
+        <>
+          <div className="mb-6">
+            <label className="block font-bold mb-2 text-lg">Host</label>
         <p className="text-gray-600 text-sm mb-2">The hostname or IP address of your database server</p>
         <input
           type="text"
@@ -583,7 +565,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
           className="neo-input w-full"
           placeholder="Enter your database password"
         />
-        <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
+        <p className="text-gray-500 text-xs mt-3">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
       </div>
 
       {/* Divider line */}
@@ -713,6 +695,8 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
             )}
           </div>
         </div>
+      )}
+        </>
       )}
     </>
   );

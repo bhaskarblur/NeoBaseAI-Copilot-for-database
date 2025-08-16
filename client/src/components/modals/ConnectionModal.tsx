@@ -1,8 +1,8 @@
-import { AlertCircle, CheckCircle, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Chat, ChatSettings, Connection, SSLMode, TableInfo } from '../../types/chat';
+import { Chat, ChatSettings, Connection, SSLMode, TableInfo, FileUpload } from '../../types/chat';
 import chatService from '../../services/chatService';
-import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab } from './components';
+import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab } from './components';
 
 // Connection tab type
 type ConnectionType = 'basic' | 'ssh';
@@ -51,6 +51,7 @@ export default function ConnectionModal({
   
   // Connection type state to toggle between basic and SSH tabs (within Connection tab)
   const [connectionType, setConnectionType] = useState<ConnectionType>('basic');
+  const [fileUploads, setFileUploads] = useState<FileUpload[]>([]);
   
   // Track previous connection type to handle state persistence
   const [prevConnectionType, setPrevConnectionType] = useState<ConnectionType>('basic');
@@ -447,14 +448,24 @@ export default function ConnectionModal({
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
-    // Always validate these fields
-    ['host', 'port', 'database', 'username'].forEach(field => {
-      const error = validateField(field, updatedFormData);
-      if (error) {
-        newErrors[field as keyof FormErrors] = error;
-        hasErrors = true;
+    // Skip validation for Spreadsheet types as they don't need connection details
+    if (updatedFormData.type === 'spreadsheet') {
+      // Validate that at least one file is uploaded
+      if (!updatedFormData.file_uploads || updatedFormData.file_uploads.length === 0) {
+        setError('Please upload at least one file');
+        setIsLoading(false);
+        return;
       }
-    });
+    } else {
+      // Always validate these fields for database connections
+      ['host', 'port', 'database', 'username'].forEach(field => {
+        const error = validateField(field, updatedFormData);
+        if (error) {
+          newErrors[field as keyof FormErrors] = error;
+          hasErrors = true;
+        }
+      });
+    }
 
     // Validate SSL fields if SSL is enabled in Basic mode
     if (connectionType === 'basic' && updatedFormData.use_ssl) {
@@ -547,6 +558,45 @@ export default function ConnectionModal({
             setNewChatId(result.chatId);
             setShowingNewlyCreatedSchema(true);
             
+            // For spreadsheet connections, upload files first
+            if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+              try {
+                setSuccessMessage("Uploading files...");
+                
+                // Upload each file
+                for (const fileUpload of fileUploads) {
+                  if (!fileUpload.file) {
+                    console.error('No file object found for upload:', fileUpload.filename);
+                    continue;
+                  }
+                  
+                  const formData = new FormData();
+                  formData.append('file', fileUpload.file);
+                  formData.append('tableName', fileUpload.tableName || '');
+                  
+                  const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${result.chatId}/file`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: formData
+                  });
+                  
+                  if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to upload file');
+                  }
+                }
+                
+                setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              } catch (error: any) {
+                console.error('Failed to upload files:', error);
+                setError(error.message || 'Failed to upload files');
+                setIsLoading(false);
+                return;
+              }
+            }
+            
             // Switch to schema tab
             setActiveTab('schema');
             
@@ -568,7 +618,9 @@ export default function ConnectionModal({
               setSelectAllTables(selectedTableNames?.length === tablesResponse.tables?.length);
               
               console.log('Connection created. Now you can select tables to include in your schema.');
-              setSuccessMessage("Connection created successfully. Select tables to include in your schema.");
+              setSuccessMessage(updatedFormData.type === 'spreadsheet' 
+                ? "Files uploaded successfully. Review your data structure."
+                : "Connection created successfully. Select tables to include in your schema.");
             } catch (error: any) {
               console.error('Failed to load tables for new connection:', error);
               setError(error.message || 'Failed to load tables for new connection');
@@ -862,103 +914,83 @@ DATABASE_PASSWORD=`; // Mask password
       case 'connection':
         return (
           <>
-            <div>
-              <label className="block font-bold mb-2 text-lg">Paste Credentials</label>
-              <p className="text-gray-600 text-sm mb-2">
-                Paste your database credentials in the following format:
-              </p>
-              <textarea
-                ref={credentialsTextAreaRef}
-                className="neo-input w-full font-mono text-sm"
-                defaultValue={credentialsValue}
-                placeholder={`DATABASE_TYPE=postgresql
-DATABASE_HOST=your-host.example.com
-DATABASE_PORT=5432
-DATABASE_NAME=your_database
-DATABASE_USERNAME=your_username
-DATABASE_PASSWORD=your_password
-USE_SSL=false
-SSL_MODE=disable
-SSL_CERT_URL=https://example.com/cert.pem
-SSL_KEY_URL=https://example.com/key.pem
-SSL_ROOT_CERT_URL=https://example.com/ca.pem
-SSH_ENABLED=false
-SSH_HOST=ssh.example.com
-SSH_PORT=22
-SSH_USERNAME=ssh_user
-SSH_PRIVATE_KEY=your_private_key`}
-                rows={6}
-                onChange={(e) => {
-                  setCredentialsValue(e.target.value);
-                  const parsed = parseConnectionString(e.target.value);
-                  setFormData(prev => ({
-                    ...prev,
-                    ...parsed,
-                    // Keep existing password if we're editing and no new password provided
-                    password: parsed.password || (initialData ? formData.password : '')
-                  }));
-                  // Clear any errors for fields that were filled
-                  const newErrors = { ...errors };
-                  Object.keys(parsed).forEach(key => {
-                    delete newErrors[key as keyof FormErrors];
-                  });
-                  setErrors(newErrors);
-                  // Mark fields as touched
-                  const newTouched = { ...touched };
-                  Object.keys(parsed).forEach(key => {
-                    newTouched[key] = true;
-                  });
-                  setTouched(newTouched);
-                  
-                  // Set the connection type tab based on SSH enabled
-                  if (parsed.ssh_enabled) {
-                    handleConnectionTypeChange('ssh');
-                  } else {
-                    handleConnectionTypeChange('basic');
-                  }
-                }}
-              />
-              <p className="text-gray-500 text-xs mt-2">
-                All the fields will be automatically filled based on the pasted credentials
-              </p>
+            {/* Data Source Type Selector - Moved from BasicConnectionTab */}
+            <div className="mb-6">
+              <label className="block font-bold mb-2 text-lg">Data Source Type</label>
+              <p className="text-gray-600 text-sm mb-2">Select your data source</p>
+              <div className="relative">
+                <select
+                  name="type"
+                  value={formData.type}
+                  onChange={handleChange}
+                  className="neo-input w-full appearance-none pr-12"
+                >
+                  {[
+                    { value: 'postgresql', label: 'PostgreSQL' },
+                    { value: 'yugabytedb', label: 'YugabyteDB' },
+                    { value: 'mysql', label: 'MySQL' },
+                    { value: 'clickhouse', label: 'ClickHouse' },
+                    { value: 'mongodb', label: 'MongoDB' },
+                    { value: 'spreadsheet', label: 'Spreadsheet Files (CSV, Excel)' },
+                  ].map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+              </div>
             </div>
             
-            <div className="my-6 border-t border-gray-200"></div>
+            {/* {formData.type !== 'spreadsheet' && (
+              <div className="my-6 border-t border-gray-200"></div>
+            )} */}
             
-            {/* Connection type tabs */}
-            <div className="flex border-b border-gray-200 mb-6">
-              <button
-                type="button"
-                className={`py-2 px-4 font-semibold border-b-2 ${
-                  connectionType === 'basic'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-                onClick={() => handleConnectionTypeChange('basic')}
-              >
-                <div className="flex items-center gap-2">
-                  <Monitor className="w-4 h-4" />
-                  <span>Basic Connection</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={`py-2 px-4 font-semibold border-b-2 ${
-                  connectionType === 'ssh'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-                onClick={() => handleConnectionTypeChange('ssh')}
-              >
-                <div className="flex items-center gap-2">
-                  <KeyRound className="w-4 h-4" />
-                  <span>SSH Tunnel</span>
-                </div>
-              </button>
-            </div>
+            {/* Connection type tabs - Hide for CSV/Excel */}
+            {formData.type !== 'spreadsheet' && (
+              <div className="flex border-b border-gray-200 mb-6">
+                <button
+                  type="button"
+                  className={`py-2 px-4 font-semibold border-b-2 ${
+                    connectionType === 'basic'
+                      ? 'border-black text-black'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => handleConnectionTypeChange('basic')}
+                >
+                  <div className="flex items-center gap-2">
+                    <Monitor className="w-4 h-4" />
+                    <span>Basic Connection</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className={`py-2 px-4 font-semibold border-b-2 ${
+                    connectionType === 'ssh'
+                      ? 'border-black text-black'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => handleConnectionTypeChange('ssh')}
+                >
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4" />
+                    <span>SSH Tunnel</span>
+                  </div>
+                </button>
+              </div>
+            )}
 
             {/* Connection Tabs Content */}
-            {connectionType === 'basic' ? (
+            {formData.type === 'spreadsheet' ? (
+              <FileUploadTab
+                formData={formData}
+                handleChange={handleChange}
+                onFilesChange={(files) => {
+                  setFileUploads(files);
+                  setFormData(prev => ({ ...prev, file_uploads: files }));
+                }}
+              />
+            ) : connectionType === 'basic' ? (
               <BasicConnectionTab
                 formData={formData}
                 errors={errors}
@@ -984,7 +1016,24 @@ SSH_PRIVATE_KEY=your_private_key`}
           </>
         );
       case 'schema':
-        return (
+        return formData.type === 'spreadsheet' ? (
+          <DataStructureTab
+            chatId={newChatId || initialData?.id || ''}
+            isLoadingData={isLoadingTables}
+            onDeleteTable={(tableName) => {
+              // TODO: Implement delete table functionality
+              console.log('Delete table:', tableName);
+            }}
+            onDownloadData={(tableName) => {
+              // TODO: Implement download data functionality
+              console.log('Download data:', tableName);
+            }}
+            onRefreshData={() => {
+              // Refresh the tables
+              loadTables();
+            }}
+          />
+        ) : (
           <SchemaTab
             isLoadingTables={isLoadingTables}
             tables={tables}
@@ -1023,7 +1072,7 @@ SSH_PRIVATE_KEY=your_private_key`}
               <Database className="w-6 h-6" />
               <div className="flex flex-col gap-1 mt-2">
                 <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
-                <p className="text-gray-500 text-sm">Your database credentials are stored in encrypted form.</p>
+                <p className="text-gray-500 text-sm">Your data source credentials are stored in <strong>encrypted form</strong>.</p>
               </div>
             </div>
             <button
@@ -1063,7 +1112,7 @@ SSH_PRIVATE_KEY=your_private_key`}
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">Schema</span>
+                <span className="hidden md:block">{formData.type === 'spreadsheet' ? 'Data Structure' : 'Schema'}</span>
               </div>
             </button>
           )}

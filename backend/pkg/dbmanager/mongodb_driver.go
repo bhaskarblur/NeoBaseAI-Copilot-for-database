@@ -871,9 +871,10 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			executionTime := int(time.Since(startTime).Milliseconds())
 			log.Printf("MongoDBDriver -> ExecuteQuery -> MongoDB query executed in %d ms", executionTime)
 
+			// Store the result JSON in StreamData for streaming purposes
 			return &QueryExecutionResult{
 				Result:        result,
-				ResultJSON:    string(resultJSON),
+				StreamData:    resultJSON,
 				ExecutionTime: executionTime,
 			}
 		default:
@@ -2165,7 +2166,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 
 	return &QueryExecutionResult{
 		Result:        resultMap,
-		ResultJSON:    string(resultJSON),
+		StreamData:    resultJSON,
 		ExecutionTime: executionTime,
 	}
 }

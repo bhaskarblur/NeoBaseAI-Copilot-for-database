@@ -13,10 +13,10 @@ import (
 func GenerateConfigKey(config map[string]interface{}) string {
 	var username string
 	if config["username"] != nil {
-		if username, ok := config["username"].(string); ok {
-			username = username
-		} else if usernameString, ok := config["username"].(*string); ok {
-			username = *usernameString
+		if usernameStr, ok := config["username"].(string); ok {
+			username = usernameStr
+		} else if usernamePtr, ok := config["username"].(*string); ok && usernamePtr != nil {
+			username = *usernamePtr
 		}
 	}
 
@@ -24,17 +24,39 @@ func GenerateConfigKey(config map[string]interface{}) string {
 	if config["port"] != nil {
 		if portStr, ok := config["port"].(string); ok {
 			port = portStr
-		} else if portString, ok := config["port"].(*string); ok {
-			port = *portString
+		} else if portPtr, ok := config["port"].(*string); ok && portPtr != nil {
+			port = *portPtr
 		}
 	}
+	// Get other values with nil checks
+	typeStr := ""
+	if config["type"] != nil {
+		if t, ok := config["type"].(string); ok {
+			typeStr = t
+		}
+	}
+	
+	hostStr := ""
+	if config["host"] != nil {
+		if h, ok := config["host"].(string); ok {
+			hostStr = h
+		}
+	}
+	
+	databaseStr := ""
+	if config["database"] != nil {
+		if d, ok := config["database"].(string); ok {
+			databaseStr = d
+		}
+	}
+	
 	// Create a unique key based on connection details
 	key := fmt.Sprintf("%s:%s:%s:%s:%s",
-		config["type"],
-		config["host"],
+		typeStr,
+		hostStr,
 		port,
 		username,
-		config["database"])
+		databaseStr)
 
 	return key
 }

@@ -664,7 +664,7 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 		return checksums, nil
 	}
 
-	return nil, fmt.Errorf("unsupported database type: %s", dbType)
+	return nil, fmt.Errorf("unsupported data source type: %s", dbType)
 }
 
 // Update fetchTableList to use driver directly

@@ -360,7 +360,7 @@ func (d *MySQLDriver) ExecuteQuery(ctx context.Context, conn *Connection, query 
 			},
 		}
 	}
-	result.ResultJSON = string(resultJSON)
+	result.StreamData = resultJSON
 
 	return result
 }

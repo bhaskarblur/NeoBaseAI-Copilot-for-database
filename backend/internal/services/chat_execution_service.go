@@ -679,20 +679,22 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			log.Printf("ChatService -> ExecuteQuery -> countResult.Result: %+v", countResult.Result)
 
 			// Try to extract count from different possible formats
-
-			// Format 1: Direct count in the result
-			if countVal, ok := countResult.Result["count"].(float64); ok {
-				tempCount := int(countVal)
-				totalRecordsCount = &tempCount
-				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result: %d", tempCount)
-			} else if countVal, ok := countResult.Result["count"].(int64); ok {
-				tempCount := int(countVal)
-				totalRecordsCount = &tempCount
-				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int64): %d", tempCount)
-			} else if countVal, ok := countResult.Result["count"].(int); ok {
-				totalRecordsCount = &countVal
-				log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int): %d", countVal)
-			} else if results, ok := countResult.Result["results"]; ok {
+			
+			// First type assert Result to map
+			if resultMap, ok := countResult.Result.(map[string]interface{}); ok {
+				// Format 1: Direct count in the result
+				if countVal, ok := resultMap["count"].(float64); ok {
+					tempCount := int(countVal)
+					totalRecordsCount = &tempCount
+					log.Printf("ChatService -> ExecuteQuery -> Found count directly in result: %d", tempCount)
+				} else if countVal, ok := resultMap["count"].(int64); ok {
+					tempCount := int(countVal)
+					totalRecordsCount = &tempCount
+					log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int64): %d", tempCount)
+				} else if countVal, ok := resultMap["count"].(int); ok {
+					totalRecordsCount = &countVal
+					log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int): %d", countVal)
+				} else if results, ok := resultMap["results"]; ok {
 				// Format 2: Results is an array of objects with count
 				if resultsList, ok := results.([]interface{}); ok && len(resultsList) > 0 {
 					log.Printf("ChatService -> ExecuteQuery -> Results is a list with %d items", len(resultsList))
@@ -779,7 +781,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			// If we still couldn't extract the count, try a more direct approach for the specific format
 			if totalRecordsCount == nil {
 				// Try to handle the specific format: map[results:[map[count:92]]]
-				if resultsRaw, ok := countResult.Result["results"]; ok {
+				if resultsRaw, ok := resultMap["results"]; ok {
 					log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
 
 					// Convert to JSON and back to ensure proper type handling
@@ -814,6 +816,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					}
 				}
 			}
+			} // Close the resultMap check
 
 			if totalRecordsCount == nil {
 				log.Printf("ChatService -> ExecuteQuery -> Could not extract count from result: %+v", countResult.Result)
@@ -1001,17 +1004,25 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
 	// Then we need to save capped 50 results in DB
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
-	log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %+v", result.ResultJSON)
+	
+	// Convert Result to JSON string first
+	resultJSON, err := json.Marshal(result.Result)
+	if err != nil {
+		log.Printf("ChatService -> ExecuteQuery -> Error marshalling result: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal result: %v", err)
+	}
+	resultJSONStr := string(resultJSON)
+	log.Printf("ChatService -> ExecuteQuery -> resultJSON: %+v", resultJSONStr)
 
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
-	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
+	if err := json.Unmarshal(resultJSON, &resultListFormatting); err != nil {
 		log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
-		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
+		if err := json.Unmarshal(resultJSON, &resultMapFormatting); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
 			// Try to unmarshal as a map
-			err = json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting)
+			err = json.Unmarshal(resultJSON, &resultMapFormatting)
 			if err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
 			}
@@ -1027,12 +1038,13 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			log.Printf("ChatService -> ExecuteQuery -> resultListFormatting length > 50")
 			formattedResultJSON = resultListFormatting[:50] // Cap the result to 50 records
 
-			// Cap the result.ResultJSON to 50 records
+			// Cap the result to 50 records
 			cappedResults, err := json.Marshal(resultListFormatting[:50])
 			if err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
 			} else {
-				result.ResultJSON = string(cappedResults)
+				resultJSONStr = string(cappedResults)
+				result.Result = resultListFormatting[:50]
 			}
 		}
 	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
@@ -1048,7 +1060,8 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			if err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
 			} else {
-				result.ResultJSON = string(cappedResultsJSON)
+				resultJSONStr = string(cappedResultsJSON)
+				result.Result = cappedResults
 			}
 		} else {
 			formattedResultJSON = map[string]interface{}{
@@ -1065,7 +1078,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	query.IsExecuted = true
 	query.IsRolledBack = false
 	query.ExecutionTime = &result.ExecutionTime
-	query.ExecutionResult = &result.ResultJSON
+	query.ExecutionResult = &resultJSONStr
 	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 	if totalRecordsCount != nil {
 		if query.Pagination == nil {
@@ -1099,9 +1112,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						}
 						(*msg.Queries)[i].Pagination.TotalRecordsCount = totalRecordsCount
 					}
-					log.Printf("ChatService -> ExecuteQuery -> result.ResultJSON: %v", result.ResultJSON)
+					log.Printf("ChatService -> ExecuteQuery -> resultJSONStr: %v", resultJSONStr)
 					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult before update: %v", (*msg.Queries)[i].ExecutionResult)
-					(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+					(*msg.Queries)[i].ExecutionResult = &resultJSONStr
 					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult after update: %v", (*msg.Queries)[i].ExecutionResult)
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
@@ -1174,8 +1187,11 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
+									// Convert Result to JSON string
+									resultJSONBytes, _ := json.Marshal(result.Result)
+									resultJSONStr := string(resultJSONBytes)
 									queryMap["executionResult"] = map[string]interface{}{
-										"result": result.ResultJSON,
+										"result": resultJSONStr,
 									}
 								} else {
 									queryMap["executionResult"] = map[string]interface{}{
@@ -1210,8 +1226,11 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
+									// Convert Result to JSON string
+									resultJSONBytes, _ := json.Marshal(result.Result)
+									resultJSONStr := string(resultJSONBytes)
 									queryMap["executionResult"] = map[string]interface{}{
-										"result": result.ResultJSON,
+										"result": resultJSONStr,
 									}
 								} else {
 									queryMap["executionResult"] = map[string]interface{}{
@@ -1419,7 +1438,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 		contextBuilder.WriteString(fmt.Sprintf("\nQuery id: %s\n", query.ID.Hex())) // This will help LLM to understand the context of the query to be rolled back
 		contextBuilder.WriteString(fmt.Sprintf("\nOriginal query: %s\n", query.Query))
-		contextBuilder.WriteString(fmt.Sprintf("Dependent query result: %s\n", dependentResult.ResultJSON))
+		// Convert Result to JSON string
+		dependentResultJSONBytes, _ := json.Marshal(dependentResult.Result)
+		dependentResultJSONStr := string(dependentResultJSONBytes)
+		contextBuilder.WriteString(fmt.Sprintf("Dependent query result: %s\n", dependentResultJSONStr))
 		contextBuilder.WriteString("\nPlease generate a rollback query that will undo the effects of the original query.")
 
 		// Get connection info for db type
@@ -1717,7 +1739,10 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				(*msg.Queries)[i].IsRolledBack = true
 				(*msg.Queries)[i].IsExecuted = true
 				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
-				(*msg.Queries)[i].ExecutionResult = &result.ResultJSON
+				// Convert Result to JSON string
+				resultJSONBytes, _ := json.Marshal(result.Result)
+				resultJSONStr := string(resultJSONBytes)
+				(*msg.Queries)[i].ExecutionResult = &resultJSONStr
 				(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{
@@ -1772,8 +1797,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
+								// Convert Result to JSON string
+								resultJSONBytes, _ := json.Marshal(result.Result)
+								resultJSONStr := string(resultJSONBytes)
 								queryMap["executionResult"] = map[string]interface{}{
-									"result": result.ResultJSON,
+									"result": resultJSONStr,
 								}
 							} else {
 								queryMap["executionResult"] = map[string]interface{}{
@@ -1808,8 +1836,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
+								// Convert Result to JSON string
+								resultJSONBytes, _ := json.Marshal(result.Result)
+								resultJSONStr := string(resultJSONBytes)
 								queryMap["executionResult"] = map[string]interface{}{
-									"result": result.ResultJSON,
+									"result": resultJSONStr,
 								}
 							} else {
 								queryMap["executionResult"] = map[string]interface{}{
@@ -2222,14 +2253,18 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
 	}
 
+	// Convert Result to JSON string
+	resultJSONBytes, _ := json.Marshal(result.Result)
+	resultJSONStr := string(resultJSONBytes)
+	
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
-	if err := json.Unmarshal([]byte(result.ResultJSON), &resultListFormatting); err != nil {
-		if err := json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting); err != nil {
+	if err := json.Unmarshal([]byte(resultJSONStr), &resultListFormatting); err != nil {
+		if err := json.Unmarshal([]byte(resultJSONStr), &resultMapFormatting); err != nil {
 			log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
 			// Try to unmarshal as a map
-			err = json.Unmarshal([]byte(result.ResultJSON), &resultMapFormatting)
+			err = json.Unmarshal(resultJSONBytes, &resultMapFormatting)
 			if err != nil {
 				log.Printf("ChatService -> GetQueryResults -> Error unmarshalling result JSON: %v", err)
 			}

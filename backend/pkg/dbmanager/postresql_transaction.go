@@ -16,7 +16,7 @@ type PostgresTransaction struct {
 	conn *Connection // Add connection reference
 }
 
-func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
+func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
 	startTime := time.Now()
 
 	// Split into individual statements
@@ -43,7 +43,7 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 						Message: err.Error(),
 						Details: fmt.Sprintf("Failed to execute SELECT: %s", stmt),
 					},
-				}
+				}, nil
 			}
 		} else {
 			// For non-SELECT queries
@@ -53,9 +53,9 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 					Error: &dtos.QueryError{
 						Code:    "QUERY_EXECUTION_FAILED",
 						Message: err.Error(),
-						Details: fmt.Sprintf("Failed to execute %s: %s", queryType, stmt),
+						Details: fmt.Sprintf("Failed to execute statement: %s", stmt),
 					},
-				}
+				}, nil
 			}
 
 			// Check for specific PostgreSQL errors
@@ -77,7 +77,7 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 							Message: err.Error(),
 							Details: "Cannot drop a table that doesn't exist",
 						},
-					}
+					}, nil
 				}
 
 				log.Printf("PostgresDriver -> ExecuteQuery -> Table '%s' exists, proceeding with DROP", tableName)
@@ -101,7 +101,7 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 					Message: err.Error(),
 					Details: "Failed to process query results",
 				},
-			}
+			}, nil
 		}
 		result.Result = map[string]interface{}{
 			"results": results,
@@ -129,11 +129,11 @@ func (tx *PostgresTransaction) ExecuteQuery(ctx context.Context, conn *Connectio
 				Message: err.Error(),
 				Details: "Failed to marshal query results",
 			},
-		}
+		}, nil
 	}
-	result.ResultJSON = string(resultJSON)
+	result.StreamData = resultJSON
 
-	return result
+	return result, nil
 }
 
 func (t *PostgresTransaction) Commit() error {

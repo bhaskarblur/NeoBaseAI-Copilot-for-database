@@ -83,6 +83,7 @@ func Initialize() {
 		manager.RegisterDriver(constants.DatabaseTypeMySQL, dbmanager.NewMySQLDriver())
 		manager.RegisterDriver(constants.DatabaseTypeClickhouse, dbmanager.NewClickHouseDriver())
 		manager.RegisterDriver(constants.DatabaseTypeMongoDB, dbmanager.NewMongoDBDriver())
+		manager.RegisterDriver(constants.DatabaseTypeSpreadsheet, dbmanager.NewSpreadsheetDriver())
 		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
@@ -172,6 +173,11 @@ func Initialize() {
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMongoDB),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMongoDB, false),
 					},
+					{
+						DBType:       constants.DatabaseTypeSpreadsheet,
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeSpreadsheet),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeSpreadsheet, false),
+					},
 				},
 			})
 			if err != nil {
@@ -210,6 +216,11 @@ func Initialize() {
 						DBType:       constants.DatabaseTypeMongoDB,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeMongoDB),
 						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMongoDB, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeSpreadsheet,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeSpreadsheet),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeSpreadsheet, false),
 					},
 				},
 			})
