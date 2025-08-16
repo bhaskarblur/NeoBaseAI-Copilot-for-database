@@ -275,9 +275,13 @@ function AppContent() {
       setIsAuthenticated(false);
       setSelectedConnection(undefined);
       setMessages([]);
+      // Force a full page reload to root to clear the URL
+      window.location.href = '/';
     } catch (error: any) {
       console.error('Logout failed:', error);
       setIsAuthenticated(false);
+      // Force navigation even on error
+      window.location.href = '/';
     }
   };
 
