@@ -225,9 +225,10 @@ export default function Sidebar({
       analyticsService.trackLogout(user.id, user.username);
     }
     
+    // Clear the URL by navigating to root
+    window.location.href = '/';
     onLogout();
     setShowLogoutConfirm(false);
-    navigate('/'); // Navigate to root on logout
   };
 
   const handleEditConnection = (connection: Chat) => {

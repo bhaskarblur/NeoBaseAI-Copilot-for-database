@@ -275,9 +275,13 @@ function AppContent() {
       setIsAuthenticated(false);
       setSelectedConnection(undefined);
       setMessages([]);
+      // Force a full page reload to root to clear the URL
+      window.location.href = '/';
     } catch (error: any) {
       console.error('Logout failed:', error);
       setIsAuthenticated(false);
+      // Force navigation even on error
+      window.location.href = '/';
     }
   };
 
@@ -362,7 +366,7 @@ function AppContent() {
     }
   };
 
-  const handleEditConnection = async (id: string, data: Connection, settings: ChatSettings): Promise<{ success: boolean; error?: string }> => {
+  const handleEditConnection = async (id: string, data: Connection, settings: ChatSettings): Promise<{ success: boolean; error?: string; updatedChat?: Chat }> => {
     let loadingToastId: string | undefined;
     loadingToastId = toast.loading('Updating connection...', {
       style: {
@@ -450,7 +454,7 @@ function AppContent() {
           toast.dismiss(loadingToastId);
         }
 
-        return { success: true };
+        return { success: true, updatedChat: response };
       }
 
       if (loadingToastId) {

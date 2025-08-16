@@ -1,7 +1,10 @@
 import { ArrowRight, Boxes, Github } from 'lucide-react'
+import { useState } from 'react'
 import FloatingBackground from './FloatingBackground'
 
 const HeroSection = () => {
+  const [viewMode, setViewMode] = useState<'technical' | 'non-technical'>('technical')
+  
   return (
     <section className="py-12 sm:py-16 md:py-20 lg:py-28 relative">
       {/* Background Pattern */}
@@ -14,7 +17,7 @@ const HeroSection = () => {
             <div className="inline-block neo-border bg-[#FFDB58] px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-sm sm:text-sm">
               #Open-Source,  #AI Copilot for Database
             </div>
-            <h1 className="text-4xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
+            <h1 className="text-5xl sm:text-5xl md:text-5xl lg:text-6xl font-extrabold leading-tight">
               Where there's a Database.<br />
               <span className="text-yellow-500">There's <span className="text-green-500">NeoBase!</span></span>
             </h1>
@@ -44,9 +47,43 @@ const HeroSection = () => {
           </div>
 
           {/* Right Side - Hero Image */}
-          <div className="md:w-7/12 mt-10 sm:mt-12 md:mt-20 md:absolute md:right-0 md:translate-x-[10%] lg:translate-x-[15%] xl:translate-x-[20%] z-0" >
-            <div className="neo-border bg-white p-0 mx-4 sm:mx-6 md:mx-0 relative hover:shadow-lg transition-all duration-300">
-              <img src="/hero-ss.png" alt="NeoBase Chat" className="w-full h-auto" />
+          <div className="md:w-7/12 mt-10 sm:mt-12 md:mt-40 md:absolute md:right-0 md:translate-x-[10%] lg:translate-x-[15%] xl:translate-x-[20%] z-20" >
+            <div className="neo-border bg-white p-0 mx-0 sm:mx-6 md:mx-0 relative hover:shadow-lg transition-all duration-300">
+              <div className="relative overflow-hidden">
+                <img 
+                  src="/hero-ss.png" 
+                  alt="NeoBase Chat Technical View" 
+                  className={`w-full h-auto transition-opacity duration-500 ${viewMode === 'technical' ? 'opacity-100' : 'opacity-0 absolute top-0 left-0'}`} 
+                />
+                <img 
+                  src="/hero-ss-nontech.png" 
+                  alt="NeoBase Chat Non-Technical View" 
+                  className={`w-full h-auto transition-opacity duration-500 ${viewMode === 'non-technical' ? 'opacity-100' : 'opacity-0 absolute top-0 left-0'}`} 
+                />
+              </div>
+              {/* Toggle Buttons */}
+              <div className="flex gap-2 mt-4 justify-center pb-4 relative z-30">
+                <button
+                  onClick={() => setViewMode('technical')}
+                  className={`px-4 py-2 font-semibold transition-all duration-200 cursor-pointer ${
+                    viewMode === 'technical' 
+                      ? 'bg-black text-white neo-border' 
+                      : 'bg-white text-black neo-border hover:bg-gray-100'
+                  }`}
+                >
+                  <span className="text-sm md:text-base">View Technical</span>
+                </button>
+                <button
+                  onClick={() => setViewMode('non-technical')}
+                  className={`px-4 py-2 font-semibold transition-all duration-200 cursor-pointer ${
+                    viewMode === 'non-technical' 
+                      ? 'bg-black text-white neo-border' 
+                      : 'bg-white text-black neo-border hover:bg-gray-100'
+                  }`}
+                >
+                 <span className="text-sm md:text-base">View Non-Technical</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
