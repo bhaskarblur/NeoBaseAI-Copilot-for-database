@@ -895,6 +895,10 @@ export default function MessageTile({
         }
 
         if (typeof value === 'object' && value !== null) {
+            // Check if it's an empty object
+            if (Object.keys(value).length === 0) {
+                return <span className="text-gray-400">-</span>;
+            }
             return <NestedJsonCell data={value} />;
         }
 
