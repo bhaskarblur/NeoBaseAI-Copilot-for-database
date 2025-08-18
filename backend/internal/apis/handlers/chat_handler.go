@@ -335,6 +335,88 @@ func (h *ChatHandler) DeleteMessages(c *gin.Context) {
 	})
 }
 
+// @Summary Pin a message
+// @Description Pin a message and its related message (user-AI cluster)
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Param messageId path string true "Message ID"
+
+func (h *ChatHandler) PinMessage(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	messageID := c.Param("messageId")
+
+	response, statusCode, err := h.chatService.PinMessage(userID, chatID, messageID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
+// @Summary Unpin a message
+// @Description Unpin a message and its related message (user-AI cluster)
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Param messageId path string true "Message ID"
+
+func (h *ChatHandler) UnpinMessage(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	messageID := c.Param("messageId")
+
+	response, statusCode, err := h.chatService.UnpinMessage(userID, chatID, messageID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
+// @Summary List pinned messages
+// @Description List all pinned messages for a chat
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+
+func (h *ChatHandler) ListPinnedMessages(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	response, statusCode, err := h.chatService.ListPinnedMessages(userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(int(statusCode), dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
 // @Summary Handle stream event
 // @Description Handle stream event
 // @Accept json

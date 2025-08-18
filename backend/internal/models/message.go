@@ -2,6 +2,7 @@ package models
 
 import (
 	"log"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -16,6 +17,8 @@ type Message struct {
 	Queries       *[]Query            `bson:"queries,omitempty" json:"queries,omitempty"`
 	ActionButtons *[]ActionButton     `bson:"action_buttons,omitempty" json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
 	NonTechMode   bool                `bson:"non_tech_mode" json:"non_tech_mode"`                       // Whether this message was generated in non-tech mode
+	IsPinned      bool                `bson:"is_pinned" json:"is_pinned"`                               // Whether this message is pinned
+	PinnedAt      *time.Time          `bson:"pinned_at,omitempty" json:"pinned_at,omitempty"`           // When the message was pinned
 	Base          `bson:",inline"`
 }
 

@@ -30,6 +30,11 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("/:id/messages", chatHandler.CreateMessage)
 		protected.PATCH("/:id/messages/:messageId", chatHandler.UpdateMessage)
 		protected.DELETE("/:id/messages", chatHandler.DeleteMessages)
+		
+		// Message pinning
+		protected.POST("/:id/messages/:messageId/pin", chatHandler.PinMessage)
+		protected.DELETE("/:id/messages/:messageId/pin", chatHandler.UnpinMessage)
+		protected.GET("/:id/messages/pinned", chatHandler.ListPinnedMessages)
 
 		// Database connection routes
 		protected.POST("/:id/connect", chatHandler.ConnectDB)

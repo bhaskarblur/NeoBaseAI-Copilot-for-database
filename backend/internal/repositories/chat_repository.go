@@ -26,6 +26,8 @@ type ChatRepository interface {
 	FindLatestMessageByChat(chatID primitive.ObjectID, page, pageSize int) ([]*models.Message, int64, error)
 	FindMessageByID(id primitive.ObjectID) (*models.Message, error)
 	FindNextMessageByID(id primitive.ObjectID) (*models.Message, error)
+	FindPinnedMessagesByChat(chatID primitive.ObjectID) ([]models.Message, error)
+	FindMessagesByChatAfterTime(chatID primitive.ObjectID, after time.Time, page, pageSize int) ([]models.Message, int64, error)
 }
 
 type chatRepository struct {
@@ -232,4 +234,58 @@ func (r *chatRepository) FindNextMessageByID(id primitive.ObjectID) (*models.Mes
 		}
 		return &nextMsg, err
 	}
+}
+
+// FindPinnedMessagesByChat finds all pinned messages for a chat, sorted by pinnedAt descending
+func (r *chatRepository) FindPinnedMessagesByChat(chatID primitive.ObjectID) ([]models.Message, error) {
+	var messages []models.Message
+	filter := bson.M{
+		"chat_id":    chatID,
+		"is_pinned":  true,
+	}
+
+	// Sort by pinnedAt descending (latest first)
+	opts := options.Find().SetSort(bson.D{{Key: "pinned_at", Value: -1}})
+
+	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &messages)
+	return messages, err
+}
+
+// FindMessagesByChatAfterTime finds messages in a chat created after a specific time
+func (r *chatRepository) FindMessagesByChatAfterTime(chatID primitive.ObjectID, after time.Time, page, pageSize int) ([]models.Message, int64, error) {
+	var messages []models.Message
+	filter := bson.M{
+		"chat_id": chatID,
+		"created_at": bson.M{
+			"$gt": after,
+		},
+	}
+
+	// Get total count
+	total, err := r.messageCollection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Setup pagination
+	skip := int64((page - 1) * pageSize)
+	opts := options.Find().
+		SetSkip(skip).
+		SetLimit(int64(pageSize)).
+		SetSort(bson.D{{Key: "created_at", Value: -1}}) // Descending order
+
+	cursor, err := r.messageCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cursor.Close(context.Background())
+
+	err = cursor.All(context.Background(), &messages)
+	return messages, total, err
 }

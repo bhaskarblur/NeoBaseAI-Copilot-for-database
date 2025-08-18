@@ -509,6 +509,61 @@ const chatService = {
             console.error('Get query recommendations error:', error);
             throw new Error(error.response?.data?.error || 'Failed to get query recommendations');
         }
+    },
+
+    async pinMessage(chatId: string, messageId: string): Promise<{success: boolean}> {
+        try {
+            const response = await axios.post(
+                `${API_URL}/chats/${chatId}/messages/${messageId}/pin`,
+                {},
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Pin message error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to pin message');
+        }
+    },
+
+    async unpinMessage(chatId: string, messageId: string): Promise<{success: boolean}> {
+        try {
+            const response = await axios.delete(
+                `${API_URL}/chats/${chatId}/messages/${messageId}/pin`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Unpin message error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to unpin message');
+        }
+    },
+
+    async getPinnedMessages(chatId: string): Promise<MessagesResponse> {
+        try {
+            const response = await axios.get(
+                `${API_URL}/chats/${chatId}/messages/pinned`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Get pinned messages error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to get pinned messages');
+        }
     }
 };
 

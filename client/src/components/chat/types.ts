@@ -48,6 +48,8 @@ export interface Message {
     user_message_id?: string;
     action_at?: string;
     non_tech_mode?: boolean;
+    is_pinned?: boolean;
+    pinned_at?: string;
 }
 
 export interface LoadingStep {
