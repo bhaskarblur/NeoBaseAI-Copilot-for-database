@@ -574,6 +574,11 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 
 	// Decrypt connection details
 	utils.DecryptConnection(&chat.Connection)
+	
+	// Log connection details for debugging spreadsheet connections
+	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet {
+		log.Printf("ChatService -> ConnectDB -> Spreadsheet connection after decrypt: Host=%s, Database=%s", chat.Connection.Host, chat.Connection.Database)
+	}
 
 	// Ensure port has a default value if empty
 	if chat.Connection.Port == nil || *chat.Connection.Port == "" {

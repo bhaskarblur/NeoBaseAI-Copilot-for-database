@@ -153,11 +153,6 @@ func (m *Manager) registerDefaultDrivers() {
 
 	// Register Spreadsheet (CSV/Excel) driver
 	m.RegisterDriver("spreadsheet", NewSpreadsheetDriver())
-
-	// Register Spreadsheet schema fetcher (uses PostgreSQL fetcher)
-	m.RegisterFetcher("spreadsheet", func(db DBExecutor) SchemaFetcher {
-		return &PostgresDriver{}
-	})
 }
 
 // GetPoolMetrics returns metrics about the connection pools
@@ -287,6 +282,13 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 
 		// Update metrics
 		m.poolMetrics.reuseCount++
+		
+		// For spreadsheet connections from pool, ensure schema exists
+		if config.Type == "spreadsheet" && chatID != "" {
+			schemaName := fmt.Sprintf("conn_%s", chatID)
+			// Store schema name in config
+			conn.Config.SchemaName = schemaName
+		}
 	} else {
 		// Create a new connection
 		conn, err = driver.Connect(config)
@@ -326,6 +328,25 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		conn.ChatID = chatID
 		conn.StreamID = streamID
 		conn.ConfigKey = configKey
+	}
+
+	// For spreadsheet connections, create the schema after ChatID is set
+	if config.Type == "spreadsheet" && chatID != "" {
+		schemaName := fmt.Sprintf("conn_%s", chatID)
+		if err := m.createSpreadsheetSchema(conn, schemaName); err != nil {
+			// Clean up on error
+			if !poolExists {
+				// Only disconnect if we created a new connection
+				driver.Disconnect(conn)
+				m.dbPoolsMu.Lock()
+				delete(m.dbPools, configKey)
+				m.dbPoolsMu.Unlock()
+			}
+			return fmt.Errorf("failed to create spreadsheet schema: %w", err)
+		}
+		// Store schema name in config for later use
+		conn.Config.SchemaName = schemaName
+		log.Printf("DBManager -> Connect -> Created spreadsheet schema: %s", schemaName)
 	}
 
 	// Initialize subscribers map with existing subscribers
@@ -376,6 +397,24 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		m.doSchemaCheck(chatID)
 	}
 
+	return nil
+}
+
+// createSpreadsheetSchema creates a schema for spreadsheet connections
+func (m *Manager) createSpreadsheetSchema(conn *Connection, schemaName string) error {
+	// Get SQL DB from GORM
+	sqlDB, err := conn.DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get SQL DB: %v", err)
+	}
+
+	// Create schema if not exists
+	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName)
+	if _, err := sqlDB.Exec(query); err != nil {
+		return fmt.Errorf("failed to create schema: %v", err)
+	}
+
+	log.Printf("DBManager -> createSpreadsheetSchema -> Created schema: %s", schemaName)
 	return nil
 }
 
@@ -437,15 +476,16 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 		log.Printf("DBManager -> Disconnect -> Cleared schema cache for chatID: %s", chatID)
 	}
 
-	// For spreadsheet connections, delete all associated data
-	if conn.Config.Type == "spreadsheet" {
-		driver := m.drivers["spreadsheet"]
-		if spreadsheetDriver, ok := driver.(*SpreadsheetDriver); ok {
-			if err := spreadsheetDriver.DeleteConnectionData(chatID); err != nil {
-				log.Printf("DBManager -> Disconnect -> Failed to delete spreadsheet data: %v", err)
-			} else {
-				log.Printf("DBManager -> Disconnect -> Deleted spreadsheet data for chatID: %s", chatID)
-			}
+	// For spreadsheet connections, delete the schema and all data when requested
+	if deleteSchema && conn.Config.Type == "spreadsheet" {
+		// Create a new spreadsheet driver instance to delete the schema
+		spreadsheetDriver := &SpreadsheetDriver{
+			postgresDriver: NewPostgresDriver(),
+		}
+		if err := spreadsheetDriver.DeleteConnectionData(chatID); err != nil {
+			log.Printf("DBManager -> Disconnect -> Failed to delete spreadsheet schema: %v", err)
+		} else {
+			log.Printf("DBManager -> Disconnect -> Successfully deleted spreadsheet schema for chatID: %s", chatID)
 		}
 	}
 
@@ -511,8 +551,13 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 		}
 		return executor, nil
 	case "spreadsheet":
-		// For Spreadsheet, we use PostgreSQL wrapper since it's PostgreSQL underneath
-		return NewPostgresWrapper(conn.DB, m, chatID), nil
+		// For Spreadsheet, we need to create a wrapper that includes the schema name
+		wrapper := &spreadsheetSchemaWrapper{
+			conn:       conn,
+			schemaName: conn.Config.SchemaName,
+			chatID:     chatID,
+		}
+		return wrapper, nil
 	default:
 		return nil, fmt.Errorf("unsupported data source type: %s", conn.Config.Type)
 	}

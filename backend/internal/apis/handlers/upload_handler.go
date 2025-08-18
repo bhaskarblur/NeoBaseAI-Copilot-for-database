@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -196,11 +197,18 @@ func (h *UploadHandler) GetTableData(c *gin.Context) {
 
 	result, statusCode, err := h.chatService.GetSpreadsheetTableData(userID, chatID, tableName, page, pageSize)
 	if err != nil {
-		c.JSON(int(statusCode), gin.H{"error": err.Error()})
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    result,
+	})
 }
 
 // DeleteTable deletes a spreadsheet table
@@ -229,6 +237,7 @@ func (h *UploadHandler) DownloadTableData(c *gin.Context) {
 	chatID := c.Param("chatID")
 	tableName := c.Param("tableName")
 	format := c.DefaultQuery("format", "csv")
+	rowIDsParam := c.Query("rowIds")
 
 	if userID == "" || chatID == "" || tableName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required parameters"})
@@ -240,12 +249,32 @@ func (h *UploadHandler) DownloadTableData(c *gin.Context) {
 		return
 	}
 
-	// Get all data for download
-	data, statusCode, err := h.chatService.DownloadSpreadsheetTableData(userID, chatID, tableName)
+	// Parse row IDs if provided
+	var rowIDs []string
+	if rowIDsParam != "" {
+		rowIDs = strings.Split(rowIDsParam, ",")
+	}
+
+	// Get data for download (all data or filtered by row IDs)
+	var data *dtos.SpreadsheetDownloadResponse
+	var statusCode uint32
+	var err error
+	
+	if len(rowIDs) > 0 {
+		// Get filtered data
+		data, statusCode, err = h.chatService.DownloadSpreadsheetTableDataWithFilter(userID, chatID, tableName, rowIDs)
+	} else {
+		// Get all data
+		data, statusCode, err = h.chatService.DownloadSpreadsheetTableData(userID, chatID, tableName)
+	}
+	
 	if err != nil {
 		c.JSON(int(statusCode), gin.H{"error": err.Error()})
 		return
 	}
+	
+	log.Printf("DownloadTableData -> Got %d columns and %d rows for table %s", 
+		len(data.Columns), len(data.Rows), tableName)
 
 	if format == "csv" {
 		// Set headers for CSV download
@@ -303,6 +332,41 @@ func (h *UploadHandler) DownloadTableData(c *gin.Context) {
 			return
 		}
 	}
+}
+
+// DeleteRow deletes a specific row from a spreadsheet table
+func (h *UploadHandler) DeleteRow(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("chatID")
+	tableName := c.Param("tableName")
+	rowID := c.Param("rowID")
+
+	if userID == "" || chatID == "" || tableName == "" || rowID == "" {
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   strPtr("Missing required parameters"),
+		})
+		return
+	}
+
+	statusCode, err := h.chatService.DeleteSpreadsheetRow(userID, chatID, tableName, rowID)
+	if err != nil {
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   strPtr(err.Error()),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    gin.H{"message": "Row deleted successfully"},
+	})
+}
+
+// Helper function to get string pointer
+func strPtr(s string) *string {
+	return &s
 }
 
 // sanitizeTableName removes special characters from filename to create valid table name

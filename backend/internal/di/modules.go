@@ -84,6 +84,27 @@ func Initialize() {
 		manager.RegisterDriver(constants.DatabaseTypeClickhouse, dbmanager.NewClickHouseDriver())
 		manager.RegisterDriver(constants.DatabaseTypeMongoDB, dbmanager.NewMongoDBDriver())
 		manager.RegisterDriver(constants.DatabaseTypeSpreadsheet, dbmanager.NewSpreadsheetDriver())
+		
+		// Register schema fetchers
+		manager.RegisterFetcher(constants.DatabaseTypePostgreSQL, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.PostgresDriver{}
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeYugabyteDB, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.PostgresDriver{}
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeMySQL, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return dbmanager.NewMySQLSchemaFetcher(db)
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeClickhouse, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.ClickHouseDriver{}
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeMongoDB, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.MongoDBDriver{}
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeSpreadsheet, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.PostgresDriver{}
+		})
+		
 		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)

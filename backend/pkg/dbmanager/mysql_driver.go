@@ -429,3 +429,4 @@ func (d *MySQLDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, ta
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
+

@@ -77,6 +77,8 @@ type TableInfo struct {
 	Name       string       `json:"name"`
 	Columns    []ColumnInfo `json:"columns"`
 	IsSelected bool         `json:"is_selected"`
+	RowCount   int64        `json:"row_count"`
+	SizeBytes  int64        `json:"size_bytes"`
 }
 
 // ColumnInfo represents a column in a table

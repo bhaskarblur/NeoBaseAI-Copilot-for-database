@@ -463,3 +463,4 @@ func (d *ClickHouseDriver) FetchExampleRecords(ctx context.Context, db DBExecuto
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
+

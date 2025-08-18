@@ -285,10 +285,13 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 	// Get total row count
 	var totalRows int64
 	countQuery := fmt.Sprintf("SELECT COUNT(*) as count FROM %s.%s", schemaName, tableName)
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Count query: %s", countQuery)
 	var countData []map[string]interface{}
 	if err := conn.QueryRows(countQuery, &countData); err != nil {
+		log.Printf("ChatService -> GetSpreadsheetTableData -> Error getting row count: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get row count: %v", err)
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Count data: %+v", countData)
 	if len(countData) > 0 {
 		if count, ok := countData[0]["count"].(int64); ok {
 			totalRows = count
@@ -296,52 +299,81 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 			totalRows = int64(count)
 		}
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Total rows: %d", totalRows)
 
-	// Get column information
-	var columns []struct {
-		ColumnName string `gorm:"column:column_name"`
-	}
-	colQuery := fmt.Sprintf(`
+	// Get column information - get ALL columns first
+	allColQuery := fmt.Sprintf(`
 		SELECT column_name 
 		FROM information_schema.columns 
 		WHERE table_schema = '%s' AND table_name = '%s' 
-		AND column_name NOT LIKE '\_%' 
 		ORDER BY ordinal_position
 	`, schemaName, tableName)
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Column query: %s", allColQuery)
 	var columnData []map[string]interface{}
-	if err := conn.QueryRows(colQuery, &columnData); err != nil {
+	if err := conn.QueryRows(allColQuery, &columnData); err != nil {
+		log.Printf("ChatService -> GetSpreadsheetTableData -> Error getting columns: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get columns: %v", err)
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> All column data: %+v", columnData)
+	
+	// Filter out internal columns in Go
+	var columns []struct {
+		ColumnName string `gorm:"column:column_name"`
+	}
 	for _, col := range columnData {
-		if colName, ok := col["column_name"].(string); ok {
-			columns = append(columns, struct {
-				ColumnName string `gorm:"column:column_name"`
-			}{
-				ColumnName: colName,
-			})
+		var colName string
+		
+		// Handle both string and byte array formats
+		if nameStr, ok := col["column_name"].(string); ok {
+			colName = nameStr
+		} else if nameBytes, ok := col["column_name"].([]uint8); ok {
+			colName = string(nameBytes)
+		} else {
+			log.Printf("ChatService -> Unexpected column_name type: %T", col["column_name"])
+			continue
 		}
+		
+		// Skip internal columns
+		if strings.HasPrefix(colName, "_") {
+			continue
+		}
+		columns = append(columns, struct {
+			ColumnName string `gorm:"column:column_name"`
+		}{
+			ColumnName: colName,
+		})
 	}
 
 	columnNames := make([]string, 0, len(columns))
 	for _, col := range columns {
 		columnNames = append(columnNames, col.ColumnName)
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Column names: %v", columnNames)
+	
+	// If no columns found (shouldn't happen), use SELECT *
+	selectClause := "*"
+	if len(columnNames) > 0 {
+		selectClause = strings.Join(columnNames, ", ")
+	}
 
 	// Get paginated data
 	offset := (page - 1) * pageSize
 	dataQuery := fmt.Sprintf(
 		"SELECT %s FROM %s.%s ORDER BY _id LIMIT %d OFFSET %d",
-		strings.Join(columnNames, ", "),
+		selectClause,
 		schemaName,
 		tableName,
 		pageSize,
 		offset,
 	)
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Data query: %s", dataQuery)
 
 	var rows []map[string]interface{}
 	if err := conn.QueryRows(dataQuery, &rows); err != nil {
+		log.Printf("ChatService -> GetSpreadsheetTableData -> Error getting data: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get data: %v", err)
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Retrieved %d rows", len(rows))
 
 	totalPages := int((totalRows + int64(pageSize) - 1) / int64(pageSize))
 
@@ -440,29 +472,47 @@ func (s *chatService) DownloadSpreadsheetTableData(userID, chatID, tableName str
 		schemaName = fmt.Sprintf("conn_%s", chatID)
 	}
 
-	// Get column information
-	var columns []struct {
-		ColumnName string `gorm:"column:column_name"`
-	}
-	colQuery := fmt.Sprintf(`
+	// Get column information - get ALL columns first
+	allColQuery := fmt.Sprintf(`
 		SELECT column_name 
 		FROM information_schema.columns 
 		WHERE table_schema = '%s' AND table_name = '%s' 
-		AND column_name NOT LIKE '\_%' 
 		ORDER BY ordinal_position
 	`, schemaName, tableName)
+	log.Printf("ChatService -> GetSpreadsheetTableData -> Column query: %s", allColQuery)
 	var columnData []map[string]interface{}
-	if err := conn.QueryRows(colQuery, &columnData); err != nil {
+	if err := conn.QueryRows(allColQuery, &columnData); err != nil {
+		log.Printf("ChatService -> GetSpreadsheetTableData -> Error getting columns: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get columns: %v", err)
 	}
+	log.Printf("ChatService -> GetSpreadsheetTableData -> All column data: %+v", columnData)
+	
+	// Filter out internal columns in Go
+	var columns []struct {
+		ColumnName string `gorm:"column:column_name"`
+	}
 	for _, col := range columnData {
-		if colName, ok := col["column_name"].(string); ok {
-			columns = append(columns, struct {
-				ColumnName string `gorm:"column:column_name"`
-			}{
-				ColumnName: colName,
-			})
+		var colName string
+		
+		// Handle both string and byte array formats
+		if nameStr, ok := col["column_name"].(string); ok {
+			colName = nameStr
+		} else if nameBytes, ok := col["column_name"].([]uint8); ok {
+			colName = string(nameBytes)
+		} else {
+			log.Printf("ChatService -> Unexpected column_name type: %T", col["column_name"])
+			continue
 		}
+		
+		// Skip internal columns
+		if strings.HasPrefix(colName, "_") {
+			continue
+		}
+		columns = append(columns, struct {
+			ColumnName string `gorm:"column:column_name"`
+		}{
+			ColumnName: colName,
+		})
 	}
 
 	columnNames := make([]string, 0, len(columns))
@@ -483,11 +533,153 @@ func (s *chatService) DownloadSpreadsheetTableData(userID, chatID, tableName str
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get data: %v", err)
 	}
 
+	log.Printf("ChatService -> DownloadSpreadsheetTableData -> Returning %d columns and %d rows", 
+		len(columnNames), len(rows))
+	
 	return &dtos.SpreadsheetDownloadResponse{
 		TableName: tableName,
 		Columns:   columnNames,
 		Rows:      rows,
 	}, http.StatusOK, nil
+}
+
+// DownloadSpreadsheetTableDataWithFilter gets filtered data from a table for download
+func (s *chatService) DownloadSpreadsheetTableDataWithFilter(userID, chatID, tableName string, rowIDs []string) (*dtos.SpreadsheetDownloadResponse, uint32, error) {
+	log.Printf("ChatService -> DownloadSpreadsheetTableDataWithFilter -> Starting for chatID: %s, table: %s, rowIDs: %v", chatID, tableName, rowIDs)
+
+	// Get connection info
+	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+	if !exists {
+		return nil, http.StatusNotFound, fmt.Errorf("connection not found")
+	}
+
+	// Get database connection
+	conn, err := s.dbManager.GetConnection(chatID)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get database connection: %v", err)
+	}
+
+	schemaName := connInfo.Config.SchemaName
+	if schemaName == "" {
+		schemaName = fmt.Sprintf("conn_%s", chatID)
+	}
+
+	// Get column information - get ALL columns first
+	allColQuery := fmt.Sprintf(`
+		SELECT column_name 
+		FROM information_schema.columns 
+		WHERE table_schema = '%s' AND table_name = '%s' 
+		ORDER BY ordinal_position
+	`, schemaName, tableName)
+	log.Printf("ChatService -> DownloadSpreadsheetTableDataWithFilter -> Column query: %s", allColQuery)
+	var columnData []map[string]interface{}
+	if err := conn.QueryRows(allColQuery, &columnData); err != nil {
+		log.Printf("ChatService -> DownloadSpreadsheetTableDataWithFilter -> Error getting columns: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get columns: %v", err)
+	}
+	
+	// Filter out internal columns in Go
+	var columns []struct {
+		ColumnName string `gorm:"column:column_name"`
+	}
+	for _, col := range columnData {
+		var colName string
+		
+		// Handle both string and byte array formats
+		if nameStr, ok := col["column_name"].(string); ok {
+			colName = nameStr
+		} else if nameBytes, ok := col["column_name"].([]uint8); ok {
+			colName = string(nameBytes)
+		} else {
+			log.Printf("ChatService -> Unexpected column_name type: %T", col["column_name"])
+			continue
+		}
+		
+		// Skip internal columns
+		if strings.HasPrefix(colName, "_") {
+			continue
+		}
+		columns = append(columns, struct {
+			ColumnName string `gorm:"column:column_name"`
+		}{
+			ColumnName: colName,
+		})
+	}
+
+	columnNames := make([]string, 0, len(columns))
+	for _, col := range columns {
+		columnNames = append(columnNames, col.ColumnName)
+	}
+
+	// Build WHERE clause for row IDs with proper escaping
+	escapedRowIDs := make([]string, len(rowIDs))
+	for i, id := range rowIDs {
+		// Escape single quotes in row IDs
+		escapedID := strings.ReplaceAll(id, "'", "''")
+		escapedRowIDs[i] = fmt.Sprintf("'%s'", escapedID)
+	}
+	whereClause := fmt.Sprintf("WHERE _id IN (%s)", strings.Join(escapedRowIDs, ", "))
+
+	// Get filtered data
+	dataQuery := fmt.Sprintf(
+		"SELECT %s FROM %s.%s %s ORDER BY _id",
+		strings.Join(columnNames, ", "),
+		schemaName,
+		tableName,
+		whereClause,
+	)
+
+	var rows []map[string]interface{}
+	if err := conn.QueryRows(dataQuery, &rows); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get data: %v", err)
+	}
+
+	log.Printf("ChatService -> DownloadSpreadsheetTableDataWithFilter -> Returning %d columns and %d rows", 
+		len(columnNames), len(rows))
+	
+	return &dtos.SpreadsheetDownloadResponse{
+		TableName: tableName,
+		Columns:   columnNames,
+		Rows:      rows,
+	}, http.StatusOK, nil
+}
+
+// DeleteSpreadsheetRow deletes a specific row from a spreadsheet table
+func (s *chatService) DeleteSpreadsheetRow(userID, chatID, tableName, rowID string) (uint32, error) {
+	log.Printf("ChatService -> DeleteSpreadsheetRow -> Starting for chatID: %s, table: %s, row: %s", chatID, tableName, rowID)
+
+	// Get connection info
+	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+	if !exists {
+		return http.StatusNotFound, fmt.Errorf("connection not found")
+	}
+
+	// Get database connection
+	conn, err := s.dbManager.GetConnection(chatID)
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to get database connection: %v", err)
+	}
+
+	schemaName := connInfo.Config.SchemaName
+	if schemaName == "" {
+		schemaName = fmt.Sprintf("conn_%s", chatID)
+	}
+
+	// Delete the row
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.%s WHERE _id = $1", schemaName, tableName)
+	if err := conn.Exec(deleteQuery, rowID); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to delete row: %v", err)
+	}
+
+	// Trigger schema refresh to update table size and row count
+	go func() {
+		ctx := context.Background()
+		if _, err := s.RefreshSchema(ctx, userID, chatID, false); err != nil {
+			log.Printf("ChatService -> DeleteSpreadsheetRow -> Failed to refresh schema: %v", err)
+		}
+	}()
+
+	return http.StatusOK, nil
 }
 
 // sanitizeColumnName removes special characters from column names

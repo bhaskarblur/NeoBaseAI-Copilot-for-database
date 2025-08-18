@@ -517,8 +517,13 @@ function AppContent() {
           handleConnectionStatusChange(id, true, 'app-select-connection');
         } else {
           console.log('connectionStatus is false, connecting to the connection');
+          // Ensure we have a streamId before connecting
+          let currentStreamId = streamId;
+          if (!currentStreamId) {
+            currentStreamId = generateStreamId();
+          }
           // Make api call to connect to the connection
-          await chatService.connectToConnection(id, streamId || '');
+          await chatService.connectToConnection(id, currentStreamId);
           handleConnectionStatusChange(id, true, 'app-select-connection');
         }
       }

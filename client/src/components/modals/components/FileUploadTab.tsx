@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, X, FileText, Table, AlertCircle, Info, Loader2, Database, RefreshCw, FilePlus, Settings, GitMerge } from 'lucide-react';
+import { Upload, X, FileText, Table, AlertCircle, Info, Loader2, Database } from 'lucide-react';
 import { Connection, FileUpload } from '../../../types/chat';
 
 interface FileUploadTabProps {
@@ -8,6 +8,7 @@ interface FileUploadTabProps {
   onFilesChange: (files: FileUpload[]) => void;
   isEditMode?: boolean;
   chatId?: string;
+  preloadedTables?: any[];
 }
 
 const FileUploadTab: React.FC<FileUploadTabProps> = ({
@@ -16,28 +17,15 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
   onFilesChange,
   isEditMode = false,
   chatId,
+  preloadedTables,
 }) => {
   const [uploadedFiles, setUploadedFiles] = useState<FileUpload[]>(formData.file_uploads || []);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [existingTables, setExistingTables] = useState<any[]>([]);
+  const [existingTables, setExistingTables] = useState<any[]>(preloadedTables || []);
   const [loadingTables, setLoadingTables] = useState(false);
-  const [conflictResolution, setConflictResolution] = useState<Record<string, 'replace' | 'append' | 'merge'>>({});
-  const [showConflictModal, setShowConflictModal] = useState(false);
-  const [conflictingFile, setConflictingFile] = useState<FileUpload | null>(null);
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-  const [selectedStrategy, setSelectedStrategy] = useState<'replace' | 'append' | 'merge' | 'smart_merge'>('replace');
-  const [mergeOptions, setMergeOptions] = useState({
-    ignoreCase: true,
-    trimWhitespace: true,
-    handleNulls: 'empty' as const,
-    addNewColumns: true,
-    dropMissingColumns: false,
-    updateExisting: true,
-    insertNew: true,
-    deleteMissing: false,
-  });
+  const [conflictingTables, setConflictingTables] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load existing tables when in edit mode
@@ -46,6 +34,15 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
       loadExistingTables();
     }
   }, [isEditMode, chatId]);
+  
+  // Reload tables when component becomes visible or preloadedTables change
+  useEffect(() => {
+    if (preloadedTables && preloadedTables.length > 0) {
+      setExistingTables(preloadedTables);
+    } else if (isEditMode && chatId && existingTables.length === 0 && !loadingTables) {
+      loadExistingTables();
+    }
+  }, [isEditMode, chatId, existingTables.length, loadingTables, preloadedTables]);
 
   const loadExistingTables = async () => {
     if (!chatId) return;
@@ -124,40 +121,46 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
       // Generate table name
       const tableName = sanitizeTableName(file.name);
 
-      // Check for conflicts with existing tables in edit mode
-      if (isEditMode && existingTables.some(t => t.name === tableName)) {
-        // Store the file temporarily and show conflict resolution modal
-        const fileUpload: FileUpload = {
-          id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          filename: file.name,
-          size: file.size,
-          type: extension === '.csv' ? 'csv' : 'excel',
-          uploadedAt: new Date(),
-          tableName: tableName,
-          file: file,
-        };
-        setConflictingFile(fileUpload);
-        setShowConflictModal(true);
+      // Check if we already have a file with the same table name in current batch or already uploaded
+      const existingFileWithSameTable = [...uploadedFiles, ...newFiles].find(f => f.tableName === tableName);
+      if (existingFileWithSameTable) {
+        setUploadError(`Multiple files map to the same table name "${tableName}". Please rename one of the files: ${existingFileWithSameTable.filename} or ${file.name}`);
         continue;
       }
 
       const fileUpload: FileUpload = {
-        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         filename: file.name,
         size: file.size,
         type: extension === '.csv' ? 'csv' : 'excel',
         uploadedAt: new Date(),
-        tableName: sanitizeTableName(file.name),
-        file: file, // Store the actual File object
+        tableName: tableName,
+        file: file,
       };
 
+      // In edit mode, track which tables will be replaced
+      if (isEditMode && existingTables.some(t => t.name === tableName)) {
+        // Always replace existing tables with the same name
+        fileUpload.mergeStrategy = 'replace';
+        if (!conflictingTables.includes(tableName)) {
+          setConflictingTables(prev => [...prev, tableName]);
+        }
+      }
+      
       newFiles.push(fileUpload);
     }
 
+    // Add all files
     if (newFiles.length > 0) {
       const updatedFiles = [...uploadedFiles, ...newFiles];
       setUploadedFiles(updatedFiles);
       onFilesChange(updatedFiles);
+      
+      // Show info message if tables will be replaced
+      if (conflictingTables.length > 0 && isEditMode) {
+        setUploadError(`Note: The following tables will be replaced with new data: ${conflictingTables.join(', ')}`);
+        setConflictingTables([]);
+      }
     }
 
     setIsProcessing(false);
@@ -177,6 +180,7 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
     const updatedFiles = uploadedFiles.filter(f => f.id !== fileId);
     setUploadedFiles(updatedFiles);
     onFilesChange(updatedFiles);
+    setUploadError(null); // Clear any info messages when removing files
   };
 
   const updateTableName = (fileId: string, newTableName: string) => {
@@ -193,42 +197,6 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  const handleConflictResolution = (resolution: 'replace' | 'append' | 'merge' | 'smart_merge') => {
-    if (resolution === 'smart_merge') {
-      setSelectedStrategy(resolution);
-      setShowAdvancedOptions(true);
-    } else {
-      if (conflictingFile) {
-        // Add the file with the selected resolution strategy
-        const updatedFiles = [...uploadedFiles, { 
-          ...conflictingFile, 
-          mergeStrategy: resolution,
-          mergeOptions: resolution === 'merge' ? mergeOptions : undefined
-        }];
-        setUploadedFiles(updatedFiles);
-        onFilesChange(updatedFiles);
-        setConflictResolution({ ...conflictResolution, [conflictingFile.tableName || '']: resolution });
-      }
-      setShowConflictModal(false);
-      setConflictingFile(null);
-    }
-  };
-
-  const handleAdvancedMergeConfirm = () => {
-    if (conflictingFile) {
-      const updatedFiles = [...uploadedFiles, { 
-        ...conflictingFile, 
-        mergeStrategy: selectedStrategy,
-        mergeOptions: mergeOptions
-      }];
-      setUploadedFiles(updatedFiles);
-      onFilesChange(updatedFiles);
-      setConflictResolution({ ...conflictResolution, [conflictingFile.tableName || '']: selectedStrategy });
-    }
-    setShowAdvancedOptions(false);
-    setShowConflictModal(false);
-    setConflictingFile(null);
-  };
 
   return (
     <>
@@ -252,9 +220,9 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
                         ({table.row_count || 0} rows • {table.columns?.length || 0} columns)
                       </span>
                     </div>
-                    <span className="text-xs text-gray-500">
+                    {/* <span className="text-xs text-gray-500">
                       From: {table.source_file || 'Unknown source'}
-                    </span>
+                    </span> */}
                   </div>
                 </div>
               ))}
@@ -268,11 +236,11 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
               <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
               <div className="text-sm text-blue-800">
                 <p className="font-medium mb-1">Uploading Additional Data</p>
-                <p>When uploading files with the same name as existing tables, you'll be asked how to handle the data:</p>
+                <p>When uploading files:</p>
                 <ul className="mt-2 space-y-1 ml-4">
-                  <li>• <strong>Replace:</strong> Delete existing data and replace with new file</li>
-                  <li>• <strong>Append:</strong> Add new rows to existing table (columns must match)</li>
-                  <li>• <strong>Merge:</strong> Smart merge based on common columns (useful for updates)</li>
+                  <li>• <strong>Existing tables:</strong> Will be replaced entirely with the new file data</li>
+                  <li>• <strong>New files:</strong> Will be added as new tables</li>
+                  <li>• <strong>Important:</strong> Always upload files containing all data you want to keep</li>
                 </ul>
               </div>
             </div>
@@ -430,256 +398,6 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
         </div>
       </div>
 
-      {/* Conflict Resolution Modal */}
-      {showConflictModal && conflictingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-            <h3 className="text-xl font-bold mb-4">Table Already Exists</h3>
-            <p className="mb-4">
-              The table <strong>"{conflictingFile.tableName}"</strong> already exists. 
-              How would you like to handle the new data from <strong>{conflictingFile.filename}</strong>?
-            </p>
-            
-            <div className="space-y-3 mb-6">
-              <button
-                onClick={() => handleConflictResolution('replace')}
-                className="w-full p-4 border-2 border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 text-left transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <RefreshCw className="w-5 h-5 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Replace Entire Table</p>
-                    <p className="text-sm text-gray-600">Delete all existing data and replace with new file</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => handleConflictResolution('append')}
-                className="w-full p-4 border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 text-left transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <FilePlus className="w-5 h-5 text-green-600 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Append New Rows</p>
-                    <p className="text-sm text-gray-600">Add new rows to the end of existing table</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => handleConflictResolution('merge')}
-                className="w-full p-4 border-2 border-gray-300 rounded-lg hover:border-purple-500 hover:bg-purple-50 text-left transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <GitMerge className="w-5 h-5 text-purple-600 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Simple Merge</p>
-                    <p className="text-sm text-gray-600">Add new rows and update existing ones if all columns match</p>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => handleConflictResolution('smart_merge')}
-                className="w-full p-4 border-2 border-gray-300 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 text-left transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <Settings className="w-5 h-5 text-indigo-600 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Advanced Merge</p>
-                    <p className="text-sm text-gray-600">Configure how to handle column changes, updates, and conflicts</p>
-                  </div>
-                </div>
-              </button>
-            </div>
-            
-            <button
-              onClick={() => {
-                setShowConflictModal(false);
-                setConflictingFile(null);
-              }}
-              className="w-full neo-button-secondary"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Advanced Merge Options Modal */}
-      {showAdvancedOptions && conflictingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 overflow-y-auto">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 my-8 border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">Advanced Merge Options</h3>
-            <p className="mb-6 text-gray-600">
-              Configure how to merge <strong>{conflictingFile.filename}</strong> into <strong>"{conflictingFile.tableName}"</strong>
-            </p>
-            
-            <div className="space-y-6">
-              {/* Column Handling */}
-              <div className="border-2 border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                  <Table className="w-4 h-4" />
-                  Column Handling
-                </h4>
-                <div className="space-y-3">
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.addNewColumns}
-                      onChange={(e) => setMergeOptions({...mergeOptions, addNewColumns: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Add New Columns</p>
-                      <p className="text-sm text-gray-600">Add columns that exist in the new file but not in the table</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.dropMissingColumns}
-                      onChange={(e) => setMergeOptions({...mergeOptions, dropMissingColumns: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Drop Missing Columns</p>
-                      <p className="text-sm text-gray-600">Remove columns that don't exist in the new file</p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Row Handling */}
-              <div className="border-2 border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                  <Database className="w-4 h-4" />
-                  Row Handling
-                </h4>
-                <div className="space-y-3">
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.updateExisting}
-                      onChange={(e) => setMergeOptions({...mergeOptions, updateExisting: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Update Existing Rows</p>
-                      <p className="text-sm text-gray-600">Update rows that match based on key columns</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.insertNew}
-                      onChange={(e) => setMergeOptions({...mergeOptions, insertNew: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Insert New Rows</p>
-                      <p className="text-sm text-gray-600">Add rows that don't exist in the current table</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.deleteMissing}
-                      onChange={(e) => setMergeOptions({...mergeOptions, deleteMissing: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Delete Missing Rows</p>
-                      <p className="text-sm text-gray-600">Remove rows that don't exist in the new file</p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Data Comparison */}
-              <div className="border-2 border-gray-200 rounded-lg p-4">
-                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                  <Settings className="w-4 h-4" />
-                  Data Comparison
-                </h4>
-                <div className="space-y-3">
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.ignoreCase}
-                      onChange={(e) => setMergeOptions({...mergeOptions, ignoreCase: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Ignore Case</p>
-                      <p className="text-sm text-gray-600">Treat 'Apple' and 'apple' as the same value</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={mergeOptions.trimWhitespace}
-                      onChange={(e) => setMergeOptions({...mergeOptions, trimWhitespace: e.target.checked})}
-                      className="mt-1"
-                    />
-                    <div>
-                      <p className="font-medium">Trim Whitespace</p>
-                      <p className="text-sm text-gray-600">Remove leading/trailing spaces before comparison</p>
-                    </div>
-                  </label>
-                  
-                  <div>
-                    <p className="font-medium mb-2">Handle Empty Values</p>
-                    <select
-                      value={mergeOptions.handleNulls}
-                      onChange={(e) => setMergeOptions({...mergeOptions, handleNulls: e.target.value as 'keep' | 'empty' | 'null'})}
-                      className="neo-input w-full"
-                    >
-                      <option value="keep">Keep existing values</option>
-                      <option value="empty">Replace with empty string</option>
-                      <option value="null">Replace with NULL</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Info Box */}
-              <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-blue-800">
-                    <p className="font-medium mb-1">Merge Behavior</p>
-                    <p>The system will automatically detect matching columns and attempt to map renamed columns based on similarity. Rows will be matched using all columns as a composite key unless you specify key columns in your data.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={handleAdvancedMergeConfirm}
-                className="flex-1 neo-button"
-              >
-                Apply Advanced Merge
-              </button>
-              <button
-                onClick={() => {
-                  setShowAdvancedOptions(false);
-                  setShowConflictModal(true);
-                }}
-                className="flex-1 neo-button-secondary"
-              >
-                Back
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 };

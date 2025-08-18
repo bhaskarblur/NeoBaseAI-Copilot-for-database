@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Chat, ChatSettings, Connection, SSLMode, TableInfo, FileUpload } from '../../types/chat';
 import chatService from '../../services/chatService';
 import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab } from './components';
+import { useStream } from '../../contexts/StreamContext';
 
 // Connection tab type
 type ConnectionType = 'basic' | 'ssh';
@@ -46,6 +47,8 @@ export default function ConnectionModal({
   onSubmit,
   onUpdateSelectedCollections,
 }: ConnectionModalProps) {
+  const { generateStreamId } = useStream();
+  
   // Modal tab state to toggle between Connection, Schema, and Settings
   const [activeTab, setActiveTab] = useState<ModalTab>(initialTab || 'connection');
   
@@ -192,13 +195,13 @@ export default function ConnectionModal({
   useEffect(() => {
     // Load tables when schema tab is active and we have either initialData or a new connection
     const shouldLoadTables = 
-      activeTab === 'schema' && 
-      ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length));
+      ((activeTab === 'schema' || (activeTab === 'connection' && formData.type === 'spreadsheet')) && 
+      ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length)));
     
     if (shouldLoadTables) {
       loadTables();
     }
-  }, [initialData, activeTab, tables.length, showingNewlyCreatedSchema, newChatId]);
+  }, [initialData, activeTab, tables.length, showingNewlyCreatedSchema, newChatId, formData.type]);
 
   // Use useEffect to update the value of the MongoDB URI inputs when the tab changes
   useEffect(() => {
@@ -546,17 +549,85 @@ export default function ConnectionModal({
             setNonTechMode(result.updatedChat.settings.non_tech_mode);
           }
           
-          // If credentials changed and we're in the connection tab, switch to schema tab
-          if (credentialsChanged && activeTab === 'connection') {
+          // For spreadsheet connections with new files, upload them
+          if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+            try {
+              setSuccessMessage("Uploading files...");
+              
+              // Upload each file
+              for (const fileUpload of fileUploads) {
+                if (!fileUpload.file) {
+                  console.error('No file object found for upload:', fileUpload.filename);
+                  continue;
+                }
+                
+                const formData = new FormData();
+                formData.append('file', fileUpload.file);
+                formData.append('tableName', fileUpload.tableName || '');
+                formData.append('mergeStrategy', fileUpload.mergeStrategy || 'replace');
+                
+                // Add merge options if present
+                if (fileUpload.mergeOptions) {
+                  formData.append('ignoreCase', String(fileUpload.mergeOptions.ignoreCase ?? true));
+                  formData.append('trimWhitespace', String(fileUpload.mergeOptions.trimWhitespace ?? true));
+                  formData.append('handleNulls', fileUpload.mergeOptions.handleNulls || 'empty');
+                  formData.append('addNewColumns', String(fileUpload.mergeOptions.addNewColumns ?? true));
+                  formData.append('dropMissingColumns', String(fileUpload.mergeOptions.dropMissingColumns ?? false));
+                  formData.append('updateExisting', String(fileUpload.mergeOptions.updateExisting ?? true));
+                  formData.append('insertNew', String(fileUpload.mergeOptions.insertNew ?? true));
+                  formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
+                }
+                
+                const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${initialData.id}/file`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: formData
+                });
+                
+                if (!response.ok) {
+                  const errorData = await response.json();
+                  console.error('Upload error response:', errorData);
+                  throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+                }
+              }
+              
+              setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              
+              // Wait a bit for the backend to process the files
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Switch to schema tab to show the new tables
+              setActiveTab('schema');
+              
+              // Force reload tables after upload
+              setTables([]); // Clear existing tables to force refresh
+              await loadTables();
+              
+              // Show final success message
+              setSuccessMessage("Files uploaded and tables loaded successfully");
+              setIsLoading(false);
+            } catch (error: any) {
+              console.error('Failed to upload files:', error);
+              setError(error.message || 'Failed to upload files');
+              setIsLoading(false);
+              return;
+            }
+          } else if (credentialsChanged && activeTab === 'connection') {
+            // If credentials changed and we're in the connection tab, switch to schema tab
             setActiveTab('schema');
             // Load tables
             loadTables();
+            setIsLoading(false);
           } else {
             // Show success message - will auto-dismiss after 3 seconds
             setSuccessMessage("Connection updated successfully");
+            setIsLoading(false);
           }
         } else if (result?.error) {
           setError(result.error);
+          setIsLoading(false);
         }
       } else {
         // For new connections, pass settings to onSubmit
@@ -572,9 +643,31 @@ export default function ConnectionModal({
             setNewChatId(result.chatId);
             setShowingNewlyCreatedSchema(true);
             
-            // For spreadsheet connections, upload files first
+            // For spreadsheet connections, establish connection first then upload files
             if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
               try {
+                setSuccessMessage("Establishing connection...");
+                
+                // First, establish the database connection
+                const connectResponse = await fetch(`${import.meta.env.VITE_API_URL}/chats/${result.chatId}/connect`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: JSON.stringify({
+                    stream_id: generateStreamId()
+                  })
+                });
+                
+                if (!connectResponse.ok) {
+                  const error = await connectResponse.json();
+                  throw new Error(error.error || 'Failed to establish database connection');
+                }
+                
+                // Wait a bit for connection to stabilize
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
                 setSuccessMessage("Uploading files...");
                 
                 // Upload each file
@@ -610,8 +703,9 @@ export default function ConnectionModal({
                   });
                   
                   if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Failed to upload file');
+                    const errorData = await response.json();
+                    console.error('Upload error response:', errorData);
+                    throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
                   }
                 }
                 
@@ -1018,6 +1112,7 @@ DATABASE_PASSWORD=`; // Mask password
                 }}
                 isEditMode={!!initialData}
                 chatId={initialData?.id || newChatId}
+                preloadedTables={tables}
               />
             ) : connectionType === 'basic' ? (
               <BasicConnectionTab
@@ -1180,7 +1275,7 @@ DATABASE_PASSWORD=`; // Mask password
         {(activeTab === 'connection' || activeTab === 'settings' || (activeTab === 'schema'  && !isLoadingTables)) && (
           <>
             {/* Password notice for updating connections */}
-            {initialData && !successMessage && !isLoading && activeTab === 'connection' && (
+            {initialData && !successMessage && !isLoading && activeTab === 'connection' && formData.type !== 'spreadsheet' && (
               <div className="mt-2 -mb-2 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />

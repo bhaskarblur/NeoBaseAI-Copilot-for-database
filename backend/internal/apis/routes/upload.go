@@ -28,6 +28,7 @@ func SetupUploadRoutes(router *gin.Engine) {
 		// Table data operations
 		protected.GET("/:chatID/tables/:tableName", uploadHandler.GetTableData)
 		protected.DELETE("/:chatID/tables/:tableName", uploadHandler.DeleteTable)
+		protected.DELETE("/:chatID/tables/:tableName/rows/:rowID", uploadHandler.DeleteRow)
 		protected.GET("/:chatID/tables/:tableName/download", uploadHandler.DownloadTableData)
 	}
 }

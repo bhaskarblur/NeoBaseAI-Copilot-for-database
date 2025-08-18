@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"neobase-ai/config"
+	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/utils"
 	"strings"
 )
@@ -14,6 +15,14 @@ import (
 type SpreadsheetDriver struct {
 	postgresDriver DatabaseDriver
 	crypto         *utils.AESGCMCrypto
+}
+
+// SpreadsheetTransaction wraps a PostgreSQL transaction with schema context
+type SpreadsheetTransaction struct {
+	pgTx       Transaction
+	conn       *Connection
+	schemaName string
+	searchPathSet bool
 }
 
 // NewSpreadsheetDriver creates a new Spreadsheet driver
@@ -34,12 +43,13 @@ func NewSpreadsheetDriver() DatabaseDriver {
 // Connect handles connection for CSV/Excel storage
 func (d *SpreadsheetDriver) Connect(cfg ConnectionConfig) (*Connection, error) {
 	// For CSV/Excel, we recognize special placeholder values
-	if cfg.Host != "internal-spreadsheet" {
-		return nil, fmt.Errorf("invalid host for spreadsheet connection")
+	// Also accept "spreadsheet" for backward compatibility with existing connections
+	if cfg.Host != "internal-spreadsheet" && cfg.Host != "spreadsheet" {
+		return nil, fmt.Errorf("invalid host for spreadsheet connection: got '%s'", cfg.Host)
 	}
 
 	// Create actual PostgreSQL config for the internal spreadsheet database
-	spreadsheetPort := fmt.Sprintf("%d", config.Env.SpreadsheetPostgresPort)
+	spreadsheetPort := config.Env.SpreadsheetPostgresPort
 	spreadsheetConfig := ConnectionConfig{
 		Type:     "postgresql",
 		Host:     config.Env.SpreadsheetPostgresHost,
@@ -63,37 +73,9 @@ func (d *SpreadsheetDriver) Connect(cfg ConnectionConfig) (*Connection, error) {
 	// Store the original config to preserve the frontend values
 	conn.Config = cfg
 
-	// Create schema for this connection if it doesn't exist
-	if conn.ChatID != "" {
-		schemaName := fmt.Sprintf("conn_%s", conn.ChatID)
-		if err := d.createConnectionSchema(conn, schemaName); err != nil {
-			// Disconnect on error
-			d.postgresDriver.Disconnect(conn)
-			return nil, fmt.Errorf("failed to create connection schema: %w", err)
-		}
-		// Store schema name in config for later use
-		conn.Config.SchemaName = schemaName
-	}
-
+	// Note: Schema creation is now handled by the Manager after ChatID is set
+	
 	return conn, nil
-}
-
-// createConnectionSchema creates a schema for the connection
-func (d *SpreadsheetDriver) createConnectionSchema(conn *Connection, schemaName string) error {
-	// Get SQL DB from GORM
-	sqlDB, err := conn.DB.DB()
-	if err != nil {
-		return fmt.Errorf("failed to get SQL DB: %v", err)
-	}
-
-	// Create schema if not exists
-	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName)
-	if _, err := sqlDB.Exec(query); err != nil {
-		return fmt.Errorf("failed to create schema: %v", err)
-	}
-
-	log.Printf("SpreadsheetDriver -> Created schema: %s", schemaName)
-	return nil
 }
 
 // Disconnect handles disconnection
@@ -114,12 +96,12 @@ func (d *SpreadsheetDriver) GetSchemaInfo(conn *Connection, selectedTables []str
 	wrapper := &spreadsheetSchemaWrapper{
 		conn:       conn,
 		schemaName: schemaName,
+		chatID:     conn.ChatID,
 	}
 
-	// Get schema using PostgreSQL driver's GetSchema method
+	// Get schema using our own GetSchema method that filters by schema
 	ctx := context.Background()
-	postgresDriver := d.postgresDriver.(*PostgresDriver)
-	schemaInfo, err := postgresDriver.GetSchema(ctx, wrapper, selectedTables)
+	schemaInfo, err := d.GetSchema(ctx, wrapper, selectedTables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get schema: %w", err)
 	}
@@ -141,6 +123,7 @@ func (d *SpreadsheetDriver) GetSchemaInfo(conn *Connection, selectedTables []str
 }
 
 
+
 // GetConnectionString returns a placeholder for CSV
 func (d *SpreadsheetDriver) GetConnectionString(cfg ConnectionConfig) string {
 	return "spreadsheet://internal"
@@ -151,7 +134,7 @@ func (d *SpreadsheetDriver) DeleteConnectionData(connectionID string) error {
 	log.Printf("SpreadsheetDriver -> Deleting data for connection: %s", connectionID)
 
 	// Create a temporary connection to drop the schema
-	tempPort := fmt.Sprintf("%d", config.Env.SpreadsheetPostgresPort)
+	tempPort := config.Env.SpreadsheetPostgresPort
 	tempConfig := ConnectionConfig{
 		Type:     "postgresql",
 		Host:     config.Env.SpreadsheetPostgresHost,
@@ -188,7 +171,9 @@ func (d *SpreadsheetDriver) DeleteConnectionData(connectionID string) error {
 type spreadsheetSchemaWrapper struct {
 	conn       *Connection
 	schemaName string
+	chatID     string
 }
+
 
 func (w *spreadsheetSchemaWrapper) GetDB() *sql.DB {
 	sqlDB, _ := w.conn.DB.DB()
@@ -243,21 +228,223 @@ func (d *SpreadsheetDriver) IsAlive(conn *Connection) bool {
 
 // ExecuteQuery executes a query with encryption/decryption support
 func (d *SpreadsheetDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
-	// For now, pass through to PostgreSQL driver
-	// TODO: Add encryption/decryption logic for sensitive data
-	return d.postgresDriver.ExecuteQuery(ctx, conn, query, queryType, findCount)
+	// Ensure the schema context is set for the query
+	schemaName := conn.Config.SchemaName
+	if schemaName == "" {
+		schemaName = fmt.Sprintf("conn_%s", conn.ChatID)
+	}
+	
+	// Set the search_path to the specific schema
+	setSearchPathQuery := fmt.Sprintf("SET search_path TO %s, public", schemaName)
+	if err := conn.DB.Exec(setSearchPathQuery).Error; err != nil {
+		log.Printf("SpreadsheetDriver -> ExecuteQuery -> Failed to set search path: %v", err)
+	}
+	
+	// Execute the query with PostgreSQL driver
+	result := d.postgresDriver.ExecuteQuery(ctx, conn, query, queryType, findCount)
+	
+	// Reset search path to default
+	if err := conn.DB.Exec("SET search_path TO public").Error; err != nil {
+		log.Printf("SpreadsheetDriver -> ExecuteQuery -> Failed to reset search path: %v", err)
+	}
+	
+	return result
 }
 
-// BeginTx begins a transaction
+// BeginTx begins a transaction with schema context
 func (d *SpreadsheetDriver) BeginTx(ctx context.Context, conn *Connection) Transaction {
-	return d.postgresDriver.BeginTx(ctx, conn)
+	// Get the underlying PostgreSQL transaction
+	pgTx := d.postgresDriver.BeginTx(ctx, conn)
+	if pgTx == nil {
+		return nil
+	}
+	
+	// Wrap it with our spreadsheet transaction that sets the search path
+	return &SpreadsheetTransaction{
+		pgTx:       pgTx,
+		conn:       conn,
+		schemaName: conn.Config.SchemaName,
+	}
 }
 
-// GetSchema gets the schema information
+// GetSchema gets the schema information with proper schema filtering
 func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, selectedTables []string) (*SchemaInfo, error) {
-	// This method is called by the schema fetcher
-	// We'll use the PostgreSQL driver's implementation
-	return d.postgresDriver.GetSchema(ctx, db, selectedTables)
+	// Extract schema name from the wrapper
+	var schemaName string
+	var chatID string
+	if wrapper, ok := db.(*spreadsheetSchemaWrapper); ok {
+		schemaName = wrapper.schemaName
+		chatID = wrapper.chatID
+	} else {
+		// Try to extract from connection if available
+		log.Printf("SpreadsheetDriver -> GetSchema -> Warning: Schema name not available from wrapper")
+		return &SchemaInfo{Tables: make(map[string]TableSchema)}, nil
+	}
+	
+	if schemaName == "" {
+		return &SchemaInfo{Tables: make(map[string]TableSchema)}, nil
+	}
+
+	// Get SQL DB
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return nil, fmt.Errorf("failed to get SQL DB connection")
+	}
+	
+	// Test connection is still valid
+	if err := sqlDB.PingContext(ctx); err != nil {
+		log.Printf("SpreadsheetDriver -> GetSchema -> Connection ping failed: %v", err)
+		return nil, fmt.Errorf("database connection is not valid: %v", err)
+	}
+
+	// Query tables in the specific schema
+	tableQuery := `
+		SELECT tablename 
+		FROM pg_catalog.pg_tables 
+		WHERE schemaname = $1
+		ORDER BY tablename;
+	`
+	
+	rows, err := sqlDB.QueryContext(ctx, tableQuery, schemaName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tables in schema %s: %w", schemaName, err)
+	}
+	defer rows.Close()
+
+	var tableNames []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			continue
+		}
+		// Skip system tables
+		if tableName == "default" {
+			continue
+		}
+		tableNames = append(tableNames, tableName)
+	}
+
+	log.Printf("SpreadsheetDriver -> GetSchema -> Found %d tables in schema %s", len(tableNames), schemaName)
+
+	// Now get the schema details for these tables
+	schema := &SchemaInfo{
+		Tables: make(map[string]TableSchema),
+	}
+
+	for _, tableName := range tableNames {
+		table := TableSchema{
+			Name:        tableName,
+			Columns:     make(map[string]ColumnInfo),
+			Indexes:     make(map[string]IndexInfo),
+			ForeignKeys: make(map[string]ForeignKey),
+			Constraints: make(map[string]ConstraintInfo),
+		}
+
+		// Get columns for the table
+		columnQuery := `
+			SELECT 
+				column_name,
+				data_type,
+				is_nullable,
+				column_default,
+				character_maximum_length,
+				numeric_precision,
+				numeric_scale
+			FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = $2
+			ORDER BY ordinal_position;
+		`
+		
+		colRows, err := sqlDB.QueryContext(ctx, columnQuery, schemaName, tableName)
+		if err != nil {
+			log.Printf("SpreadsheetDriver -> GetSchema -> Error getting columns for table %s: %v", tableName, err)
+			continue
+		}
+		
+		for colRows.Next() {
+			var colName, dataType string
+			var isNullable string
+			var columnDefault, charMaxLength, numPrecision, numScale sql.NullString
+			
+			if err := colRows.Scan(&colName, &dataType, &isNullable, &columnDefault, 
+				&charMaxLength, &numPrecision, &numScale); err != nil {
+				continue
+			}
+			
+			// Skip internal columns
+			if strings.HasPrefix(colName, "_") {
+				continue
+			}
+			
+			table.Columns[colName] = ColumnInfo{
+				Name:         colName,
+				Type:         dataType,
+				IsNullable:   isNullable == "YES",
+				DefaultValue: columnDefault.String,
+			}
+		}
+		colRows.Close()
+		
+		// Get constraints (including primary keys)
+		constraintQuery := `
+			SELECT 
+				tc.constraint_name,
+				tc.constraint_type,
+				kcu.column_name
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu 
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+				AND tc.table_name = kcu.table_name
+			WHERE tc.table_schema = $1 AND tc.table_name = $2
+			ORDER BY tc.constraint_name, kcu.ordinal_position;
+		`
+		
+		constRows, err := sqlDB.QueryContext(ctx, constraintQuery, schemaName, tableName)
+		if err == nil {
+			constraints := make(map[string]*ConstraintInfo)
+			for constRows.Next() {
+				var constName, constType, colName string
+				if err := constRows.Scan(&constName, &constType, &colName); err != nil {
+					continue
+				}
+				
+				if _, exists := constraints[constName]; !exists {
+					constraints[constName] = &ConstraintInfo{
+						Name:    constName,
+						Type:    constType,
+						Columns: []string{},
+					}
+				}
+				constraints[constName].Columns = append(constraints[constName].Columns, colName)
+			}
+			constRows.Close()
+			
+			// Convert to the expected format
+			for name, info := range constraints {
+				table.Constraints[name] = *info
+			}
+		}
+		
+		// Get row count
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s.%s`, schemaName, tableName)
+		var count int64
+		if err := sqlDB.QueryRowContext(ctx, countQuery).Scan(&count); err == nil {
+			table.RowCount = count
+		}
+		
+		// Get table size
+		sizeQuery := fmt.Sprintf(`SELECT pg_total_relation_size('%s.%s')`, schemaName, tableName)
+		var size int64
+		if err := sqlDB.QueryRowContext(ctx, sizeQuery).Scan(&size); err == nil {
+			table.SizeBytes = size
+		}
+		
+		schema.Tables[tableName] = table
+	}
+
+	log.Printf("SpreadsheetDriver -> GetSchema -> Returning %d tables for schema %s (chatID: %s)", len(schema.Tables), schemaName, chatID)
+	return schema, nil
 }
 
 // GetTableChecksum gets a checksum for a table
@@ -267,16 +454,72 @@ func (d *SpreadsheetDriver) GetTableChecksum(ctx context.Context, db DBExecutor,
 
 // FetchExampleRecords fetches example records from a table
 func (d *SpreadsheetDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, table string, limit int) ([]map[string]interface{}, error) {
-	// TODO: Add decryption logic for encrypted data
-	return d.postgresDriver.FetchExampleRecords(ctx, db, table, limit)
+	// Get the schema name from the connection
+	wrapper, ok := db.(*spreadsheetSchemaWrapper)
+	if !ok {
+		return nil, fmt.Errorf("invalid database wrapper for spreadsheet")
+	}
+	
+	// Build schema-qualified table name
+	schemaName := wrapper.schemaName
+	if schemaName == "" {
+		schemaName = fmt.Sprintf("conn_%s", wrapper.chatID)
+	}
+	qualifiedTable := fmt.Sprintf("%s.%s", schemaName, table)
+	
+	// Use the qualified table name to fetch records
+	return d.postgresDriver.FetchExampleRecords(ctx, db, qualifiedTable, limit)
 }
 
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+// setSearchPath sets the search path for this transaction if not already set
+func (t *SpreadsheetTransaction) setSearchPath(ctx context.Context) error {
+	if t.searchPathSet {
+		return nil
 	}
-	return false
+	
+	schemaName := t.schemaName
+	if schemaName == "" {
+		schemaName = fmt.Sprintf("conn_%s", t.conn.ChatID)
+	}
+	
+	// Set the search_path to the specific schema
+	setSearchPathQuery := fmt.Sprintf("SET search_path TO %s, public", schemaName)
+	result, err := t.pgTx.ExecuteQuery(ctx, setSearchPathQuery)
+	if err != nil {
+		return err
+	}
+	if result.Error != nil {
+		return fmt.Errorf("failed to set search path: %s", result.Error.Message)
+	}
+	
+	t.searchPathSet = true
+	return nil
 }
+
+// ExecuteQuery executes queries with schema context
+func (t *SpreadsheetTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
+	// Set search path before executing queries
+	if err := t.setSearchPath(ctx); err != nil {
+		return &QueryExecutionResult{
+			Error: &dtos.QueryError{
+				Code:    "SCHEMA_SETUP_FAILED",
+				Message: err.Error(),
+				Details: "Failed to set schema context for spreadsheet query",
+			},
+		}, err
+	}
+	
+	// Execute query using the underlying PostgreSQL transaction
+	return t.pgTx.ExecuteQuery(ctx, query)
+}
+
+// Commit commits the transaction
+func (t *SpreadsheetTransaction) Commit() error {
+	return t.pgTx.Commit()
+}
+
+// Rollback rolls back the transaction
+func (t *SpreadsheetTransaction) Rollback() error {
+	return t.pgTx.Rollback()
+}
+

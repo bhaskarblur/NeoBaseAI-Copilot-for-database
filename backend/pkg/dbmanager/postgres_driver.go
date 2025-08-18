@@ -53,10 +53,16 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 			baseParams += fmt.Sprintf(" sslmode=%s", sslMode)
 		}
 
-		// Fetch certificates from URLs
-		certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
-		if err != nil {
-			return nil, err
+		// Fetch certificates from URLs only if they are provided
+		var certPath, keyPath, rootCertPath string
+		var certTempFiles []string
+		var err error
+
+		if config.SSLCertURL != nil && config.SSLKeyURL != nil && config.SSLRootCertURL != nil {
+			certPath, keyPath, rootCertPath, certTempFiles, err = utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// Track temporary files for cleanup
@@ -287,6 +293,12 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor, selectedT
 		return nil, fmt.Errorf("failed to get SQL DB connection")
 	}
 
+	// Test connection is still valid before executing queries
+	if err := sqlDB.PingContext(ctx); err != nil {
+		log.Printf("PostgresDriver -> GetSchema -> Connection ping failed: %v", err)
+		return nil, fmt.Errorf("database connection is not valid: %v", err)
+	}
+
 	// Get all tables in the database, filtered by selectedTables if provided
 	var tableQuery string
 	var args []interface{}
@@ -326,7 +338,25 @@ func (d *PostgresDriver) GetSchema(ctx context.Context, db DBExecutor, selectedT
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to query tables: %v", err)
+		// Check if this is a prepared statement error
+		if strings.Contains(err.Error(), "unnamed prepared statement does not exist") {
+			log.Printf("PostgresDriver -> GetSchema -> Prepared statement error detected, retrying with fresh connection")
+			// Try to recover by pinging the connection first
+			if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
+				return nil, fmt.Errorf("connection lost: %v (original error: %v)", pingErr, err)
+			}
+			// Retry the query once more
+			if len(args) > 0 {
+				tableRows, err = sqlDB.QueryContext(ctx, tableQuery, args...)
+			} else {
+				tableRows, err = sqlDB.QueryContext(ctx, tableQuery)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to query tables after retry: %v", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to query tables: %v", err)
+		}
 	}
 	defer tableRows.Close()
 

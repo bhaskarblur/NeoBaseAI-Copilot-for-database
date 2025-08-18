@@ -67,7 +67,10 @@ type ChatService interface {
 	StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string, mergeStrategy string, mergeOptions MergeOptions) (*dtos.SpreadsheetUploadResponse, uint32, error)
 	GetSpreadsheetTableData(userID, chatID, tableName string, page, pageSize int) (*dtos.SpreadsheetTableDataResponse, uint32, error)
 	DeleteSpreadsheetTable(userID, chatID, tableName string) (uint32, error)
+	DeleteSpreadsheetRow(userID, chatID, tableName string, rowID string) (uint32, error)
 	DownloadSpreadsheetTableData(userID, chatID, tableName string) (*dtos.SpreadsheetDownloadResponse, uint32, error)
+	DownloadSpreadsheetTableDataWithFilter(userID, chatID, tableName string, rowIDs []string) (*dtos.SpreadsheetDownloadResponse, uint32, error)
+
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
@@ -177,15 +180,15 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 			Host:           req.Connection.Host,
 			Port:           req.Connection.Port,
 			Username:       &req.Connection.Username,
-		Password:       req.Connection.Password,
-		Database:       req.Connection.Database,
-		AuthDatabase:   req.Connection.AuthDatabase,
-		SSLMode:        req.Connection.SSLMode,
-		UseSSL:         req.Connection.UseSSL,
-		SSLCertURL:     req.Connection.SSLCertURL,
-		SSLKeyURL:      req.Connection.SSLKeyURL,
-		SSLRootCertURL: req.Connection.SSLRootCertURL,
-	})
+			Password:       req.Connection.Password,
+			Database:       req.Connection.Database,
+			AuthDatabase:   req.Connection.AuthDatabase,
+			SSLMode:        req.Connection.SSLMode,
+			UseSSL:         req.Connection.UseSSL,
+			SSLCertURL:     req.Connection.SSLCertURL,
+			SSLKeyURL:      req.Connection.SSLKeyURL,
+			SSLRootCertURL: req.Connection.SSLRootCertURL,
+		})
 		if err != nil {
 			return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
 		}
@@ -202,13 +205,20 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we don't need traditional database connection details
+	// For spreadsheet connections, we store placeholder values
 	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
-		// Host and Database will be set when files are uploaded
-		connection.Host = "spreadsheet"
-		connection.Database = "spreadsheet_" + userID
+		// Store placeholder values - these will be replaced with real credentials when connecting
+		connection.Host = "internal-spreadsheet"
+		connection.Database = "spreadsheet_data"
+		// Set placeholder username and password
+		placeholderUsername := "spreadsheet_user"
+		placeholderPassword := "internal"
+		placeholderPort := "0"
+		connection.Username = &placeholderUsername
+		connection.Password = &placeholderPassword
+		connection.Port = &placeholderPort
 	} else {
 		// For traditional database connections
 		connection.Host = req.Connection.Host
@@ -286,13 +296,20 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we don't need traditional database connection details
+	// For spreadsheet connections, we store placeholder values
 	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
-		// Host and Database will be set when files are uploaded
-		connection.Host = "spreadsheet"
-		connection.Database = "spreadsheet_" + userID
+		// Store placeholder values - these will be replaced with real credentials when connecting
+		connection.Host = "internal-spreadsheet"
+		connection.Database = "spreadsheet_data"
+		// Set placeholder username and password
+		placeholderUsername := "spreadsheet_user"
+		placeholderPassword := "internal"
+		placeholderPort := "0"
+		connection.Username = &placeholderUsername
+		connection.Password = &placeholderPassword
+		connection.Port = &placeholderPort
 	} else {
 		// For traditional database connections
 		connection.Host = req.Connection.Host
@@ -370,29 +387,37 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		utils.DecryptConnection(&existingConn)
 
 		// Check if critical connection details have changed
-		credentialsChanged = existingConn.Database != req.Connection.Database ||
-			existingConn.Host != req.Connection.Host ||
-			existingConn.Port != req.Connection.Port ||
-			*existingConn.Username != req.Connection.Username ||
-			(req.Connection.Password != nil && existingConn.Password != nil && *existingConn.Password != *req.Connection.Password)
+		// For spreadsheet connections, we never consider credentials as changed since they use internal credentials
+		if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+			credentialsChanged = false
+		} else {
+			credentialsChanged = existingConn.Database != req.Connection.Database ||
+				existingConn.Host != req.Connection.Host ||
+				existingConn.Port != req.Connection.Port ||
+				*existingConn.Username != req.Connection.Username ||
+				(req.Connection.Password != nil && existingConn.Password != nil && *existingConn.Password != *req.Connection.Password)
+		}
 
-		// Test connection without creating a persistent connection
-		err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
-			Type:           req.Connection.Type,
-			Host:           req.Connection.Host,
-			Port:           req.Connection.Port,
-			Username:       &req.Connection.Username,
-			Password:       req.Connection.Password,
-			Database:       req.Connection.Database,
-			AuthDatabase:   req.Connection.AuthDatabase,
-			UseSSL:         req.Connection.UseSSL,
-			SSLMode:        req.Connection.SSLMode,
-			SSLCertURL:     req.Connection.SSLCertURL,
-			SSLKeyURL:      req.Connection.SSLKeyURL,
-			SSLRootCertURL: req.Connection.SSLRootCertURL,
-		})
-		if err != nil {
-			return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
+		// Skip connection test for spreadsheet type as it doesn't have traditional database connection
+		if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+			// Test connection without creating a persistent connection
+			err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
+				Type:           req.Connection.Type,
+				Host:           req.Connection.Host,
+				Port:           req.Connection.Port,
+				Username:       &req.Connection.Username,
+				Password:       req.Connection.Password,
+				Database:       req.Connection.Database,
+				AuthDatabase:   req.Connection.AuthDatabase,
+				UseSSL:         req.Connection.UseSSL,
+				SSLMode:        req.Connection.SSLMode,
+				SSLCertURL:     req.Connection.SSLCertURL,
+				SSLKeyURL:      req.Connection.SSLKeyURL,
+				SSLRootCertURL: req.Connection.SSLRootCertURL,
+			})
+			if err != nil {
+				return nil, http.StatusBadRequest, fmt.Errorf("%v", err)
+			}
 		}
 
 		// Create connection object with SSL configuration
@@ -1820,6 +1845,8 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 				Name:       tableName,
 				Columns:    make([]dtos.ColumnInfo, 0, len(tableSchema.Columns)),
 				IsSelected: isAllSelected || selectedTablesMap[tableName],
+				RowCount:   tableSchema.RowCount,
+				SizeBytes:  tableSchema.SizeBytes,
 			}
 
 			for columnName, columnInfo := range tableSchema.Columns {

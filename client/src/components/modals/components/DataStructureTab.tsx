@@ -14,6 +14,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import ConfirmationModal from '../../modals/ConfirmationModal';
+import Tooltip from '../../ui/Tooltip';
+import toast from 'react-hot-toast';
 
 interface DataStructureTabProps {
   chatId: string;
@@ -54,7 +56,7 @@ export default function DataStructureTab({
   const [pagination, setPagination] = useState<Record<string, PaginationState>>({});
   const [loading, setLoading] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState<Record<string, boolean>>({});
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{ show: boolean; tableName: string | null }>({ show: false, tableName: null });
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ show: boolean; tableName: string | null; isSelectedRows?: boolean; rowId?: string | number }>({ show: false, tableName: null, isSelectedRows: false });
   const [downloadMenu, setDownloadMenu] = useState<{ show: boolean; tableName: string | null; x: number; y: number }>({ show: false, tableName: null, x: 0, y: 0 });
 
   useEffect(() => {
@@ -125,18 +127,20 @@ export default function DataStructureTab({
       );
       if (response.ok) {
         const data = await response.json();
+        // Handle both wrapped and unwrapped responses
+        const responseData = data.data || data;
         setTables(prev => prev.map(table => 
           table.name === tableName 
-            ? { ...table, previewData: data.data?.rows || [] }
+            ? { ...table, previewData: responseData.rows || [] }
             : table
         ));
         // Update pagination total if provided
-        if (data.data?.total !== undefined) {
+        if (responseData.total_rows !== undefined) {
           setPagination(prev => ({
             ...prev,
             [tableName]: {
               ...prev[tableName],
-              totalRows: data.data.total
+              totalRows: responseData.total_rows
             }
           }));
         }
@@ -204,7 +208,35 @@ export default function DataStructureTab({
 
   const handleCopyRow = (row: any) => {
     const text = JSON.stringify(row, null, 2);
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success('Row data copied to clipboard', {
+        duration: 2000,
+        style: {
+          background: '#000',
+          color: '#fff',
+          border: '4px solid #000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: '500',
+        },
+      });
+    }).catch(() => {
+      toast.error('Failed to copy row data', {
+        duration: 2000,
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+        },
+      });
+    });
   };
 
   const handleDownloadClick = (e: React.MouseEvent, tableName: string) => {
@@ -215,37 +247,194 @@ export default function DataStructureTab({
 
   const handleDownload = async (format: 'csv' | 'xlsx') => {
     if (downloadMenu.tableName) {
+      const loadingToast = toast.loading('Preparing download...', {
+        style: {
+          background: '#000',
+          color: '#fff',
+          border: '4px solid #000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: '500',
+        },
+      });
+
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${downloadMenu.tableName}/download?format=${format}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
+        // Check if we're downloading selected rows
+        const selectedRowIndices = selectedRows[downloadMenu.tableName];
+        const isSelectedDownload = selectedRowIndices && selectedRowIndices.size > 0;
+        
+        // Get the table data
+        const table = tables.find(t => t.name === downloadMenu.tableName);
+        if (!table) {
+          throw new Error('Table not found');
+        }
+
+        // If we're downloading selected rows but no data is loaded, we can't proceed
+        if (isSelectedDownload && (!table.previewData || table.previewData.length === 0)) {
+          toast.dismiss(loadingToast);
+          toast.error('Please expand the table first to load data before downloading selected rows', {
+            duration: 3000,
+            style: {
+              background: '#ff4444',
+              color: '#fff',
+              border: '4px solid #cc0000',
+              borderRadius: '12px',
+              boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+            },
+          });
+          return;
+        }
+
+        // For full table download, we'll use the server endpoint directly
+        // For selected rows with CSV, we need the preview data
+        if (format === 'csv' && isSelectedDownload) {
+          const dataToDownload = table.previewData.filter((_, index) => selectedRowIndices.has(index));
+          
+          if (dataToDownload.length === 0) {
+            toast.dismiss(loadingToast);
+            toast.error('No data to download', {
+              duration: 2000,
+              style: {
+                background: '#ff4444',
+                color: '#fff',
+                border: '4px solid #cc0000',
+                borderRadius: '12px',
+                boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+                padding: '12px 24px',
+                fontSize: '16px',
+                fontWeight: 'bold',
+              },
+            });
+            return;
           }
-        );
-        if (response.ok) {
-          const blob = await response.blob();
+
+          // Create CSV content for selected rows
+          const headers = table.columns.map(col => col.name).join(',');
+          const rows = dataToDownload.map(row => 
+            table.columns.map(col => {
+              const value = row[col.name];
+              if (value === null || value === undefined) return '';
+              // Escape quotes and wrap in quotes if contains comma or newline
+              const stringValue = String(value);
+              if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+                return `"${stringValue.replace(/"/g, '""')}"`;
+              }
+              return stringValue;
+            }).join(',')
+          );
+          
+          const csvContent = [headers, ...rows].join('\n');
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `${downloadMenu.tableName}.${format}`;
+          a.download = `${downloadMenu.tableName}_selected.csv`;
           document.body.appendChild(a);
           a.click();
           window.URL.revokeObjectURL(url);
           document.body.removeChild(a);
+        } else {
+          // For full table downloads (CSV or XLSX) or selected XLSX, use server endpoint
+          let url = `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${downloadMenu.tableName}/download?format=${format}`;
+          
+          // Add selected row IDs to the URL if downloading selected rows
+          if (isSelectedDownload && format === 'xlsx') {
+            if (table.previewData && table.previewData.length > 0) {
+              const selectedRowIds = table.previewData
+                .filter((_, index) => selectedRowIndices.has(index))
+                .map(row => row._id || '')
+                .filter(id => id !== '');
+              
+              if (selectedRowIds.length > 0) {
+                url += `&rowIds=${selectedRowIds.join(',')}`;
+              }
+            }
+          }
+          
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`,
+              'Accept': format === 'xlsx' 
+                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                : 'text/csv'
+            }
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Download failed:', errorText);
+            throw new Error('Download failed');
+          }
+
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = `${downloadMenu.tableName}${isSelectedDownload ? '_selected' : ''}.${format}`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(blobUrl);
+          document.body.removeChild(a);
         }
+
+        toast.dismiss(loadingToast);
+        toast.success('Download complete', {
+          duration: 2000,
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '16px',
+            fontWeight: '500',
+          },
+        });
       } catch (error) {
+        toast.dismiss(loadingToast);
+        toast.error('Download failed', {
+          duration: 2000,
+          style: {
+            background: '#ff4444',
+            color: '#fff',
+            border: '4px solid #cc0000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '16px',
+            fontWeight: 'bold',
+          },
+        });
         console.error('Download failed:', error);
       }
     }
     setDownloadMenu({ show: false, tableName: null, x: 0, y: 0 });
   };
 
-  const handleDeleteTable = async (tableName: string) => {
+  const handleDeleteRow = async (tableName: string, rowId: number | string) => {
+    const loadingToast = toast.loading('Deleting row...', {
+      style: {
+        background: '#000',
+        color: '#fff',
+        border: '4px solid #000',
+        borderRadius: '12px',
+        boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+        padding: '12px 24px',
+        fontSize: '16px',
+        fontWeight: '500',
+      },
+    });
+
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}`,
+        `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}/rows/${rowId}`,
         {
           method: 'DELETE',
           headers: {
@@ -253,14 +442,173 @@ export default function DataStructureTab({
           }
         }
       );
+
       if (response.ok) {
-        setTables(prev => prev.filter(t => t.name !== tableName));
-        onDeleteTable?.(tableName);
+        toast.dismiss(loadingToast);
+        toast.success('Row deleted successfully', {
+          duration: 2000,
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '16px',
+            fontWeight: '500',
+          },
+        });
+        
+        // Reload table data to update row count and size
+        await loadTableData();
+        
+        // Reload the preview data
+        const currentPagination = pagination[tableName] || { page: 1, pageSize: 15, totalRows: 0 };
+        await loadTablePreviewData(tableName, currentPagination.page, currentPagination.pageSize);
+      } else {
+        throw new Error('Failed to delete row');
+      }
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      toast.error('Failed to delete row', {
+        duration: 2000,
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+        },
+      });
+      console.error('Delete row failed:', error);
+    }
+  };
+
+  const handleDeleteTable = async (tableName: string) => {
+    // Dismiss the modal first
+    setDeleteConfirmation({ show: false, tableName: null });
+    
+    try {
+      if (deleteConfirmation.rowId !== undefined) {
+        // Delete individual row
+        await handleDeleteRow(tableName, deleteConfirmation.rowId);
+      } else if (deleteConfirmation.isSelectedRows) {
+        // Delete selected rows one by one
+        const selectedRowIndices = selectedRows[tableName];
+        const table = tables.find(t => t.name === tableName);
+        if (!table || !selectedRowIndices) {
+          throw new Error('Table or selected rows not found');
+        }
+
+        const loadingToast = toast.loading(`Deleting ${selectedRowIndices.size} rows...`, {
+          style: {
+            background: '#000',
+            color: '#fff',
+            border: '4px solid #000',
+            borderRadius: '12px',
+            boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+            padding: '12px 24px',
+            fontSize: '16px',
+            fontWeight: '500',
+          },
+        });
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Get the row IDs to delete
+        const rowsToDelete = Array.from(selectedRowIndices).map(index => {
+          const row = table.previewData[index];
+          return row?._id || index;
+        });
+
+        // Delete each row
+        for (const rowId of rowsToDelete) {
+          try {
+            const response = await fetch(
+              `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}/rows/${rowId}`,
+              {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+              }
+            );
+            
+            if (response.ok) {
+              successCount++;
+            } else {
+              errorCount++;
+            }
+          } catch (error) {
+            errorCount++;
+          }
+        }
+
+        toast.dismiss(loadingToast);
+        
+        if (errorCount === 0) {
+          toast.success(`Successfully deleted ${successCount} rows`, {
+            duration: 2000,
+            style: {
+              background: '#000',
+              color: '#fff',
+              border: '4px solid #000',
+              borderRadius: '12px',
+              boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: '500',
+            },
+          });
+        } else {
+          toast.error(`Deleted ${successCount} rows, ${errorCount} failed`, {
+            duration: 2000,
+            style: {
+              background: '#ff4444',
+              color: '#fff',
+              border: '4px solid #cc0000',
+              borderRadius: '12px',
+              boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+              padding: '12px 24px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+            },
+          });
+        }
+
+        // Clear selected rows after deletion
+        setSelectedRows(prev => ({
+          ...prev,
+          [tableName]: new Set()
+        }));
+
+        // Reload the table data and preview
+        await loadTableData();
+        const currentPagination = pagination[tableName] || { page: 1, pageSize: 15, totalRows: 0 };
+        await loadTablePreviewData(tableName, currentPagination.page, currentPagination.pageSize);
+      } else {
+        // Delete entire table
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          }
+        );
+        if (response.ok) {
+          setTables(prev => prev.filter(t => t.name !== tableName));
+          onDeleteTable?.(tableName);
+        }
       }
     } catch (error) {
       console.error('Delete failed:', error);
     }
-    setDeleteConfirmation({ show: false, tableName: null });
   };
 
   const formatBytes = (bytes: number): string => {
@@ -299,8 +647,14 @@ export default function DataStructureTab({
 
   if (loading || isLoadingData) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
+        <div className="text-center text-gray-600 max-w-md">
+          <p className="font-medium">Loading data structure...</p>
+          <p className="text-sm mt-2">
+            Fetching table schemas, column information, and data statistics from your database.
+          </p>
+        </div>
       </div>
     );
   }
@@ -309,13 +663,15 @@ export default function DataStructureTab({
     <div className="space-y-4">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Data Structure</h3>
-        <button
-          onClick={onRefreshData}
-          className="neo-button-secondary flex items-center gap-2 px-3 py-1.5 text-sm"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
+        <Tooltip content="Refresh table data">
+          <button
+            onClick={onRefreshData}
+            className="neo-button-secondary flex items-center gap-2 px-3 py-1.5 text-sm"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </Tooltip>
       </div>
 
       {tables.length === 0 ? (
@@ -332,6 +688,7 @@ export default function DataStructureTab({
                   <button
                     onClick={() => toggleTableExpansion(table.name)}
                     className="p-1 hover:bg-gray-200 rounded transition-colors"
+                    title={expandedTables[table.name] ? "Collapse table" : "Expand table"}
                   >
                     {expandedTables[table.name] ? (
                       <ChevronDown className="w-5 h-5" />
@@ -342,7 +699,7 @@ export default function DataStructureTab({
                   <div>
                     <h4 className="font-semibold text-lg">{table.name}</h4>
                     <div className="text-sm text-gray-600">
-                      Data: {table.rowCount.toLocaleString()} rows • Size: {formatBytes(table.sizeBytes)} • Source: {table.sourceFile}
+                      Data: {table.rowCount.toLocaleString()} rows • Size: {formatBytes(table.sizeBytes)}
                     </div>
                   </div>
                 </div>
@@ -352,7 +709,7 @@ export default function DataStructureTab({
                     className="p-2 hover:bg-gray-200 rounded transition-colors"
                     title="Download table data"
                   >
-                    <Download className="w-4 h-4" />
+                    <Download className="w-4 w-4" />
                   </button>
                   <button
                     onClick={() => setDeleteConfirmation({ show: true, tableName: table.name })}
@@ -371,17 +728,30 @@ export default function DataStructureTab({
                   <div className="p-4">
                     <div className="flex justify-between items-center mb-3">
                       <h5 className="font-medium">Data Preview</h5>
-                      <div className="flex items-center gap-2 text-sm">
-                        <button
-                          onClick={() => handleSelectAllRows(table.name, table.previewData)}
-                          className="text-blue-600 hover:text-blue-700"
-                        >
-                          {selectedRows[table.name]?.size === table.previewData.length ? 'Deselect All' : 'Select All'}
-                        </button>
+                      <div className="flex items-center gap-2">
                         {selectedRows[table.name]?.size > 0 && (
-                          <span className="text-gray-500">
-                            ({selectedRows[table.name].size} selected)
-                          </span>
+                          <>
+                            <span className="text-sm text-gray-500 mr-2">
+                              ({selectedRows[table.name].size} selected)
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setDownloadMenu({ show: true, tableName: table.name, x: rect.left, y: rect.bottom + 5 });
+                              }}
+                              className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+                              title="Download selected rows"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirmation({ show: true, tableName: table.name, isSelectedRows: true })}
+                              className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors"
+                              title="Delete selected rows"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -404,7 +774,7 @@ export default function DataStructureTab({
                               />
                             </th>
                             {table.columns.map((col) => (
-                              <th key={col.name} className="p-2 text-left font-medium text-sm bg-gray-100">
+                              <th key={col.name} className="p-4 text-left font-medium text-sm bg-gray-100">
                                 {col.name}
                               </th>
                             ))}
@@ -423,9 +793,9 @@ export default function DataStructureTab({
                                 />
                               </td>
                               {table.columns.map((col) => (
-                                <td key={col.name} className="p-2 text-sm">
-                                  <span className="truncate max-w-xs block" title={String(row[col.name])}>
-                                    {row[col.name]}
+                                <td key={col.name} className="p-4 text-sm">
+                                  <span className="truncate max-w-xs block" title={String(row[col.name] ?? '-')}>
+                                    {row[col.name] === null || row[col.name] === undefined ? '-' : row[col.name]}
                                   </span>
                                 </td>
                               ))}
@@ -436,14 +806,14 @@ export default function DataStructureTab({
                                     className="p-1 hover:bg-gray-200 rounded"
                                     title="Copy row data"
                                   >
-                                    <Copy className="w-3 h-3" />
+                                    <Copy className="w-3.5 h-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => {/* TODO: Delete row */}}
+                                    onClick={() => setDeleteConfirmation({ show: true, tableName: table.name, rowId: row._id || rowIndex })}
                                     className="p-1 hover:bg-red-100 text-red-600 rounded"
                                     title="Delete row"
                                   >
-                                    <Trash2 className="w-3 h-3" />
+                                    <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
                               </td>
@@ -480,7 +850,7 @@ export default function DataStructureTab({
                         <span className="text-sm text-gray-600">
                           {table.previewData.length > 0 ? (
                             <>Showing {((pagination[table.name]?.page || 1) - 1) * (pagination[table.name]?.pageSize || 15) + 1}-
-                            {Math.min((pagination[table.name]?.page || 1) * (pagination[table.name]?.pageSize || 15), pagination[table.name]?.totalRows || table.rowCount)} of {pagination[table.name]?.totalRows || table.rowCount}</>
+                            {((pagination[table.name]?.page || 1) - 1) * (pagination[table.name]?.pageSize || 15) + table.previewData.length} of {pagination[table.name]?.totalRows || table.rowCount}</>
                           ) : (
                             'No data'
                           )}
@@ -490,6 +860,7 @@ export default function DataStructureTab({
                             onClick={() => handlePageChange(table.name, 1)}
                             disabled={(pagination[table.name]?.page || 1) === 1}
                             className="p-1 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="First page"
                           >
                             <ChevronsLeft className="w-4 h-4" />
                           </button>
@@ -497,6 +868,7 @@ export default function DataStructureTab({
                             onClick={() => handlePageChange(table.name, (pagination[table.name]?.page || 1) - 1)}
                             disabled={(pagination[table.name]?.page || 1) === 1}
                             className="p-1 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Previous page"
                           >
                             <ChevronLeft className="w-4 h-4" />
                           </button>
@@ -504,6 +876,7 @@ export default function DataStructureTab({
                             onClick={() => handlePageChange(table.name, (pagination[table.name]?.page || 1) + 1)}
                             disabled={(pagination[table.name]?.page || 1) * (pagination[table.name]?.pageSize || 15) >= (pagination[table.name]?.totalRows || table.rowCount)}
                             className="p-1 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Next page"
                           >
                             <ChevronRightIcon className="w-4 h-4" />
                           </button>
@@ -511,6 +884,7 @@ export default function DataStructureTab({
                             onClick={() => handlePageChange(table.name, Math.ceil((pagination[table.name]?.totalRows || table.rowCount) / (pagination[table.name]?.pageSize || 15)))}
                             disabled={(pagination[table.name]?.page || 1) * (pagination[table.name]?.pageSize || 15) >= (pagination[table.name]?.totalRows || table.rowCount)}
                             className="p-1 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Last page"
                           >
                             <ChevronsRight className="w-4 h-4" />
                           </button>
@@ -555,10 +929,22 @@ export default function DataStructureTab({
       {/* Delete Confirmation Modal */}
       {deleteConfirmation.show && deleteConfirmation.tableName && (
         <ConfirmationModal
-          title="Delete Table"
-          message={`Are you sure you want to delete the table "${deleteConfirmation.tableName}"? This action cannot be undone and all data in this table will be permanently deleted.`}
+          title={
+            deleteConfirmation.rowId !== undefined 
+              ? "Delete Row" 
+              : deleteConfirmation.isSelectedRows 
+                ? "Delete Selected Rows" 
+                : "Delete Table"
+          }
+          message={
+            deleteConfirmation.rowId !== undefined
+              ? `Are you sure you want to delete this row from "${deleteConfirmation.tableName}"? This action cannot be undone.`
+              : deleteConfirmation.isSelectedRows
+                ? `Are you sure you want to delete ${selectedRows[deleteConfirmation.tableName]?.size || 0} selected rows from "${deleteConfirmation.tableName}"? This action cannot be undone.`
+                : `Are you sure you want to delete the table "${deleteConfirmation.tableName}"? This action cannot be undone and all data in this table will be permanently deleted.`
+          }
           onConfirm={() => handleDeleteTable(deleteConfirmation.tableName!)}
-          onCancel={() => setDeleteConfirmation({ show: false, tableName: null })}
+          onCancel={() => setDeleteConfirmation({ show: false, tableName: null, isSelectedRows: false, rowId: undefined })}
         />
       )}
     </div>
