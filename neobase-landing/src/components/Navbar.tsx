@@ -122,7 +122,7 @@ const Navbar = ({ forks }: { forks: number }) => {
         <div className="container mx-auto max-w-7xl">
           <div className="flex items-center justify-center text-center">
             <p className="text-sm md:text-base font-medium leading-relaxed">
-              🚀 We're raising <strong>Seed Funding</strong> round for developing Enterprise Version.{' '}
+              🚀 We're raising a <strong>Seed Funding</strong> round.{' '}
               <br className="sm:hidden" />
               To know more:{' '}
               <a 
