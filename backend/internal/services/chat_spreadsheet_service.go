@@ -366,11 +366,17 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 		selectClause = strings.Join(columnNames, ", ")
 	}
 
-	// Get paginated data
+	// Get paginated data - include _id for row operations
 	offset := (page - 1) * pageSize
+	// Always include _id in the select clause for row identification
+	selectWithId := "_id"
+	if selectClause != "*" && selectClause != "" {
+		selectWithId = "_id, " + selectClause
+	}
+	
 	dataQuery := fmt.Sprintf(
 		"SELECT %s FROM %s.%s ORDER BY _id LIMIT %d OFFSET %d",
-		selectClause,
+		selectWithId,
 		schemaName,
 		tableName,
 		pageSize,
@@ -388,13 +394,13 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 	// Process rows: decrypt and handle empty values
 	for i, row := range rows {
 		for key, value := range row {
-			// Skip internal columns
-			if strings.HasPrefix(key, "_") {
+			// Skip internal columns except _id (needed for row operations)
+			if strings.HasPrefix(key, "_") && key != "_id" {
 				continue
 			}
 			
-			// Handle null/empty values
-			if value == nil || (fmt.Sprintf("%v", value) == "") {
+			// Handle null/empty values (but not for _id)
+			if key != "_id" && (value == nil || (fmt.Sprintf("%v", value) == "")) {
 				rows[i][key] = "-"
 				continue
 			}
@@ -568,13 +574,13 @@ func (s *chatService) DownloadSpreadsheetTableData(userID, chatID, tableName str
 	// Process rows: decrypt and handle empty values
 	for i, row := range rows {
 		for key, value := range row {
-			// Skip internal columns
-			if strings.HasPrefix(key, "_") {
+			// Skip internal columns except _id (needed for row operations)
+			if strings.HasPrefix(key, "_") && key != "_id" {
 				continue
 			}
 			
-			// Handle null/empty values
-			if value == nil || (fmt.Sprintf("%v", value) == "") {
+			// Handle null/empty values (but not for _id)
+			if key != "_id" && (value == nil || (fmt.Sprintf("%v", value) == "")) {
 				rows[i][key] = "-"
 				continue
 			}
@@ -687,13 +693,13 @@ func (s *chatService) DownloadSpreadsheetTableDataWithFilter(userID, chatID, tab
 	// Process rows: decrypt and handle empty values
 	for i, row := range rows {
 		for key, value := range row {
-			// Skip internal columns
-			if strings.HasPrefix(key, "_") {
+			// Skip internal columns except _id (needed for row operations)
+			if strings.HasPrefix(key, "_") && key != "_id" {
 				continue
 			}
 			
-			// Handle null/empty values
-			if value == nil || (fmt.Sprintf("%v", value) == "") {
+			// Handle null/empty values (but not for _id)
+			if key != "_id" && (value == nil || (fmt.Sprintf("%v", value) == "")) {
 				rows[i][key] = "-"
 				continue
 			}
@@ -733,9 +739,9 @@ func (s *chatService) DeleteSpreadsheetRow(userID, chatID, tableName, rowID stri
 		schemaName = fmt.Sprintf("conn_%s", chatID)
 	}
 
-	// Delete the row
-	deleteQuery := fmt.Sprintf("DELETE FROM %s.%s WHERE _id = $1", schemaName, tableName)
-	if err := conn.Exec(deleteQuery, rowID); err != nil {
+	// Delete the row - using formatted query instead of parameterized to avoid prepared statement issues
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.%s WHERE _id = %s", schemaName, tableName, rowID)
+	if err := conn.Exec(deleteQuery); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete row: %v", err)
 	}
 
