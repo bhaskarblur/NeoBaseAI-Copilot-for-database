@@ -44,6 +44,7 @@ type TableSchema struct {
 	Comment     string                    `json:"comment,omitempty"`
 	Checksum    string                    `json:"checksum"`
 	RowCount    int64                     `json:"row_count"`
+	SizeBytes   int64                     `json:"size_bytes"`
 }
 
 type ColumnInfo struct {
@@ -662,9 +663,49 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 			checksums[collectionName] = checksum
 		}
 		return checksums, nil
+	case "spreadsheet":
+		// Spreadsheet needs special handling to get schema with the fetcher
+		checksums := make(map[string]string)
+
+		// Get the spreadsheet fetcher
+		fetcher, err := sm.getFetcher("spreadsheet", db)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get spreadsheet fetcher: %v", err)
+		}
+
+		// Get schema using the fetcher
+		schema, err := fetcher.GetSchema(ctx, db, []string{"ALL"})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema: %v", err)
+		}
+
+		// Calculate checksums for each table
+		for tableName, table := range schema.Tables {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				log.Printf("getTableChecksums -> context cancelled: %v", err)
+				return nil, err
+			}
+
+			// Convert table definition to string for checksum
+			tableStr := fmt.Sprintf("%s:%v:%v:%v:%v",
+				tableName,
+				table.Columns,
+				table.Indexes,
+				table.ForeignKeys,
+				table.Constraints,
+			)
+
+			// Calculate checksum using crypto/md5
+			hasher := md5.New()
+			hasher.Write([]byte(tableStr))
+			checksum := hex.EncodeToString(hasher.Sum(nil))
+			checksums[tableName] = checksum
+		}
+		return checksums, nil
 	}
 
-	return nil, fmt.Errorf("unsupported database type: %s", dbType)
+	return nil, fmt.Errorf("unsupported data source type: %s", dbType)
 }
 
 // Update fetchTableList to use driver directly
@@ -1649,6 +1690,13 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 	// Register MongoDB schema fetcher
 	sm.RegisterFetcher("mongodb", func(db DBExecutor) SchemaFetcher {
 		return NewMongoDBSchemaFetcher(db)
+	})
+
+	// Register Spreadsheet schema fetcher (uses custom SpreadsheetDriver fetcher)
+	sm.RegisterFetcher("spreadsheet", func(db DBExecutor) SchemaFetcher {
+		return &SpreadsheetDriver{
+			postgresDriver: NewPostgresDriver(),
+		}
 	})
 }
 

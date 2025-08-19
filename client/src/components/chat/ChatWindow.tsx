@@ -1522,9 +1522,14 @@ export default function ChatWindow({
           <ConnectionModal
             initialData={chat}
             initialTab={openWithSettingsTab ? 'settings' : undefined}
-            onClose={() => {
+            onClose={(updatedChat) => {
               setShowEditConnection(false);
               setOpenWithSettingsTab(false);
+              
+              // If we have an updated chat (e.g., after file uploads), update it
+              if (updatedChat && onEditConnection) {
+                onEditConnection(chat.id, updatedChat.connection, updatedChat.settings);
+              }
             }}
             onEdit={async (data, autoExecuteQuery) => {
               const result = await onEditConnection?.(chat.id, data!, autoExecuteQuery!);

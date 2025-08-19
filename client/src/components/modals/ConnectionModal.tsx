@@ -1,8 +1,9 @@
-import { AlertCircle, CheckCircle, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Chat, ChatSettings, Connection, SSLMode, TableInfo } from '../../types/chat';
+import { Chat, ChatSettings, Connection, TableInfo, FileUpload } from '../../types/chat';
 import chatService from '../../services/chatService';
-import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab } from './components';
+import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab } from './components';
+import { useStream } from '../../contexts/StreamContext';
 
 // Connection tab type
 type ConnectionType = 'basic' | 'ssh';
@@ -13,7 +14,7 @@ export type ModalTab = 'connection' | 'schema' | 'settings';
 interface ConnectionModalProps {
   initialData?: Chat;
   initialTab?: ModalTab;
-  onClose: () => void;
+  onClose: (updatedChat?: Chat) => void;
   onEdit?: (data?: Connection, settings?: ChatSettings) => Promise<{ success: boolean, error?: string, updatedChat?: Chat }>;
   onSubmit: (data: Connection, settings: ChatSettings) => Promise<{ 
     success: boolean;
@@ -46,11 +47,14 @@ export default function ConnectionModal({
   onSubmit,
   onUpdateSelectedCollections,
 }: ConnectionModalProps) {
+  const { generateStreamId } = useStream();
+  
   // Modal tab state to toggle between Connection, Schema, and Settings
   const [activeTab, setActiveTab] = useState<ModalTab>(initialTab || 'connection');
   
   // Connection type state to toggle between basic and SSH tabs (within Connection tab)
   const [connectionType, setConnectionType] = useState<ConnectionType>('basic');
+  const [fileUploads, setFileUploads] = useState<FileUpload[]>([]);
   
   // Track previous connection type to handle state persistence
   const [prevConnectionType, setPrevConnectionType] = useState<ConnectionType>('basic');
@@ -66,6 +70,7 @@ export default function ConnectionModal({
   // State for handling new connections
   const [showingNewlyCreatedSchema, setShowingNewlyCreatedSchema] = useState(false);
   const [newChatId, setNewChatId] = useState<string | undefined>(undefined);
+  const [currentChatData, setCurrentChatData] = useState<Chat | undefined>(initialData);
   
   // Success message state
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -78,7 +83,7 @@ export default function ConnectionModal({
     port: initialData?.connection.port || '',
     username: initialData?.connection.username || '',
     password: '',  // Password is never sent back from server
-    database: initialData?.connection.database || '',
+    database: initialData?.connection.database || (initialData?.connection.type === 'spreadsheet' ? 'spreadsheet_db' : ''),
     auth_database: initialData?.connection.auth_database || 'admin',  // Default to 'admin' for MongoDB
     use_ssl: initialData?.connection.use_ssl || false,
     ssl_mode: initialData?.connection.ssl_mode || 'disable',
@@ -191,13 +196,13 @@ export default function ConnectionModal({
   useEffect(() => {
     // Load tables when schema tab is active and we have either initialData or a new connection
     const shouldLoadTables = 
-      activeTab === 'schema' && 
-      ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length));
+      ((activeTab === 'schema' || (activeTab === 'connection' && formData.type === 'spreadsheet')) && 
+      ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length)));
     
     if (shouldLoadTables) {
       loadTables();
     }
-  }, [initialData, activeTab, tables.length, showingNewlyCreatedSchema, newChatId]);
+  }, [initialData, activeTab, tables.length, showingNewlyCreatedSchema, newChatId, formData.type]);
 
   // Use useEffect to update the value of the MongoDB URI inputs when the tab changes
   useEffect(() => {
@@ -396,6 +401,7 @@ export default function ConnectionModal({
           setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
           setShareWithAI(result.updatedChat.settings.share_data_with_ai);
           setNonTechMode(result.updatedChat.settings.non_tech_mode);
+          setCurrentChatData(result.updatedChat);
         }
         
         // Show success message - will auto-dismiss after 3 seconds
@@ -454,14 +460,24 @@ export default function ConnectionModal({
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
-    // Always validate these fields
-    ['host', 'port', 'database', 'username'].forEach(field => {
-      const error = validateField(field, updatedFormData);
-      if (error) {
-        newErrors[field as keyof FormErrors] = error;
-        hasErrors = true;
+    // Skip validation for Spreadsheet types as they don't need connection details
+    if (updatedFormData.type === 'spreadsheet') {
+      // Validate that at least one file is uploaded
+      if (!updatedFormData.file_uploads || updatedFormData.file_uploads.length === 0) {
+        setError('Please upload at least one file');
+        setIsLoading(false);
+        return;
       }
-    });
+    } else {
+      // Always validate these fields for database connections
+      ['host', 'port', 'database', 'username'].forEach(field => {
+        const error = validateField(field, updatedFormData);
+        if (error) {
+          newErrors[field as keyof FormErrors] = error;
+          hasErrors = true;
+        }
+      });
+    }
 
     // Validate SSL fields if SSL is enabled in Basic mode
     if (connectionType === 'basic' && updatedFormData.use_ssl) {
@@ -513,6 +529,91 @@ export default function ConnectionModal({
     }
 
     try {
+      // Handle file uploads for newly created spreadsheet connections
+      if (showingNewlyCreatedSchema && newChatId && formData.type === 'spreadsheet' && fileUploads.length > 0) {
+        try {
+          setSuccessMessage("Uploading files...");
+          
+          // Upload each file
+          for (const fileUpload of fileUploads) {
+            if (!fileUpload.file) {
+              console.error('No file object found for upload:', fileUpload.filename);
+              continue;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileUpload.file);
+            formData.append('tableName', fileUpload.tableName || '');
+            formData.append('mergeStrategy', fileUpload.mergeStrategy || 'replace');
+            
+            // Add merge options if present
+            if (fileUpload.mergeOptions) {
+              formData.append('ignoreCase', String(fileUpload.mergeOptions.ignoreCase ?? true));
+              formData.append('trimWhitespace', String(fileUpload.mergeOptions.trimWhitespace ?? true));
+              formData.append('handleNulls', fileUpload.mergeOptions.handleNulls || 'empty');
+              formData.append('addNewColumns', String(fileUpload.mergeOptions.addNewColumns ?? true));
+              formData.append('dropMissingColumns', String(fileUpload.mergeOptions.dropMissingColumns ?? false));
+              formData.append('updateExisting', String(fileUpload.mergeOptions.updateExisting ?? true));
+              formData.append('insertNew', String(fileUpload.mergeOptions.insertNew ?? true));
+              formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
+            }
+            
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${newChatId}/file`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              },
+              body: formData
+            });
+            
+            if (!response.ok) {
+              const errorData = await response.json();
+              console.error('Upload error response:', errorData);
+              throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+            }
+          }
+          
+          setSuccessMessage("Files uploaded successfully. Loading data structure...");
+          
+          // Wait a bit for the backend to process the files
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Switch to schema tab to show the new tables
+          setActiveTab('schema');
+          
+          // Clear the uploaded files from the state
+          setFileUploads([]);
+          setFormData(prev => ({ ...prev, file_uploads: [] }));
+          
+          // Force reload tables after upload
+          setTables([]); // Clear existing tables to force refresh
+          await loadTables();
+          
+          // Refresh the chat data to get updated database name
+          try {
+            const updatedChat = await chatService.getChat(newChatId);
+            setCurrentChatData(updatedChat);
+            // Update the form data with the new database name
+            setFormData(prev => ({
+              ...prev,
+              database: updatedChat.connection.database
+            }));
+          } catch (error) {
+            console.error('Failed to refresh chat data:', error);
+          }
+          
+          // Show final success message
+          setSuccessMessage("Files uploaded and tables loaded successfully");
+          setIsLoading(false);
+          return;
+        } catch (error: any) {
+          console.error('Failed to upload files:', error);
+          setError(error.message || 'Failed to upload files');
+          setIsLoading(false);
+          return;
+        }
+      }
+      
       if (initialData) {
         // Check if critical connection details have changed
         const credentialsChanged = 
@@ -533,19 +634,112 @@ export default function ConnectionModal({
             setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
             setShareWithAI(result.updatedChat.settings.share_data_with_ai);
             setNonTechMode(result.updatedChat.settings.non_tech_mode);
+            setCurrentChatData(result.updatedChat);
+            // Update the form data with the new database name for spreadsheets
+            if (result.updatedChat?.connection.type === 'spreadsheet') {
+              setFormData(prev => ({
+                ...prev,
+                database: result.updatedChat!.connection.database
+              }));
+            }
           }
           
-          // If credentials changed and we're in the connection tab, switch to schema tab
-          if (credentialsChanged && activeTab === 'connection') {
+          // For spreadsheet connections with new files, upload them
+          if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+            try {
+              setSuccessMessage("Uploading files...");
+              
+              // Upload each file
+              for (const fileUpload of fileUploads) {
+                if (!fileUpload.file) {
+                  console.error('No file object found for upload:', fileUpload.filename);
+                  continue;
+                }
+                
+                const formData = new FormData();
+                formData.append('file', fileUpload.file);
+                formData.append('tableName', fileUpload.tableName || '');
+                formData.append('mergeStrategy', fileUpload.mergeStrategy || 'replace');
+                
+                // Add merge options if present
+                if (fileUpload.mergeOptions) {
+                  formData.append('ignoreCase', String(fileUpload.mergeOptions.ignoreCase ?? true));
+                  formData.append('trimWhitespace', String(fileUpload.mergeOptions.trimWhitespace ?? true));
+                  formData.append('handleNulls', fileUpload.mergeOptions.handleNulls || 'empty');
+                  formData.append('addNewColumns', String(fileUpload.mergeOptions.addNewColumns ?? true));
+                  formData.append('dropMissingColumns', String(fileUpload.mergeOptions.dropMissingColumns ?? false));
+                  formData.append('updateExisting', String(fileUpload.mergeOptions.updateExisting ?? true));
+                  formData.append('insertNew', String(fileUpload.mergeOptions.insertNew ?? true));
+                  formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
+                }
+                
+                const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${initialData.id}/file`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: formData
+                });
+                
+                if (!response.ok) {
+                  const errorData = await response.json();
+                  console.error('Upload error response:', errorData);
+                  throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+                }
+              }
+              
+              setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              
+              // Clear the uploaded files from the state
+              setFileUploads([]);
+              setFormData(prev => ({ ...prev, file_uploads: [] }));
+              
+              // Wait a bit for the backend to process the files
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Switch to schema tab to show the new tables
+              setActiveTab('schema');
+              
+              // Force reload tables after upload
+              setTables([]); // Clear existing tables to force refresh
+              await loadTables();
+              
+              // Refresh the chat data to get updated database name
+              try {
+                const updatedChat = await chatService.getChat(initialData.id);
+                setCurrentChatData(updatedChat);
+                // Update the form data with the new database name
+                setFormData(prev => ({
+                  ...prev,
+                  database: updatedChat.connection.database
+                }));
+              } catch (error) {
+                console.error('Failed to refresh chat data:', error);
+              }
+              
+              // Show final success message
+              setSuccessMessage("Files uploaded and tables loaded successfully");
+              setIsLoading(false);
+            } catch (error: any) {
+              console.error('Failed to upload files:', error);
+              setError(error.message || 'Failed to upload files');
+              setIsLoading(false);
+              return;
+            }
+          } else if (credentialsChanged && activeTab === 'connection') {
+            // If credentials changed and we're in the connection tab, switch to schema tab
             setActiveTab('schema');
             // Load tables
             loadTables();
+            setIsLoading(false);
           } else {
             // Show success message - will auto-dismiss after 3 seconds
             setSuccessMessage("Connection updated successfully");
+            setIsLoading(false);
           }
         } else if (result?.error) {
           setError(result.error);
+          setIsLoading(false);
         }
       } else {
         // For new connections, pass settings to onSubmit
@@ -560,6 +754,81 @@ export default function ConnectionModal({
             // Store the new chat ID for use in handleUpdateSchema
             setNewChatId(result.chatId);
             setShowingNewlyCreatedSchema(true);
+            
+            // For spreadsheet connections, establish connection first then upload files
+            if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+              try {
+                setSuccessMessage("Establishing connection...");
+                
+                // First, establish the database connection
+                const connectResponse = await fetch(`${import.meta.env.VITE_API_URL}/chats/${result.chatId}/connect`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: JSON.stringify({
+                    stream_id: generateStreamId()
+                  })
+                });
+                
+                if (!connectResponse.ok) {
+                  const error = await connectResponse.json();
+                  throw new Error(error.error || 'Failed to establish database connection');
+                }
+                
+                // Wait a bit for connection to stabilize
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                setSuccessMessage("Uploading files...");
+                
+                // Upload each file
+                for (const fileUpload of fileUploads) {
+                  if (!fileUpload.file) {
+                    console.error('No file object found for upload:', fileUpload.filename);
+                    continue;
+                  }
+                  
+                  const formData = new FormData();
+                  formData.append('file', fileUpload.file);
+                  formData.append('tableName', fileUpload.tableName || '');
+                  formData.append('mergeStrategy', fileUpload.mergeStrategy || 'replace');
+                  
+                  // Add merge options if present
+                  if (fileUpload.mergeOptions) {
+                    formData.append('ignoreCase', String(fileUpload.mergeOptions.ignoreCase ?? true));
+                    formData.append('trimWhitespace', String(fileUpload.mergeOptions.trimWhitespace ?? true));
+                    formData.append('handleNulls', fileUpload.mergeOptions.handleNulls || 'empty');
+                    formData.append('addNewColumns', String(fileUpload.mergeOptions.addNewColumns ?? true));
+                    formData.append('dropMissingColumns', String(fileUpload.mergeOptions.dropMissingColumns ?? false));
+                    formData.append('updateExisting', String(fileUpload.mergeOptions.updateExisting ?? true));
+                    formData.append('insertNew', String(fileUpload.mergeOptions.insertNew ?? true));
+                    formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
+                  }
+                  
+                  const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${result.chatId}/file`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: formData
+                  });
+                  
+                  if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Upload error response:', errorData);
+                    throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+                  }
+                }
+                
+                setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              } catch (error: any) {
+                console.error('Failed to upload files:', error);
+                setError(error.message || 'Failed to upload files');
+                setIsLoading(false);
+                return;
+              }
+            }
             
             // Switch to schema tab
             setActiveTab('schema');
@@ -581,8 +850,25 @@ export default function ConnectionModal({
               // Check if all tables are selected to set selectAll state correctly
               setSelectAllTables(selectedTableNames?.length === tablesResponse.tables?.length);
               
+              // For spreadsheet connections, refresh the chat data to get updated database name
+              if (updatedFormData.type === 'spreadsheet') {
+                try {
+                  const updatedChat = await chatService.getChat(result.chatId);
+                  setCurrentChatData(updatedChat);
+                  // Update the form data with the new database name
+                  setFormData(prev => ({
+                    ...prev,
+                    database: updatedChat.connection.database
+                  }));
+                } catch (error) {
+                  console.error('Failed to refresh chat data:', error);
+                }
+              }
+              
               console.log('Connection created. Now you can select tables to include in your schema.');
-              setSuccessMessage("Connection created successfully. Select tables to include in your schema.");
+              setSuccessMessage(updatedFormData.type === 'spreadsheet' 
+                ? "Files uploaded successfully. Review your data structure."
+                : "Connection created successfully. Select tables to include in your schema.");
             } catch (error: any) {
               console.error('Failed to load tables for new connection:', error);
               setError(error.message || 'Failed to load tables for new connection');
@@ -609,10 +895,24 @@ export default function ConnectionModal({
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    
+    // Special handling for type change to spreadsheet
+    if (name === 'type' && value === 'spreadsheet') {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+        database: currentChatData?.connection.database || 'spreadsheet_db',
+        host: 'internal-spreadsheet',
+        port: '0',
+        username: 'spreadsheet_user',
+        password: 'internal'
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
 
     if (touched[name]) {
       const error = validateField(name, {
@@ -639,72 +939,7 @@ export default function ConnectionModal({
     }));
   };
 
-  const parseConnectionString = (text: string): Partial<Connection> => {
-    const result: Partial<Connection> = {};
-    const lines = text.split('\n');
-
-    lines.forEach(line => {
-      const [key, value] = line.split('=').map(s => s.trim());
-      switch (key) {
-        case 'DATABASE_TYPE':
-          if (['postgresql', 'yugabytedb', 'mysql', 'clickhouse', 'mongodb', 'redis', 'neo4j'].includes(value)) {
-            result.type = value as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
-          }
-          break;
-        case 'DATABASE_HOST':
-          result.host = value;
-          break;
-        case 'DATABASE_PORT':
-          result.port = value;
-          break;
-        case 'DATABASE_NAME':
-          result.database = value;
-          break;
-        case 'DATABASE_USERNAME':
-          result.username = value;
-          break;
-        case 'DATABASE_PASSWORD':
-          result.password = value;
-          break;
-        case 'USE_SSL':
-          result.use_ssl = value.toLowerCase() === 'true';
-          break;
-        case 'SSL_MODE':
-          if (['disable', 'require', 'verify-ca', 'verify-full'].includes(value)) {
-            result.ssl_mode = value as SSLMode;
-          }
-          break;
-        case 'SSL_CERT_URL':
-          result.ssl_cert_url = value;
-          break;
-        case 'SSL_KEY_URL':
-          result.ssl_key_url = value;
-          break;
-        case 'SSL_ROOT_CERT_URL':
-          result.ssl_root_cert_url = value;
-          break;
-        case 'SSH_ENABLED':
-          result.ssh_enabled = value.toLowerCase() === 'true';
-          break;
-        case 'SSH_HOST':
-          result.ssh_host = value;
-          break;
-        case 'SSH_PORT':
-          result.ssh_port = value;
-          break;
-        case 'SSH_USERNAME':
-          result.ssh_username = value;
-          break;
-        case 'SSH_PRIVATE_KEY':
-          result.ssh_private_key = value;
-          break;
-        case 'SSH_PASSPHRASE':
-          result.ssh_passphrase = value;
-          break;
-      }
-    });
-    return result;
-  };
+  // Removed unused parseConnectionString function
 
   const formatConnectionString = (connection: Connection): string => {
     let result = `DATABASE_TYPE=${connection.type}
@@ -812,6 +1047,16 @@ DATABASE_PASSWORD=`; // Mask password
   const handleUpdateSchema = async () => {
     if (!initialData && !showingNewlyCreatedSchema) return;
     
+    // For spreadsheet connections, just close the modal since data is already saved
+    if (formData.type === 'spreadsheet') {
+      setSuccessMessage("Data structure saved successfully");
+      // Give the success message time to show before closing
+      setTimeout(() => {
+        onClose(currentChatData);
+      }, 500);
+      return;
+    }
+    
     // Validate that at least one table is selected
     if (selectedTables?.length === 0) {
       setSchemaValidationError("At least one table must be selected");
@@ -841,7 +1086,7 @@ DATABASE_PASSWORD=`; // Mask password
         if (!initialData && showingNewlyCreatedSchema) {
           // Give the success message time to show before closing
           setTimeout(() => {
-            onClose();
+            onClose(currentChatData);
           }, 1000);
         }
         
@@ -876,103 +1121,86 @@ DATABASE_PASSWORD=`; // Mask password
       case 'connection':
         return (
           <>
-            <div>
-              <label className="block font-bold mb-2 text-lg">Paste Credentials</label>
-              <p className="text-gray-600 text-sm mb-2">
-                Paste your database credentials in the following format:
-              </p>
-              <textarea
-                ref={credentialsTextAreaRef}
-                className="neo-input w-full font-mono text-sm"
-                defaultValue={credentialsValue}
-                placeholder={`DATABASE_TYPE=postgresql
-DATABASE_HOST=your-host.example.com
-DATABASE_PORT=5432
-DATABASE_NAME=your_database
-DATABASE_USERNAME=your_username
-DATABASE_PASSWORD=your_password
-USE_SSL=false
-SSL_MODE=disable
-SSL_CERT_URL=https://example.com/cert.pem
-SSL_KEY_URL=https://example.com/key.pem
-SSL_ROOT_CERT_URL=https://example.com/ca.pem
-SSH_ENABLED=false
-SSH_HOST=ssh.example.com
-SSH_PORT=22
-SSH_USERNAME=ssh_user
-SSH_PRIVATE_KEY=your_private_key`}
-                rows={6}
-                onChange={(e) => {
-                  setCredentialsValue(e.target.value);
-                  const parsed = parseConnectionString(e.target.value);
-                  setFormData(prev => ({
-                    ...prev,
-                    ...parsed,
-                    // Keep existing password if we're editing and no new password provided
-                    password: parsed.password || (initialData ? formData.password : '')
-                  }));
-                  // Clear any errors for fields that were filled
-                  const newErrors = { ...errors };
-                  Object.keys(parsed).forEach(key => {
-                    delete newErrors[key as keyof FormErrors];
-                  });
-                  setErrors(newErrors);
-                  // Mark fields as touched
-                  const newTouched = { ...touched };
-                  Object.keys(parsed).forEach(key => {
-                    newTouched[key] = true;
-                  });
-                  setTouched(newTouched);
-                  
-                  // Set the connection type tab based on SSH enabled
-                  if (parsed.ssh_enabled) {
-                    handleConnectionTypeChange('ssh');
-                  } else {
-                    handleConnectionTypeChange('basic');
-                  }
-                }}
-              />
-              <p className="text-gray-500 text-xs mt-2">
-                All the fields will be automatically filled based on the pasted credentials
-              </p>
+            {/* Data Source Type Selector - Moved from BasicConnectionTab */}
+            <div className="mb-6">
+              <label className="block font-bold mb-2 text-lg">Data Source Type</label>
+              <p className="text-gray-600 text-sm mb-2">Select your data source</p>
+              <div className="relative">
+                <select
+                  name="type"
+                  value={formData.type}
+                  onChange={handleChange}
+                  className="neo-input w-full appearance-none pr-12"
+                >
+                  {[
+                    { value: 'postgresql', label: 'PostgreSQL' },
+                    { value: 'yugabytedb', label: 'YugabyteDB' },
+                    { value: 'mysql', label: 'MySQL' },
+                    { value: 'clickhouse', label: 'ClickHouse' },
+                    { value: 'mongodb', label: 'MongoDB' },
+                    { value: 'spreadsheet', label: 'Spreadsheet Files (CSV, Excel)' },
+                  ].map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
+              </div>
             </div>
             
-            <div className="my-6 border-t border-gray-200"></div>
+            {/* {formData.type !== 'spreadsheet' && (
+              <div className="my-6 border-t border-gray-200"></div>
+            )} */}
             
-            {/* Connection type tabs */}
-            <div className="flex border-b border-gray-200 mb-6">
-              <button
-                type="button"
-                className={`py-2 px-4 font-semibold border-b-2 ${
-                  connectionType === 'basic'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-                onClick={() => handleConnectionTypeChange('basic')}
-              >
-                <div className="flex items-center gap-2">
-                  <Monitor className="w-4 h-4" />
-                  <span>Basic Connection</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={`py-2 px-4 font-semibold border-b-2 ${
-                  connectionType === 'ssh'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-                onClick={() => handleConnectionTypeChange('ssh')}
-              >
-                <div className="flex items-center gap-2">
-                  <KeyRound className="w-4 h-4" />
-                  <span>SSH Tunnel</span>
-                </div>
-              </button>
-            </div>
+            {/* Connection type tabs - Hide for CSV/Excel */}
+            {formData.type !== 'spreadsheet' && (
+              <div className="flex border-b border-gray-200 mb-6">
+                <button
+                  type="button"
+                  className={`py-2 px-4 font-semibold border-b-2 ${
+                    connectionType === 'basic'
+                      ? 'border-black text-black'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => handleConnectionTypeChange('basic')}
+                >
+                  <div className="flex items-center gap-2">
+                    <Monitor className="w-4 h-4" />
+                    <span>Basic Connection</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className={`py-2 px-4 font-semibold border-b-2 ${
+                    connectionType === 'ssh'
+                      ? 'border-black text-black'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                  onClick={() => handleConnectionTypeChange('ssh')}
+                >
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4" />
+                    <span>SSH Tunnel</span>
+                  </div>
+                </button>
+              </div>
+            )}
 
             {/* Connection Tabs Content */}
-            {connectionType === 'basic' ? (
+            {formData.type === 'spreadsheet' ? (
+              <FileUploadTab
+                formData={formData}
+                handleChange={handleChange}
+                onFilesChange={(files) => {
+                  setFileUploads(files);
+                  setFormData(prev => ({ ...prev, file_uploads: files }));
+                }}
+                isEditMode={!!initialData || (showingNewlyCreatedSchema && !!newChatId)}
+                chatId={initialData?.id || newChatId}
+                preloadedTables={tables}
+              />
+            ) : connectionType === 'basic' ? (
               <BasicConnectionTab
                 formData={formData}
                 errors={errors}
@@ -998,7 +1226,24 @@ SSH_PRIVATE_KEY=your_private_key`}
           </>
         );
       case 'schema':
-        return (
+        return formData.type === 'spreadsheet' ? (
+          <DataStructureTab
+            chatId={newChatId || initialData?.id || ''}
+            isLoadingData={isLoadingTables}
+            onDeleteTable={(tableName) => {
+              // TODO: Implement delete table functionality
+              console.log('Delete table:', tableName);
+            }}
+            onDownloadData={(tableName) => {
+              // TODO: Implement download data functionality
+              console.log('Download data:', tableName);
+            }}
+            onRefreshData={() => {
+              // Refresh the tables
+              loadTables();
+            }}
+          />
+        ) : (
           <SchemaTab
             isLoadingTables={isLoadingTables}
             tables={tables}
@@ -1036,12 +1281,17 @@ SSH_PRIVATE_KEY=your_private_key`}
             <div className="flex items-center gap-3">
               <Database className="w-6 h-6" />
               <div className="flex flex-col gap-1 mt-2">
-                <h2 className="text-2xl font-bold">{initialData ? 'Edit Connection' : 'New Connection'}</h2>
-                <p className="text-gray-500 text-sm">Your database credentials are stored in encrypted form.</p>
+                <h2 className="text-2xl font-bold">
+                  {initialData ? 'Edit Connection' : 'New Connection'}
+                  {(currentChatData || (showingNewlyCreatedSchema && formData.type === 'spreadsheet')) && formData.database && formData.database !== 'spreadsheet_db' && (
+                    <span className="text-lg font-normal text-gray-600 ml-2">- {formData.database}</span>
+                  )}
+                </h2>
+                <p className="text-gray-500 text-sm">Your data source credentials are stored in <strong>encrypted form</strong>.</p>
               </div>
             </div>
             <button
-              onClick={onClose}
+              onClick={() => onClose(currentChatData)}
               className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
             >
               <X className="w-6 h-6" />
@@ -1077,7 +1327,7 @@ SSH_PRIVATE_KEY=your_private_key`}
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">Schema</span>
+                <span className="hidden md:block">{formData.type === 'spreadsheet' ? 'Data Structure' : 'Schema'}</span>
               </div>
             </button>
           )}
@@ -1116,7 +1366,7 @@ SSH_PRIVATE_KEY=your_private_key`}
         {(activeTab === 'connection' || activeTab === 'settings' || (activeTab === 'schema'  && !isLoadingTables)) && (
           <>
             {/* Password notice for updating connections */}
-            {initialData && !successMessage && !isLoading && activeTab === 'connection' && (
+            {initialData && !successMessage && !isLoading && activeTab === 'connection' && formData.type !== 'spreadsheet' && (
               <div className="mt-2 -mb-2 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
@@ -1157,18 +1407,24 @@ SSH_PRIVATE_KEY=your_private_key`}
               ) : (
                 <span>
                   {!initialData 
-                    ? (showingNewlyCreatedSchema && activeTab === 'schema') ? 'Save Schema' : 'Create' 
+                    ? (showingNewlyCreatedSchema && activeTab === 'schema') 
+                      ? (formData.type === 'spreadsheet' ? 'Save Structure' : 'Save Schema') 
+                      : (showingNewlyCreatedSchema && activeTab === 'connection' && formData.type === 'spreadsheet')
+                        ? 'Upload Files'
+                        : 'Create' 
                     : activeTab === 'settings' 
                       ? 'Update Settings' 
                       : activeTab === 'schema' 
-                        ? 'Update Schema' 
-                        : 'Update Connection'}
+                        ? (formData.type === 'spreadsheet' ? 'Update Structure' : 'Update Schema') 
+                        : (showingNewlyCreatedSchema && formData.type === 'spreadsheet' && fileUploads.length > 0)
+                          ? 'Upload Files'
+                          : 'Update Connection'}
                 </span>
               )}
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose(currentChatData)}
               className="neo-button-secondary flex-1"
               disabled={isLoading}
             >

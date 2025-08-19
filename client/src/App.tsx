@@ -517,8 +517,13 @@ function AppContent() {
           handleConnectionStatusChange(id, true, 'app-select-connection');
         } else {
           console.log('connectionStatus is false, connecting to the connection');
+          // Ensure we have a streamId before connecting
+          let currentStreamId = streamId;
+          if (!currentStreamId) {
+            currentStreamId = generateStreamId();
+          }
           // Make api call to connect to the connection
-          await chatService.connectToConnection(id, streamId || '');
+          await chatService.connectToConnection(id, currentStreamId);
           handleConnectionStatusChange(id, true, 'app-select-connection');
         }
       }
@@ -1476,9 +1481,21 @@ function AppContent() {
 
       {showConnectionModal && (
         <ConnectionModal
-          onClose={() => {
+          onClose={(updatedChat) => {
             setShowConnectionModal(false);
             setIsEditingConnection(false);
+            
+            // If we have an updated chat (e.g., after file uploads), update it in state
+            if (updatedChat) {
+              setChats(prev => prev.map(chat => 
+                chat.id === updatedChat.id ? updatedChat : chat
+              ));
+              
+              // Update the selected connection if it's the one being edited
+              if (selectedConnection?.id === updatedChat.id) {
+                setSelectedConnection(updatedChat);
+              }
+            }
           }}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
@@ -1498,7 +1515,7 @@ function AppContent() {
               }
               
               toast.success('Connection updated successfully!', toastStyle);
-              return { success: true };
+              return { success: true, updatedChat };
             } catch (error: any) {
               console.error('Failed to update connection:', error);
               toast.error(error.message, errorToast);

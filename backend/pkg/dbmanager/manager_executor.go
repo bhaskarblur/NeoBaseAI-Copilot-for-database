@@ -136,7 +136,17 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	go func() {
 		defer close(done)
 		log.Printf("Manager -> ExecuteQuery -> Executing query: %v", query)
-		result = tx.ExecuteQuery(execCtx, conn, query, queryType, findCount)
+		var err error
+		result, err = tx.ExecuteQuery(execCtx, query)
+		if err != nil {
+			log.Printf("Manager -> ExecuteQuery -> Error executing query: %v", err)
+			result = &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: err.Error(),
+					Code:    "EXECUTION_ERROR",
+				},
+			}
+		}
 		// log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
 		if result.Error != nil {
 			queryErr = result.Error
@@ -688,7 +698,7 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 		return nil
 
 	default:
-		return fmt.Errorf("unsupported database type: %s", config.Type)
+		return fmt.Errorf("unsupported data source type: %s", config.Type)
 	}
 }
 

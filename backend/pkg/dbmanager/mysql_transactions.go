@@ -18,14 +18,14 @@ type MySQLTransaction struct {
 }
 
 // ExecuteQuery executes a query within a transaction
-func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
+func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, query string) (*QueryExecutionResult, error) {
 	if t.tx == nil {
 		return &QueryExecutionResult{
 			Error: &dtos.QueryError{
 				Message: "No active transaction",
 				Code:    "TRANSACTION_ERROR",
 			},
-		}
+		}, nil
 	}
 
 	startTime := time.Now()
@@ -46,7 +46,7 @@ func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, q
 				Message: "Query execution cancelled",
 				Code:    "EXECUTION_CANCELLED",
 			}
-			return result
+			return result, nil
 		}
 
 		// Execute the statement based on query type
@@ -60,7 +60,7 @@ func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, q
 					Message: err.Error(),
 					Code:    "EXECUTION_ERROR",
 				}
-				return result
+				return result, nil
 			}
 
 			// Process the rows to ensure proper type handling
@@ -107,7 +107,7 @@ func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, q
 					Message: execResult.Error.Error(),
 					Code:    "EXECUTION_ERROR",
 				}
-				return result
+				return result, nil
 			}
 
 			rowsAffected := execResult.RowsAffected
@@ -138,11 +138,11 @@ func (t *MySQLTransaction) ExecuteQuery(ctx context.Context, conn *Connection, q
 				Message: err.Error(),
 				Details: "Failed to marshal query results",
 			},
-		}
+		}, nil
 	}
-	result.ResultJSON = string(resultJSON)
+	result.StreamData = resultJSON
 
-	return result
+	return result, nil
 }
 
 // Commit commits the transaction

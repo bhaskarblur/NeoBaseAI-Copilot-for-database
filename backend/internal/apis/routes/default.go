@@ -33,4 +33,5 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
 	SetupWaitlistRoutes(router)
+	SetupUploadRoutes(router)
 }

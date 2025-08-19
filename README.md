@@ -13,6 +13,7 @@
 
 - **AI-Powered Queries**: Generate and optimize SQL queries using natural language prompts.
 - **Multi-Database Support**: Connect to PostgreSQL, MySQL, MongoDB, Redis, and more.
+- **Spreadsheet Support**: Upload and query CSV/Excel files with AES-GCM encryption.
 - **Real-Time Chat Interface**: Interact with your database like you're chatting with an expert.
 - **Neo Brutalism Design**: Bold, modern, and high-contrast UI for a unique user experience.
 - **Transaction Management**: Start, commit, and rollback transactions with ease.
@@ -26,6 +27,7 @@
 - MySQL
 - ClickHouse
 - MongoDB
+- Spreadsheet (CSV/Excel)
 
 ## Planned to be supported DBs
 - Cassandra (Priority 1)

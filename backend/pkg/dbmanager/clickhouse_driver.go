@@ -393,7 +393,8 @@ func (d *ClickHouseDriver) ExecuteQuery(ctx context.Context, conn *Connection, q
 			},
 		}
 	}
-	result.ResultJSON = string(resultJSON)
+	// Store the result JSON in StreamData for streaming purposes
+	result.StreamData = resultJSON
 
 	return result
 }
@@ -462,3 +463,4 @@ func (d *ClickHouseDriver) FetchExampleRecords(ctx context.Context, db DBExecuto
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
+

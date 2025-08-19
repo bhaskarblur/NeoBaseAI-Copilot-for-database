@@ -61,7 +61,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
             <h3 className="text-xl font-bold mb-2">SSH Tunnel Coming Soon</h3>
             <p className="text-gray-700">
               SSH tunneling is currently under development such as a Jump Host.
-              The connection will use direct database connection for now.
+              Please use Basic Connection for now to setup data source.
             </p>
           </div>
         </div>
@@ -174,12 +174,12 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
 
           {/* Database Settings Section */}
           <div>
-            <h3 className="font-bold text-lg mb-3">Database Credentials</h3>
+            <h3 className="font-bold text-lg mb-3">Data Source Credentials</h3>
             
             {/* Database Type */}
             <div className="mb-6">
-              <label className="block font-bold mb-2">Database Type</label>
-              <p className="text-gray-600 text-sm mb-2">Select your database system</p>
+              <label className="block font-bold mb-2">Data Source Type</label>
+              <p className="text-gray-600 text-sm mb-2">Select your data source</p>
               <div className="relative">
                 <select
                   name="type"
@@ -193,9 +193,6 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                     { value: 'mysql', label: 'MySQL' },
                     { value: 'clickhouse', label: 'ClickHouse' },
                     { value: 'mongodb', label: 'MongoDB' },
-                    { value: 'cassandra', label: 'Cassandra (Coming Soon)' },
-                    { value: 'redis', label: 'Redis (Coming Soon)' },
-                    { value: 'neo4j', label: 'Neo4J (Coming Soon)' }
                   ].map(option => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -352,7 +349,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                     }
                   }}
                 />
-                <p className="text-gray-500 text-xs mt-2">
+                <p className="text-gray-500 text-xs mt-3">
                   Connection URI will be used to auto-fill the fields below. Both standard and Atlas SRV formats supported.
                 </p>
               </div>
@@ -454,7 +451,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                 className="neo-input w-full"
                 placeholder="Enter your database password"
               />
-              <p className="text-gray-500 text-xs mt-2">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
+              <p className="text-gray-500 text-xs mt-3">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
             </div>
 
             {/* MongoDB Authentication Database Field - Only show when MongoDB is selected */}

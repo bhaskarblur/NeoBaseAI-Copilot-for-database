@@ -15,6 +15,21 @@ services:
     networks:
       - neobase-network
 
+  neobase-spreadsheet-postgres:
+    image: postgres:16-alpine
+    container_name: neobase-spreadsheet-postgres
+    restart: always
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: neobase
+      POSTGRES_PASSWORD: neobase
+      POSTGRES_DB: neobase_spreadsheet_storage
+    volumes:
+      - neobase-spreadsheet-postgres-data:/var/lib/postgresql/data
+    networks:
+      - neobase-network
+
   neobase-redis:
     image: redis:latest
     container_name: neobase-redis
@@ -36,6 +51,7 @@ services:
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
+  neobase-spreadsheet-postgres-data:
 
 networks:
   neobase-network:

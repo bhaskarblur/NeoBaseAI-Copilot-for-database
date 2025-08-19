@@ -31,7 +31,7 @@ import { DemoModal } from '../modals/DemoModal';
 export interface Connection {
   id: string;
   name: string;
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet';
 }
 
 interface SidebarProps {
@@ -292,9 +292,10 @@ export default function Sidebar({
     try {
       console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
-      if (id === currentConnectedChatId) {
-        return;
-      }
+      // Don't return early if it's the same connection - we might need to reconnect
+      // if (id === currentConnectedChatId) {
+      //   return;
+      // }
 
       // Track connection selected event
       const connection = connections.find(chat => chat.id === id);
@@ -477,7 +478,7 @@ export default function Sidebar({
                             >
                               <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
                                 <DatabaseLogo
-                                  type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j'}
+                                  type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet'}
                                   size={28}
                                   className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
                                 />
@@ -507,7 +508,9 @@ export default function Sidebar({
                                                     ? 'Redis' 
                                                     : connection.connection.type === 'neo4j' 
                                                       ? 'Neo4j' 
-                                                      : 'Unknown'}
+                                                      : connection.connection.type === 'spreadsheet'
+                                                        ? 'Spreadsheet'
+                                                        : 'Unknown'}
                                       </p>
                                       <div className="flex flex-row items-center gap-1.5 mt-1">
                                         <Clock className="w-3.5 h-3.5 text-gray-500" />

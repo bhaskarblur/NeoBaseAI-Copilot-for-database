@@ -999,3 +999,8 @@ func (h *ChatHandler) GetQueryRecommendations(c *gin.Context) {
 		Data:    recommendations,
 	})
 }
+
+// GetChatService returns the chat service instance
+func (h *ChatHandler) GetChatService() services.ChatService {
+	return h.chatService
+}

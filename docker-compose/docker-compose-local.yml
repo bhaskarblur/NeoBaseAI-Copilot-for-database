@@ -33,6 +33,21 @@ services:
     networks:
       - neobase-network
 
+  neobase-spreadsheet-postgres:
+    image: postgres:16-alpine
+    container_name: neobase-spreadsheet-postgres
+    restart: always
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: neobase
+      POSTGRES_PASSWORD: neobase
+      POSTGRES_DB: neobase_spreadsheet_storage
+    volumes:
+      - neobase-spreadsheet-postgres-data:/var/lib/postgresql/data
+    networks:
+      - neobase-network
+
   neobase-backend:
     build:
       context: ../backend
@@ -82,9 +97,17 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD} # your-app-password
       - SMTP_FROM_NAME=${SMTP_FROM_NAME} # NeoBase - AI Database Copilot
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL} # your-email@gmail.com
+      - SPREADSHEET_POSTGRES_HOST=${SPREADSHEET_POSTGRES_HOST} # neobase-spreadsheet-postgres
+      - SPREADSHEET_POSTGRES_PORT=${SPREADSHEET_POSTGRES_PORT} # 5432
+      - SPREADSHEET_POSTGRES_DATABASE=${SPREADSHEET_POSTGRES_DATABASE} # neobase_spreadsheet_storage
+      - SPREADSHEET_POSTGRES_USERNAME=${SPREADSHEET_POSTGRES_USERNAME} # neobase_spreadsheet
+      - SPREADSHEET_POSTGRES_PASSWORD=${SPREADSHEET_POSTGRES_PASSWORD} # your_secure_password_here
+      - SPREADSHEET_POSTGRES_SSL_MODE=${SPREADSHEET_POSTGRES_SSL_MODE} # disable
+      - SPREADSHEET_DATA_ENCRYPTION_KEY=${SPREADSHEET_DATA_ENCRYPTION_KEY} # 32 bytes for AES-GCM
     depends_on:
       - neobase-mongodb
       - neobase-redis
+      - neobase-spreadsheet-postgres
     networks:
       - neobase-network
 
@@ -109,6 +132,7 @@ services:
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
+  neobase-spreadsheet-postgres-data:
 
 networks:
   neobase-network:

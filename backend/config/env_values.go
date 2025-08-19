@@ -62,6 +62,15 @@ type Environment struct {
 	SMTPPassword  string
 	SMTPFromName  string
 	SMTPFromEmail string
+
+	// Spreadsheet PostgreSQL configs
+	SpreadsheetPostgresHost       string
+	SpreadsheetPostgresPort       string
+	SpreadsheetPostgresDatabase   string
+	SpreadsheetPostgresUsername   string
+	SpreadsheetPostgresPassword   string
+	SpreadsheetPostgresSSLMode    string
+	SpreadsheetDataEncryptionKey  string
 }
 
 var Env Environment
@@ -133,6 +142,15 @@ func LoadEnv() error {
 	Env.SMTPFromName = getEnvWithDefault("SMTP_FROM_NAME", "NeoBase")
 	Env.SMTPFromEmail = getEnvWithDefault("SMTP_FROM_EMAIL", Env.SMTPUser)
 
+	// Spreadsheet PostgreSQL configs
+	Env.SpreadsheetPostgresHost = getEnvWithDefault("SPREADSHEET_POSTGRES_HOST", "localhost")
+	Env.SpreadsheetPostgresPort = getEnvWithDefault("SPREADSHEET_POSTGRES_PORT", "5432")
+	Env.SpreadsheetPostgresDatabase = getEnvWithDefault("SPREADSHEET_POSTGRES_DATABASE", "neobase_spreadsheet_storage")
+	Env.SpreadsheetPostgresUsername = getEnvWithDefault("SPREADSHEET_POSTGRES_USERNAME", "neobase_spreadsheet")
+	Env.SpreadsheetPostgresPassword = getRequiredEnv("SPREADSHEET_POSTGRES_PASSWORD", "")
+	Env.SpreadsheetPostgresSSLMode = getEnvWithDefault("SPREADSHEET_POSTGRES_SSL_MODE", "disable")
+	Env.SpreadsheetDataEncryptionKey = getRequiredEnv("SPREADSHEET_DATA_ENCRYPTION_KEY", "spreadsheet_data_key_32bytes")
+
 	return validateConfig()
 }
 
@@ -170,7 +188,13 @@ func getFloatEnvWithDefault(key string, defaultValue float64) float64 {
 	if strValue == "" {
 		return defaultValue
 	}
-	return defaultValue
+	
+	value, err := strconv.ParseFloat(strValue, 64)
+	if err != nil {
+		fmt.Printf("Warning: Invalid value for %s, using default: %f\n", key, defaultValue)
+		return defaultValue
+	}
+	return value
 }
 
 func validateConfig() error {
@@ -186,6 +210,17 @@ func validateConfig() error {
 
 	if Env.AdminUser == "neobase-admin" || Env.AdminPassword == "neobase-password" {
 		return fmt.Errorf("default credentials: neobase-admin and neobase-password should not be used")
+	}
+
+	// Validate Spreadsheet PostgreSQL configs
+	if len(Env.SpreadsheetDataEncryptionKey) != 32 {
+		return fmt.Errorf("SPREADSHEET_DATA_ENCRYPTION_KEY must be exactly 32 bytes for AES-GCM encryption, got: %d bytes", len(Env.SpreadsheetDataEncryptionKey))
+	}
+
+	// Validate SSL mode
+	validSSLModes := map[string]bool{"disable": true, "require": true, "verify-ca": true, "verify-full": true}
+	if !validSSLModes[Env.SpreadsheetPostgresSSLMode] {
+		return fmt.Errorf("invalid SPREADSHEET_POSTGRES_SSL_MODE: %s, must be one of: disable, require, verify-ca, verify-full", Env.SpreadsheetPostgresSSLMode)
 	}
 
 	return nil

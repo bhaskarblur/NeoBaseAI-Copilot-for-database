@@ -12,12 +12,12 @@ type ChatSettingsResponse struct {
 	NonTechMode      bool `json:"non_tech_mode"`
 }
 type CreateConnectionRequest struct {
-	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra"`
-	Host         string  `json:"host" binding:"required"`
+	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet"`
+	Host         string  `json:"host" binding:"required_unless=Type spreadsheet"`
 	Port         *string `json:"port"`
-	Username     string  `json:"username" binding:"required"`
+	Username     string  `json:"username" binding:"required_unless=Type spreadsheet"`
 	Password     *string `json:"password"`
-	Database     string  `json:"database" binding:"required"`
+	Database     string  `json:"database" binding:"required_unless=Type spreadsheet"`
 	AuthDatabase *string `json:"auth_database,omitempty"` // Database to authenticate against (for MongoDB)
 
 	// SSL/TLS Configuration
@@ -77,6 +77,8 @@ type TableInfo struct {
 	Name       string       `json:"name"`
 	Columns    []ColumnInfo `json:"columns"`
 	IsSelected bool         `json:"is_selected"`
+	RowCount   int64        `json:"row_count"`
+	SizeBytes  int64        `json:"size_bytes"`
 }
 
 // ColumnInfo represents a column in a table

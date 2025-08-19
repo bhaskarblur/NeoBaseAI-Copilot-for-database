@@ -360,7 +360,7 @@ func (d *MySQLDriver) ExecuteQuery(ctx context.Context, conn *Connection, query 
 			},
 		}
 	}
-	result.ResultJSON = string(resultJSON)
+	result.StreamData = resultJSON
 
 	return result
 }
@@ -429,3 +429,4 @@ func (d *MySQLDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, ta
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
+

@@ -116,8 +116,30 @@ const Navbar = ({ forks }: { forks: number }) => {
           )}
         </div>
       </nav>
-      {/* Spacer to prevent content from being hidden under the fixed navbar */}
-      <div className="h-[73px]"></div>
+      
+      {/* Fundraising Banner */}
+      <div className="bg-black text-white py-2 pt-4 px-6 md:px-8 lg:px-12 fixed top-[73px] left-0 right-0 z-[99] border-b-2 border-gray-700">
+        <div className="container mx-auto max-w-7xl">
+          <div className="flex items-center justify-center text-center">
+            <p className="text-sm md:text-base font-medium leading-relaxed">
+              🚀 We're raising <strong>Seed Funding</strong> round for developing Enterprise Version.{' '}
+              <br className="sm:hidden" />
+              To know more:{' '}
+              <a 
+                href="https://drive.google.com/file/d/1uvjE-rMgkYA_LhkZCoQEruh_kYGj0pIa/view?usp=drive_link"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-1 underline hover:text-yellow-400 transition-colors font-semibold"
+              >
+                View our Pitch Deck
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Spacer to prevent content from being hidden under the fixed navbar and banner */}
+      <div className="h-[125px]"></div>
     </>
   )
 }
