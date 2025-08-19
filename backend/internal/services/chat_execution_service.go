@@ -193,8 +193,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			if queryMap["exampleResult"] != nil {
 				log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
 				result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
-				exampleResult = utils.ToStringPtr(string(result))
-				log.Printf("processLLMResponse -> saving exampleResult: %v", *exampleResult)
+				resultStr := string(result)
+				// Encrypt the example result before storage
+				encryptedResult := s.encryptQueryResult(resultStr)
+				exampleResult = utils.ToStringPtr(encryptedResult)
+				log.Printf("processLLMResponse -> saving exampleResult (encrypted): %v", *exampleResult)
 			} else {
 				exampleResult = nil
 				log.Println("processLLMResponse -> saving exampleResult: nil")
@@ -403,7 +406,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 					ChatID:        existingMessage.ChatID.Hex(),
 					Content:       existingMessage.Content,
 					UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-					Queries:       dtos.ToQueryDto(existingMessage.Queries),
+					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
 					CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
@@ -418,7 +421,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			ChatID:        existingMessage.ChatID.Hex(),
 			Content:       existingMessage.Content,
 			UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-			Queries:       dtos.ToQueryDto(existingMessage.Queries),
+			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
 			NonTechMode:   existingMessage.NonTechMode,
@@ -475,7 +478,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				ChatID:        chatResponseMsg.ChatID.Hex(),
 				Content:       chatResponseMsg.Content,
 				UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-				Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
+				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
 				NonTechMode:   chatResponseMsg.NonTechMode,
@@ -489,7 +492,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		ChatID:        chatResponseMsg.ChatID.Hex(),
 		Content:       chatResponseMsg.Content,
 		UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-		Queries:       dtos.ToQueryDto(chatResponseMsg.Queries),
+		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
 		NonTechMode:   chatResponseMsg.NonTechMode,
@@ -1083,7 +1086,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	query.IsExecuted = true
 	query.IsRolledBack = false
 	query.ExecutionTime = &result.ExecutionTime
-	query.ExecutionResult = &resultJSONStr
+	// Encrypt the execution result before storage
+	encryptedResult := s.encryptQueryResult(resultJSONStr)
+	query.ExecutionResult = &encryptedResult
 	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 	if totalRecordsCount != nil {
 		if query.Pagination == nil {
@@ -1119,7 +1124,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					}
 					log.Printf("ChatService -> ExecuteQuery -> resultJSONStr: %v", resultJSONStr)
 					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult before update: %v", (*msg.Queries)[i].ExecutionResult)
-					(*msg.Queries)[i].ExecutionResult = &resultJSONStr
+					// Encrypt the execution result before storage
+					encryptedResult := s.encryptQueryResult(resultJSONStr)
+					(*msg.Queries)[i].ExecutionResult = &encryptedResult
 					log.Printf("ChatService -> ExecuteQuery -> ExecutionResult after update: %v", (*msg.Queries)[i].ExecutionResult)
 					if result.Error != nil {
 						(*msg.Queries)[i].Error = &models.QueryError{
@@ -1747,7 +1754,9 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				// Convert Result to JSON string
 				resultJSONBytes, _ := json.Marshal(result.Result)
 				resultJSONStr := string(resultJSONBytes)
-				(*msg.Queries)[i].ExecutionResult = &resultJSONStr
+				// Encrypt the execution result before storage
+				encryptedResult := s.encryptQueryResult(resultJSONStr)
+				(*msg.Queries)[i].ExecutionResult = &encryptedResult
 				(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{

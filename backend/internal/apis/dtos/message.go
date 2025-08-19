@@ -80,6 +80,12 @@ type MessageListRequest struct {
 }
 
 func ToQueryDto(queries *[]models.Query) *[]Query {
+	// Call the new version with no decryption function for backward compatibility
+	return ToQueryDtoWithDecryption(queries, nil)
+}
+
+// ToQueryDtoWithDecryption converts model queries to DTO queries with optional decryption
+func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) string) *[]Query {
 	if queries == nil {
 		return nil
 	}
@@ -93,7 +99,12 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		log.Printf("ToQueryDto -> saved query.ExampleResult: %v", query.ExampleResult)
 		if query.ExampleResult != nil {
 			log.Printf("ToQueryDto -> query.ExampleResult: %v", *query.ExampleResult)
-			err := json.Unmarshal([]byte(*query.ExampleResult), &exampleResult)
+			// Decrypt if function provided
+			resultStr := *query.ExampleResult
+			if decryptFunc != nil {
+				resultStr = decryptFunc(resultStr)
+			}
+			err := json.Unmarshal([]byte(resultStr), &exampleResult)
 			if err != nil {
 				log.Printf("ToQueryDto -> error unmarshalling exampleResult: %v", err)
 				exampleResult = []interface{}{}
@@ -101,12 +112,17 @@ func ToQueryDto(queries *[]models.Query) *[]Query {
 		}
 
 		if query.ExecutionResult != nil {
-			err := json.Unmarshal([]byte(*query.ExecutionResult), &executionResult)
+			// Decrypt if function provided
+			resultStr := *query.ExecutionResult
+			if decryptFunc != nil {
+				resultStr = decryptFunc(resultStr)
+			}
+			err := json.Unmarshal([]byte(resultStr), &executionResult)
 			if err != nil {
 				log.Printf("ToQueryDto -> error unmarshalling executionResult: %v", err)
 				// Try unmarshalling the executionResult as a []interface{}
 				var executionResultArray []interface{}
-				err = json.Unmarshal([]byte(*query.ExecutionResult), &executionResultArray)
+				err = json.Unmarshal([]byte(resultStr), &executionResultArray)
 				if err != nil {
 					log.Printf("ToQueryDto -> error unmarshalling executionResult as []interface{}: %v", err)
 					executionResult = map[string]interface{}{}

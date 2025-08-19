@@ -85,6 +85,7 @@ type chatService struct {
 	streamHandler   StreamHandler
 	activeProcesses map[string]context.CancelFunc // key: streamID
 	processesMu     sync.RWMutex
+	crypto          *utils.AESGCMCrypto
 }
 
 func isValidDBType(dbType string) bool {
@@ -137,6 +138,13 @@ func NewChatService(
 	dbManager *dbmanager.Manager,
 	llmClient llm.Client,
 ) ChatService {
+	// Initialize crypto instance
+	crypto, err := utils.NewFromConfig()
+	if err != nil {
+		log.Printf("ChatService -> NewChatService -> Failed to initialize crypto: %v", err)
+		// Continue without crypto for backward compatibility
+	}
+	
 	return &chatService{
 		chatRepo:        chatRepo,
 		llmRepo:         llmRepo,
@@ -144,7 +152,38 @@ func NewChatService(
 		llmClient:       llmClient,
 		streamChans:     make(map[string]chan dtos.StreamResponse),
 		activeProcesses: make(map[string]context.CancelFunc),
+		crypto:          crypto,
 	}
+}
+
+// encryptQueryResult encrypts a query result for storage
+func (s *chatService) encryptQueryResult(result string) string {
+	if s.crypto == nil || result == "" {
+		return result
+	}
+	
+	encrypted, err := s.crypto.EncryptField(result)
+	if err != nil {
+		log.Printf("ChatService -> encryptQueryResult -> Failed to encrypt: %v", err)
+		return result // Return unencrypted for backward compatibility
+	}
+	
+	return encrypted
+}
+
+// decryptQueryResult decrypts a query result from storage
+func (s *chatService) decryptQueryResult(result string) string {
+	if s.crypto == nil || result == "" {
+		return result
+	}
+	
+	decrypted, err := s.crypto.DecryptField(result)
+	if err != nil {
+		log.Printf("ChatService -> decryptQueryResult -> Failed to decrypt: %v", err)
+		return result // Return as-is for backward compatibility
+	}
+	
+	return decrypted
 }
 
 // Create a new chat
@@ -1632,7 +1671,7 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		pinnedAt = &pinnedAtStr
 	}
 
-	queriesDto := dtos.ToQueryDto(msg.Queries)
+	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult)
 	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
 
 	return &dtos.MessageResponse{
