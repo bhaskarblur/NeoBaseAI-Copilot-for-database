@@ -76,8 +76,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		s.handleError(ctx, chatID, err)
 		return nil, fmt.Errorf("failed to fetch chat: %v", err)
 	}
-	
-	log.Printf("ChatService -> Execute -> Chat settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v", 
+
+	log.Printf("ChatService -> Execute -> Chat settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
 		chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
 
 	// Get connection info
@@ -577,7 +577,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 
 	// Decrypt connection details
 	utils.DecryptConnection(&chat.Connection)
-	
+
 	// Log connection details for debugging spreadsheet connections
 	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet {
 		log.Printf("ChatService -> ConnectDB -> Spreadsheet connection after decrypt: Host=%s, Database=%s", chat.Connection.Host, chat.Connection.Database)
@@ -687,7 +687,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			log.Printf("ChatService -> ExecuteQuery -> countResult.Result: %+v", countResult.Result)
 
 			// Try to extract count from different possible formats
-			
+
 			// First type assert Result to map
 			if resultMap, ok := countResult.Result.(map[string]interface{}); ok {
 				// Format 1: Direct count in the result
@@ -703,127 +703,127 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					totalRecordsCount = &countVal
 					log.Printf("ChatService -> ExecuteQuery -> Found count directly in result (int): %d", countVal)
 				} else if results, ok := resultMap["results"]; ok {
-				// Format 2: Results is an array of objects with count
-				if resultsList, ok := results.([]interface{}); ok && len(resultsList) > 0 {
-					log.Printf("ChatService -> ExecuteQuery -> Results is a list with %d items", len(resultsList))
+					// Format 2: Results is an array of objects with count
+					if resultsList, ok := results.([]interface{}); ok && len(resultsList) > 0 {
+						log.Printf("ChatService -> ExecuteQuery -> Results is a list with %d items", len(resultsList))
 
-					// Try to get count from the first item
-					if countObj, ok := resultsList[0].(map[string]interface{}); ok {
-						if countVal, ok := countObj["count"].(float64); ok {
-							tempCount := int(countVal)
-							totalRecordsCount = &tempCount
-							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item: %d", tempCount)
-						} else if countVal, ok := countObj["count"].(int64); ok {
-							tempCount := int(countVal)
-							totalRecordsCount = &tempCount
-							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int64): %d", tempCount)
-						} else if countVal, ok := countObj["count"].(int); ok {
-							totalRecordsCount = &countVal
-							log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int): %d", countVal)
-						} else {
-							// For PostgreSQL, the count might be in a column named 'count'
-							for key, value := range countObj {
-								if strings.ToLower(key) == "count" {
-									if countVal, ok := value.(float64); ok {
-										tempCount := int(countVal)
-										totalRecordsCount = &tempCount
-										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s': %d", key, tempCount)
-										break
-									} else if countVal, ok := value.(int64); ok {
-										tempCount := int(countVal)
-										totalRecordsCount = &tempCount
-										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int64): %d", key, tempCount)
-										break
-									} else if countVal, ok := value.(int); ok {
-										totalRecordsCount = &countVal
-										log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int): %d", key, countVal)
-										break
-									} else if countStr, ok := value.(string); ok {
-										// Handle case where count is returned as string
-										if countVal, err := strconv.Atoi(countStr); err == nil {
-											totalRecordsCount = &countVal
-											log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (string): %d", key, countVal)
+						// Try to get count from the first item
+						if countObj, ok := resultsList[0].(map[string]interface{}); ok {
+							if countVal, ok := countObj["count"].(float64); ok {
+								tempCount := int(countVal)
+								totalRecordsCount = &tempCount
+								log.Printf("ChatService -> ExecuteQuery -> Found count in first result item: %d", tempCount)
+							} else if countVal, ok := countObj["count"].(int64); ok {
+								tempCount := int(countVal)
+								totalRecordsCount = &tempCount
+								log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int64): %d", tempCount)
+							} else if countVal, ok := countObj["count"].(int); ok {
+								totalRecordsCount = &countVal
+								log.Printf("ChatService -> ExecuteQuery -> Found count in first result item (int): %d", countVal)
+							} else {
+								// For PostgreSQL, the count might be in a column named 'count'
+								for key, value := range countObj {
+									if strings.ToLower(key) == "count" {
+										if countVal, ok := value.(float64); ok {
+											tempCount := int(countVal)
+											totalRecordsCount = &tempCount
+											log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s': %d", key, tempCount)
 											break
+										} else if countVal, ok := value.(int64); ok {
+											tempCount := int(countVal)
+											totalRecordsCount = &tempCount
+											log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int64): %d", key, tempCount)
+											break
+										} else if countVal, ok := value.(int); ok {
+											totalRecordsCount = &countVal
+											log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (int): %d", key, countVal)
+											break
+										} else if countStr, ok := value.(string); ok {
+											// Handle case where count is returned as string
+											if countVal, err := strconv.Atoi(countStr); err == nil {
+												totalRecordsCount = &countVal
+												log.Printf("ChatService -> ExecuteQuery -> Found count in column '%s' (string): %d", key, countVal)
+												break
+											}
 										}
 									}
 								}
 							}
+						} else {
+							// Handle case where the array element is not a map
+							log.Printf("ChatService -> ExecuteQuery -> First item in results list is not a map: %T", resultsList[0])
 						}
-					} else {
-						// Handle case where the array element is not a map
-						log.Printf("ChatService -> ExecuteQuery -> First item in results list is not a map: %T", resultsList[0])
-					}
-				} else if resultsMap, ok := results.(map[string]interface{}); ok {
-					// Format 3: Results is a map with count
-					log.Printf("ChatService -> ExecuteQuery -> Results is a map")
-					if countVal, ok := resultsMap["count"].(float64); ok {
+					} else if resultsMap, ok := results.(map[string]interface{}); ok {
+						// Format 3: Results is a map with count
+						log.Printf("ChatService -> ExecuteQuery -> Results is a map")
+						if countVal, ok := resultsMap["count"].(float64); ok {
+							tempCount := int(countVal)
+							totalRecordsCount = &tempCount
+							log.Printf("ChatService -> ExecuteQuery -> Found count in results map: %d", tempCount)
+						} else if countVal, ok := resultsMap["count"].(int64); ok {
+							tempCount := int(countVal)
+							totalRecordsCount = &tempCount
+							log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int64): %d", tempCount)
+						} else if countVal, ok := resultsMap["count"].(int); ok {
+							totalRecordsCount = &countVal
+							log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int): %d", countVal)
+						}
+					} else if countVal, ok := results.(float64); ok {
+						// Format 4: Results is directly a number
 						tempCount := int(countVal)
 						totalRecordsCount = &tempCount
-						log.Printf("ChatService -> ExecuteQuery -> Found count in results map: %d", tempCount)
-					} else if countVal, ok := resultsMap["count"].(int64); ok {
+						log.Printf("ChatService -> ExecuteQuery -> Results is a number: %d", tempCount)
+					} else if countVal, ok := results.(int64); ok {
 						tempCount := int(countVal)
 						totalRecordsCount = &tempCount
-						log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int64): %d", tempCount)
-					} else if countVal, ok := resultsMap["count"].(int); ok {
+						log.Printf("ChatService -> ExecuteQuery -> Results is a number (int64): %d", tempCount)
+					} else if countVal, ok := results.(int); ok {
 						totalRecordsCount = &countVal
-						log.Printf("ChatService -> ExecuteQuery -> Found count in results map (int): %d", countVal)
+						log.Printf("ChatService -> ExecuteQuery -> Results is a number (int): %d", countVal)
+					} else {
+						// Log the actual type for debugging
+						log.Printf("ChatService -> ExecuteQuery -> Results has unexpected type: %T", results)
 					}
-				} else if countVal, ok := results.(float64); ok {
-					// Format 4: Results is directly a number
-					tempCount := int(countVal)
-					totalRecordsCount = &tempCount
-					log.Printf("ChatService -> ExecuteQuery -> Results is a number: %d", tempCount)
-				} else if countVal, ok := results.(int64); ok {
-					tempCount := int(countVal)
-					totalRecordsCount = &tempCount
-					log.Printf("ChatService -> ExecuteQuery -> Results is a number (int64): %d", tempCount)
-				} else if countVal, ok := results.(int); ok {
-					totalRecordsCount = &countVal
-					log.Printf("ChatService -> ExecuteQuery -> Results is a number (int): %d", countVal)
-				} else {
-					// Log the actual type for debugging
-					log.Printf("ChatService -> ExecuteQuery -> Results has unexpected type: %T", results)
 				}
-			}
 
-			// If we still couldn't extract the count, try a more direct approach for the specific format
-			if totalRecordsCount == nil {
-				// Try to handle the specific format: map[results:[map[count:92]]]
-				if resultsRaw, ok := resultMap["results"]; ok {
-					log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
+				// If we still couldn't extract the count, try a more direct approach for the specific format
+				if totalRecordsCount == nil {
+					// Try to handle the specific format: map[results:[map[count:92]]]
+					if resultsRaw, ok := resultMap["results"]; ok {
+						log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
 
-					// Convert to JSON and back to ensure proper type handling
-					jsonBytes, err := json.Marshal(resultsRaw)
-					if err == nil {
-						var resultsArray []map[string]interface{}
-						if err := json.Unmarshal(jsonBytes, &resultsArray); err == nil && len(resultsArray) > 0 {
-							if countVal, ok := resultsArray[0]["count"]; ok {
-								// Try to convert to int
-								switch v := countVal.(type) {
-								case float64:
-									tempCount := int(v)
-									totalRecordsCount = &tempCount
-									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach: %d", tempCount)
-								case int64:
-									tempCount := int(v)
-									totalRecordsCount = &tempCount
-									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int64): %d", tempCount)
-								case int:
-									totalRecordsCount = &v
-									log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int): %d", v)
-								case string:
-									if countInt, err := strconv.Atoi(v); err == nil {
-										totalRecordsCount = &countInt
-										log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (string): %d", countInt)
+						// Convert to JSON and back to ensure proper type handling
+						jsonBytes, err := json.Marshal(resultsRaw)
+						if err == nil {
+							var resultsArray []map[string]interface{}
+							if err := json.Unmarshal(jsonBytes, &resultsArray); err == nil && len(resultsArray) > 0 {
+								if countVal, ok := resultsArray[0]["count"]; ok {
+									// Try to convert to int
+									switch v := countVal.(type) {
+									case float64:
+										tempCount := int(v)
+										totalRecordsCount = &tempCount
+										log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach: %d", tempCount)
+									case int64:
+										tempCount := int(v)
+										totalRecordsCount = &tempCount
+										log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int64): %d", tempCount)
+									case int:
+										totalRecordsCount = &v
+										log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (int): %d", v)
+									case string:
+										if countInt, err := strconv.Atoi(v); err == nil {
+											totalRecordsCount = &countInt
+											log.Printf("ChatService -> ExecuteQuery -> Found count using direct approach (string): %d", countInt)
+										}
+									default:
+										log.Printf("ChatService -> ExecuteQuery -> Count value has unexpected type: %T", v)
 									}
-								default:
-									log.Printf("ChatService -> ExecuteQuery -> Count value has unexpected type: %T", v)
 								}
 							}
 						}
 					}
 				}
-			}
 			} // Close the resultMap check
 
 			if totalRecordsCount == nil {
@@ -1012,7 +1012,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
 	// Then we need to save capped 50 results in DB
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
-	
+
 	// Convert Result to JSON string first
 	resultJSON, err := json.Marshal(result.Result)
 	if err != nil {
@@ -1199,11 +1199,22 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
-									// Convert Result to JSON string
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultJSONStr := string(resultJSONBytes)
+									// Get the encrypted result from the message and decrypt it for LLM
+									var resultForLLM string
+									// Find the corresponding query in the message to get encrypted result
+									for _, msgQuery := range *msg.Queries {
+										if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
+											resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
+											break
+										}
+									}
+									// Fallback: Convert current result to JSON if encrypted result not found
+									if resultForLLM == "" {
+										resultJSONBytes, _ := json.Marshal(result.Result)
+										resultForLLM = string(resultJSONBytes)
+									}
 									queryMap["executionResult"] = map[string]interface{}{
-										"result": resultJSONStr,
+										"result": resultForLLM,
 									}
 								} else {
 									queryMap["executionResult"] = map[string]interface{}{
@@ -1238,11 +1249,22 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
-									// Convert Result to JSON string
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultJSONStr := string(resultJSONBytes)
+									// Get the encrypted result from the message and decrypt it for LLM
+									var resultForLLM string
+									// Find the corresponding query in the message to get encrypted result
+									for _, msgQuery := range *msg.Queries {
+										if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
+											resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
+											break
+										}
+									}
+									// Fallback: Convert current result to JSON if encrypted result not found
+									if resultForLLM == "" {
+										resultJSONBytes, _ := json.Marshal(result.Result)
+										resultForLLM = string(resultJSONBytes)
+									}
 									queryMap["executionResult"] = map[string]interface{}{
-										"result": resultJSONStr,
+										"result": resultForLLM,
 									}
 								} else {
 									queryMap["executionResult"] = map[string]interface{}{
@@ -1811,11 +1833,22 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
-								// Convert Result to JSON string
-								resultJSONBytes, _ := json.Marshal(result.Result)
-								resultJSONStr := string(resultJSONBytes)
+								// Get the encrypted result from the message and decrypt it for LLM
+								var resultForLLM string
+								// Find the corresponding query in the message to get encrypted result
+								for _, msgQuery := range *msg.Queries {
+									if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
+										resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
+										break
+									}
+								}
+								// Fallback: Convert current result to JSON if encrypted result not found
+								if resultForLLM == "" {
+									resultJSONBytes, _ := json.Marshal(result.Result)
+									resultForLLM = string(resultJSONBytes)
+								}
 								queryMap["executionResult"] = map[string]interface{}{
-									"result": resultJSONStr,
+									"result": resultForLLM,
 								}
 							} else {
 								queryMap["executionResult"] = map[string]interface{}{
@@ -1850,11 +1883,22 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
-								// Convert Result to JSON string
-								resultJSONBytes, _ := json.Marshal(result.Result)
-								resultJSONStr := string(resultJSONBytes)
+								// Get the encrypted result from the message and decrypt it for LLM
+								var resultForLLM string
+								// Find the corresponding query in the message to get encrypted result
+								for _, msgQuery := range *msg.Queries {
+									if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
+										resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
+										break
+									}
+								}
+								// Fallback: Convert current result to JSON if encrypted result not found
+								if resultForLLM == "" {
+									resultJSONBytes, _ := json.Marshal(result.Result)
+									resultForLLM = string(resultJSONBytes)
+								}
 								queryMap["executionResult"] = map[string]interface{}{
-									"result": resultJSONStr,
+									"result": resultForLLM,
 								}
 							} else {
 								queryMap["executionResult"] = map[string]interface{}{
@@ -2270,7 +2314,7 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	// Convert Result to JSON string
 	resultJSONBytes, _ := json.Marshal(result.Result)
 	resultJSONStr := string(resultJSONBytes)
-	
+
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}

@@ -292,9 +292,10 @@ export default function Sidebar({
     try {
       console.log('handleSelectConnection happened', { id, currentConnectedChatId });
 
-      if (id === currentConnectedChatId) {
-        return;
-      }
+      // Don't return early if it's the same connection - we might need to reconnect
+      // if (id === currentConnectedChatId) {
+      //   return;
+      // }
 
       // Track connection selected event
       const connection = connections.find(chat => chat.id === id);
