@@ -144,7 +144,7 @@ func NewChatService(
 		log.Printf("ChatService -> NewChatService -> Failed to initialize crypto: %v", err)
 		// Continue without crypto for backward compatibility
 	}
-	
+
 	return &chatService{
 		chatRepo:        chatRepo,
 		llmRepo:         llmRepo,
@@ -161,13 +161,13 @@ func (s *chatService) encryptQueryResult(result string) string {
 	if s.crypto == nil || result == "" {
 		return result
 	}
-	
+
 	encrypted, err := s.crypto.EncryptField(result)
 	if err != nil {
 		log.Printf("ChatService -> encryptQueryResult -> Failed to encrypt: %v", err)
 		return result // Return unencrypted for backward compatibility
 	}
-	
+
 	return encrypted
 }
 
@@ -176,13 +176,13 @@ func (s *chatService) decryptQueryResult(result string) string {
 	if s.crypto == nil || result == "" {
 		return result
 	}
-	
+
 	decrypted, err := s.crypto.DecryptField(result)
 	if err != nil {
 		log.Printf("ChatService -> decryptQueryResult -> Failed to decrypt: %v", err)
 		return result // Return as-is for backward compatibility
 	}
-	
+
 	return decrypted
 }
 
@@ -201,8 +201,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) >= 3 {
-			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
+		if len(chats) >= 2 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 2 chats in trial mode")
 		}
 	}
 
@@ -314,8 +314,8 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) >= 3 {
-			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
+		if len(chats) >= 2 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 2 chats in trial mode")
 		}
 	}
 
@@ -902,8 +902,8 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 		}
-		if len(chats) >= 3 {
-			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 3 chats in trial mode")
+		if len(chats) >= 2 {
+			return nil, http.StatusBadRequest, fmt.Errorf("You cannot have more than 2 chats in trial mode")
 		}
 	}
 	// Duplicate the chat
@@ -1818,7 +1818,7 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		}
 
 		// For spreadsheet connections with default database name, update it based on tables
-		if chat.Connection.Type == constants.DatabaseTypeSpreadsheet && 
+		if chat.Connection.Type == constants.DatabaseTypeSpreadsheet &&
 			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data") {
 			log.Printf("ChatService -> GetAllTables -> Spreadsheet connection has default database name, updating it")
 			if err := s.updateSpreadsheetDatabaseName(chatID); err != nil {
