@@ -14,16 +14,16 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'YugabyteDB', isSupported: true },
     { name: 'MongoDB', isSupported: true, priority: 1 },
     { name: 'MySQL', isSupported: true, priority: 2 },
-    { name: 'Neo4j', isSupported: false, priority: 3 },
-    { name: 'Redis', isSupported: false, priority: 4 },
     { name: 'Clickhouse', isSupported: true, priority: 5 },
-    { name: 'Cassandra', isSupported: false, priority: 6 }
+    { name: 'Spreadsheet - CSV/XL', isSupported: true, priority: 7 },
+    { name: 'Microsoft Excel', isSupported: false, priority: 7 },
+    { name: 'Google Sheets', isSupported: false, priority: 7 }
   ];
 
   const llmClients: Technology[] = [
     { name: 'OpenAI', isSupported: true },
     { name: 'Google Gemini', isSupported: true },
-    { name: 'Anthropic (Claude)', isSupported: false, priority: 1 },
+    { name: 'Claude (Anthropic)', isSupported: false, priority: 1 },
     { name: 'Ollama (Local)', isSupported: false, priority: 2 }
   ];
 
@@ -97,7 +97,7 @@ const SupportedTechnologiesSection: React.FC = () => {
             Supported <span className="text-green-500">Technologies</span>
           </h2>
           <p className="text-lg sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
-            NeoBase works with a variety of databases and LLM clients, with more being added regularly.
+            NeoBase works with a variety of Data sources and LLM clients, with more being added regularly.
           </p>
         </div>
         
@@ -106,7 +106,7 @@ const SupportedTechnologiesSection: React.FC = () => {
           <div className="flex-1">
             <div className="neo-border bg-[#FFDB58]/5 p-4 sm:p-5 md:p-6 h-full">
               <h3 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 flex items-center">
-                <DatabaseIcon className="mr-2 w-5 h-5 sm:w-6 sm:h-6" /> Databases
+                <DatabaseIcon className="mr-2 w-5 h-5 sm:w-6 sm:h-6" /> Data sources
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {databases.map((db, index) => (
