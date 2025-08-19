@@ -66,7 +66,7 @@ func GetSystemPrompt(provider string, dbType string, nonTechMode bool) string {
 		case DatabaseTypeMongoDB:
 			basePrompt = OpenAIMongoDBPrompt
 		case DatabaseTypeSpreadsheet:
-			basePrompt = OpenAIPostgreSQLPrompt // Use PostgreSQL prompt since spreadsheet uses PostgreSQL internally
+			basePrompt = OpenAISpreadsheetPrompt
 		default:
 			basePrompt = OpenAIPostgreSQLPrompt // Default to PostgreSQL
 		}
@@ -83,7 +83,7 @@ func GetSystemPrompt(provider string, dbType string, nonTechMode bool) string {
 		case DatabaseTypeMongoDB:
 			basePrompt = GeminiMongoDBPrompt
 		case DatabaseTypeSpreadsheet:
-			basePrompt = GeminiPostgreSQLPrompt // Use PostgreSQL prompt since spreadsheet uses PostgreSQL internally
+			basePrompt = GeminiSpreadsheetPrompt
 		default:
 			basePrompt = GeminiPostgreSQLPrompt // Default to PostgreSQL
 		}

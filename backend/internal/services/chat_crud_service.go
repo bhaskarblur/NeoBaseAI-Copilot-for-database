@@ -211,7 +211,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
 		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_data"
+		connection.Database = "spreadsheet_db"
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -302,7 +302,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
 		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_data"
+		connection.Database = "spreadsheet_db"
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -1776,6 +1776,20 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		if chat == nil {
 			log.Printf("ChatService -> GetAllTables -> Chat not found for chatID: %s", chatID)
 			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
+
+		// For spreadsheet connections with default database name, update it based on tables
+		if chat.Connection.Type == constants.DatabaseTypeSpreadsheet && 
+			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data") {
+			log.Printf("ChatService -> GetAllTables -> Spreadsheet connection has default database name, updating it")
+			if err := s.updateSpreadsheetDatabaseName(chatID); err != nil {
+				log.Printf("ChatService -> GetAllTables -> Failed to update spreadsheet database name: %v", err)
+			}
+			// Reload the chat to get the updated database name
+			chat, err = s.chatRepo.FindByID(chatObjID)
+			if err == nil && chat != nil {
+				utils.DecryptConnection(&chat.Connection)
+			}
 		}
 
 		// Get database connection

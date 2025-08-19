@@ -398,5 +398,17 @@ func sanitizeTableName(filename string) string {
 		name = "table_" + name
 	}
 
+	// Limit to 63 characters (PostgreSQL table name limit)
+	if len(name) > 63 {
+		name = name[:63]
+		// Ensure we don't end with an underscore after truncation
+		name = strings.TrimRight(name, "_")
+	}
+
+	// Default name if empty
+	if name == "" {
+		name = "uploaded_data"
+	}
+
 	return name
 }

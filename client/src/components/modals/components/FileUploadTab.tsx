@@ -43,6 +43,14 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
       loadExistingTables();
     }
   }, [isEditMode, chatId, existingTables.length, loadingTables, preloadedTables]);
+  
+  // Clear uploaded files when entering edit mode
+  useEffect(() => {
+    if (isEditMode) {
+      setUploadedFiles([]);
+      setUploadError(null);
+    }
+  }, [isEditMode]);
 
   const loadExistingTables = async () => {
     if (!chatId) return;
@@ -267,7 +275,7 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
       {/* Hidden Connection Fields for Spreadsheet */}
       <input type="hidden" name="host" value="internal-spreadsheet" onChange={handleChange} />
       <input type="hidden" name="port" value="0" onChange={handleChange} />
-      <input type="hidden" name="database" value="spreadsheet_data" onChange={handleChange} />
+      <input type="hidden" name="database" value={formData.database || "spreadsheet_db"} onChange={handleChange} />
       <input type="hidden" name="username" value="spreadsheet_user" onChange={handleChange} />
       <input type="hidden" name="password" value="internal" onChange={handleChange} />
 

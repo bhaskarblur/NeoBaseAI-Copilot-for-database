@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL/YugabyteDB Driver
 	"gorm.io/gorm"
 
+	"neobase-ai/config"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/utils"
@@ -65,6 +66,8 @@ type Manager struct {
 		totalConnections int
 		reuseCount       int
 	}
+	spreadsheetInternalConn *Connection // Shared PostgreSQL connection for spreadsheet operations
+	spreadsheetConnMu       sync.Mutex  // Mutex for spreadsheet connection
 }
 
 // NewManager creates a new connection manager
@@ -128,6 +131,72 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 	m.registerDefaultDrivers()
 
 	return m, nil
+}
+
+// getSpreadsheetInternalConnection gets or creates the shared PostgreSQL connection for spreadsheet operations
+func (m *Manager) getSpreadsheetInternalConnection() (*Connection, error) {
+	m.spreadsheetConnMu.Lock()
+	defer m.spreadsheetConnMu.Unlock()
+
+	// If we already have a connection, return it
+	if m.spreadsheetInternalConn != nil {
+		return m.spreadsheetInternalConn, nil
+	}
+
+	// Create a new connection
+	tempPort := config.Env.SpreadsheetPostgresPort
+	tempConfig := ConnectionConfig{
+		Type:     "postgresql",
+		Host:     config.Env.SpreadsheetPostgresHost,
+		Port:     &tempPort,
+		Username: &config.Env.SpreadsheetPostgresUsername,
+		Password: &config.Env.SpreadsheetPostgresPassword,
+		Database: config.Env.SpreadsheetPostgresDatabase,
+		UseSSL:   config.Env.SpreadsheetPostgresSSLMode != "disable",
+	}
+
+	postgresDriver := NewPostgresDriver()
+	conn, err := postgresDriver.Connect(tempConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create internal spreadsheet connection: %w", err)
+	}
+
+	m.spreadsheetInternalConn = conn
+	log.Printf("DBManager -> Created shared internal PostgreSQL connection for spreadsheet operations")
+	return conn, nil
+}
+
+// Close closes all connections and stops background routines
+func (m *Manager) Close() {
+	// Stop cleanup routine
+	close(m.stopCleanup)
+
+	// Close the shared spreadsheet connection if it exists
+	m.spreadsheetConnMu.Lock()
+	if m.spreadsheetInternalConn != nil {
+		postgresDriver := NewPostgresDriver()
+		if err := postgresDriver.Disconnect(m.spreadsheetInternalConn); err != nil {
+			log.Printf("DBManager -> Close -> Failed to close internal spreadsheet connection: %v", err)
+		} else {
+			log.Printf("DBManager -> Close -> Closed internal spreadsheet connection")
+		}
+		m.spreadsheetInternalConn = nil
+	}
+	m.spreadsheetConnMu.Unlock()
+
+	// Close all other connections
+	m.mu.Lock()
+	for chatID, conn := range m.connections {
+		if driver, exists := m.drivers[conn.Config.Type]; exists {
+			if err := driver.Disconnect(conn); err != nil {
+				log.Printf("DBManager -> Close -> Failed to close connection for chat %s: %v", chatID, err)
+			}
+		}
+	}
+	m.connections = make(map[string]*Connection)
+	m.mu.Unlock()
+
+	log.Printf("DBManager -> Close -> Closed all connections")
 }
 
 func (m *Manager) registerDefaultDrivers() {
@@ -478,14 +547,24 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 
 	// For spreadsheet connections, delete the schema and all data when requested
 	if deleteSchema && conn.Config.Type == "spreadsheet" {
-		// Create a new spreadsheet driver instance to delete the schema
-		spreadsheetDriver := &SpreadsheetDriver{
-			postgresDriver: NewPostgresDriver(),
-		}
-		if err := spreadsheetDriver.DeleteConnectionData(chatID); err != nil {
-			log.Printf("DBManager -> Disconnect -> Failed to delete spreadsheet schema: %v", err)
+		// Use the shared internal PostgreSQL connection for deletion
+		internalConn, err := m.getSpreadsheetInternalConnection()
+		if err != nil {
+			log.Printf("DBManager -> Disconnect -> Failed to get internal connection for deletion: %v", err)
 		} else {
-			log.Printf("DBManager -> Disconnect -> Successfully deleted spreadsheet schema for chatID: %s", chatID)
+			// Delete the schema directly using the internal connection
+			schemaName := fmt.Sprintf("conn_%s", chatID)
+			sqlDB, err := internalConn.DB.DB()
+			if err != nil {
+				log.Printf("DBManager -> Disconnect -> Failed to get SQL DB: %v", err)
+			} else {
+				query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)
+				if _, err := sqlDB.Exec(query); err != nil {
+					log.Printf("DBManager -> Disconnect -> Failed to drop schema: %v", err)
+				} else {
+					log.Printf("DBManager -> Disconnect -> Successfully dropped schema: %s", schemaName)
+				}
+			}
 		}
 	}
 
@@ -1004,3 +1083,4 @@ type ConnectionInfo struct {
 func (m *Manager) SetStreamHandler(handler StreamHandler) {
 	m.streamHandler = handler
 }
+

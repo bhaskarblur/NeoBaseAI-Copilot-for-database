@@ -7,14 +7,12 @@ import (
 	"log"
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/dtos"
-	"neobase-ai/internal/utils"
 	"strings"
 )
 
 // SpreadsheetDriver implements DatabaseDriver for CSV/Excel storage using PostgreSQL
 type SpreadsheetDriver struct {
 	postgresDriver DatabaseDriver
-	crypto         *utils.AESGCMCrypto
 }
 
 // SpreadsheetTransaction wraps a PostgreSQL transaction with schema context
@@ -23,20 +21,13 @@ type SpreadsheetTransaction struct {
 	conn       *Connection
 	schemaName string
 	searchPathSet bool
+	driver     *SpreadsheetDriver
 }
 
 // NewSpreadsheetDriver creates a new Spreadsheet driver
 func NewSpreadsheetDriver() DatabaseDriver {
-	// Initialize crypto with the encryption key
-	crypto, err := utils.NewAESGCMCrypto(config.Env.SpreadsheetDataEncryptionKey)
-	if err != nil {
-		log.Printf("SpreadsheetDriver -> Failed to initialize crypto: %v", err)
-		return nil
-	}
-
 	return &SpreadsheetDriver{
 		postgresDriver: NewPostgresDriver(),
-		crypto:         crypto,
 	}
 }
 
@@ -167,6 +158,26 @@ func (d *SpreadsheetDriver) DeleteConnectionData(connectionID string) error {
 	return nil
 }
 
+// DeleteConnectionDataWithConn deletes all data associated with a connection using a provided connection
+func (d *SpreadsheetDriver) DeleteConnectionDataWithConn(connectionID string, conn *Connection) error {
+	log.Printf("SpreadsheetDriver -> Deleting data for connection: %s (using provided connection)", connectionID)
+
+	// Drop the schema and all its tables
+	schemaName := fmt.Sprintf("conn_%s", connectionID)
+	sqlDB, err := conn.DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get SQL DB: %v", err)
+	}
+
+	query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)
+	if _, err := sqlDB.Exec(query); err != nil {
+		return fmt.Errorf("failed to drop schema: %v", err)
+	}
+
+	log.Printf("SpreadsheetDriver -> Dropped schema: %s", schemaName)
+	return nil
+}
+
 // spreadsheetSchemaWrapper wraps a connection to filter queries by schema
 type spreadsheetSchemaWrapper struct {
 	conn       *Connection
@@ -248,6 +259,8 @@ func (d *SpreadsheetDriver) ExecuteQuery(ctx context.Context, conn *Connection, 
 		log.Printf("SpreadsheetDriver -> ExecuteQuery -> Failed to reset search path: %v", err)
 	}
 	
+	// No decryption needed - data is stored in plain text
+	
 	return result
 }
 
@@ -264,6 +277,7 @@ func (d *SpreadsheetDriver) BeginTx(ctx context.Context, conn *Connection) Trans
 		pgTx:       pgTx,
 		conn:       conn,
 		schemaName: conn.Config.SchemaName,
+		driver:     d,
 	}
 }
 
@@ -297,15 +311,15 @@ func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, select
 		return nil, fmt.Errorf("database connection is not valid: %v", err)
 	}
 
-	// Query tables in the specific schema
-	tableQuery := `
+	// Query tables in the specific schema using direct SQL to avoid prepared statement issues
+	tableQuery := fmt.Sprintf(`
 		SELECT tablename 
 		FROM pg_catalog.pg_tables 
-		WHERE schemaname = $1
+		WHERE schemaname = '%s'
 		ORDER BY tablename;
-	`
+	`, schemaName)
 	
-	rows, err := sqlDB.QueryContext(ctx, tableQuery, schemaName)
+	rows, err := sqlDB.QueryContext(ctx, tableQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tables in schema %s: %w", schemaName, err)
 	}
@@ -341,7 +355,7 @@ func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, select
 		}
 
 		// Get columns for the table
-		columnQuery := `
+		columnQuery := fmt.Sprintf(`
 			SELECT 
 				column_name,
 				data_type,
@@ -351,11 +365,11 @@ func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, select
 				numeric_precision,
 				numeric_scale
 			FROM information_schema.columns
-			WHERE table_schema = $1 AND table_name = $2
+			WHERE table_schema = '%s' AND table_name = '%s'
 			ORDER BY ordinal_position;
-		`
+		`, schemaName, tableName)
 		
-		colRows, err := sqlDB.QueryContext(ctx, columnQuery, schemaName, tableName)
+		colRows, err := sqlDB.QueryContext(ctx, columnQuery)
 		if err != nil {
 			log.Printf("SpreadsheetDriver -> GetSchema -> Error getting columns for table %s: %v", tableName, err)
 			continue
@@ -386,7 +400,7 @@ func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, select
 		colRows.Close()
 		
 		// Get constraints (including primary keys)
-		constraintQuery := `
+		constraintQuery := fmt.Sprintf(`
 			SELECT 
 				tc.constraint_name,
 				tc.constraint_type,
@@ -396,11 +410,11 @@ func (d *SpreadsheetDriver) GetSchema(ctx context.Context, db DBExecutor, select
 				ON tc.constraint_name = kcu.constraint_name
 				AND tc.table_schema = kcu.table_schema
 				AND tc.table_name = kcu.table_name
-			WHERE tc.table_schema = $1 AND tc.table_name = $2
+			WHERE tc.table_schema = '%s' AND tc.table_name = '%s'
 			ORDER BY tc.constraint_name, kcu.ordinal_position;
-		`
+		`, schemaName, tableName)
 		
-		constRows, err := sqlDB.QueryContext(ctx, constraintQuery, schemaName, tableName)
+		constRows, err := sqlDB.QueryContext(ctx, constraintQuery)
 		if err == nil {
 			constraints := make(map[string]*ConstraintInfo)
 			for constRows.Next() {
@@ -468,7 +482,14 @@ func (d *SpreadsheetDriver) FetchExampleRecords(ctx context.Context, db DBExecut
 	qualifiedTable := fmt.Sprintf("%s.%s", schemaName, table)
 	
 	// Use the qualified table name to fetch records
-	return d.postgresDriver.FetchExampleRecords(ctx, db, qualifiedTable, limit)
+	records, err := d.postgresDriver.FetchExampleRecords(ctx, db, qualifiedTable, limit)
+	if err != nil {
+		return nil, err
+	}
+	
+	// No decryption needed - data is stored in plain text
+	
+	return records, nil
 }
 
 // setSearchPath sets the search path for this transaction if not already set
@@ -510,7 +531,11 @@ func (t *SpreadsheetTransaction) ExecuteQuery(ctx context.Context, query string)
 	}
 	
 	// Execute query using the underlying PostgreSQL transaction
-	return t.pgTx.ExecuteQuery(ctx, query)
+	result, queryErr := t.pgTx.ExecuteQuery(ctx, query)
+	
+	// No decryption needed - data is stored in plain text
+	
+	return result, queryErr
 }
 
 // Commit commits the transaction

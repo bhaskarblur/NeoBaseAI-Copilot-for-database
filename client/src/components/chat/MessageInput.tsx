@@ -175,7 +175,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                                     border-2 border-gray-300 hover:border-gray-400
                                     rounded-full text-sm font-medium text-black
                                     transition-all duration-200
-                                    max-w-xs truncate
+                                    max-w-base truncate
                                 "
                                 title={rec.text}
                             >

@@ -1481,9 +1481,21 @@ function AppContent() {
 
       {showConnectionModal && (
         <ConnectionModal
-          onClose={() => {
+          onClose={(updatedChat) => {
             setShowConnectionModal(false);
             setIsEditingConnection(false);
+            
+            // If we have an updated chat (e.g., after file uploads), update it in state
+            if (updatedChat) {
+              setChats(prev => prev.map(chat => 
+                chat.id === updatedChat.id ? updatedChat : chat
+              ));
+              
+              // Update the selected connection if it's the one being edited
+              if (selectedConnection?.id === updatedChat.id) {
+                setSelectedConnection(updatedChat);
+              }
+            }
           }}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
@@ -1503,7 +1515,7 @@ function AppContent() {
               }
               
               toast.success('Connection updated successfully!', toastStyle);
-              return { success: true };
+              return { success: true, updatedChat };
             } catch (error: any) {
               console.error('Failed to update connection:', error);
               toast.error(error.message, errorToast);
