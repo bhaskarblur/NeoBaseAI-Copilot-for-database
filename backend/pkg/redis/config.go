@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -12,10 +13,14 @@ import (
 func RedisClient(redisHost, redisPort, redisUsername, redisPassword string) (*redis.Client, error) {
 	redisURL := fmt.Sprintf("%s:%s", redisHost, redisPort)
 
-	// Create Redis client with retry logic
-	client := redis.NewClient(&redis.Options{
+	// Debug logging
+	log.Printf("Redis connection - Host: %s, Port: %s, Username: '%s', Password: %s", 
+		redisHost, redisPort, redisUsername, 
+		strings.Repeat("*", len(redisPassword)))
+
+	// Create Redis options
+	opts := &redis.Options{
 		Addr:         redisURL,
-		Username:     redisUsername,
 		Password:     redisPassword,
 		DB:           0,
 		DialTimeout:  10 * time.Second,
@@ -23,7 +28,15 @@ func RedisClient(redisHost, redisPort, redisUsername, redisPassword string) (*re
 		WriteTimeout: 30 * time.Second,
 		PoolSize:     10,
 		MaxRetries:   3,
-	})
+	}
+
+	// Only set Username if it's not empty
+	if redisUsername != "" {
+		opts.Username = redisUsername
+	}
+
+	// Create Redis client with retry logic
+	client := redis.NewClient(opts)
 
 	// Add retry logic for initial connection
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

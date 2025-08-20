@@ -98,6 +98,7 @@ func isValidDBType(dbType string) bool {
 		constants.DatabaseTypeRedis,
 		constants.DatabaseTypeNeo4j,
 		constants.DatabaseTypeSpreadsheet,
+		constants.DatabaseTypeGoogleSheets,
 	}
 
 	for _, validType := range validTypes {
@@ -211,8 +212,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported data source type: %s", req.Connection.Type)
 	}
 
-	// Skip connection test for spreadsheet type as it doesn't have traditional database connection
-	if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+	// Skip connection test for spreadsheet and Google Sheets types as they don't have traditional database connection
+	if req.Connection.Type != constants.DatabaseTypeSpreadsheet && req.Connection.Type != constants.DatabaseTypeGoogleSheets {
 		// Test connection without creating a persistent connection
 		err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 			Type:           req.Connection.Type,
@@ -244,13 +245,26 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we store placeholder values
-	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+	// For spreadsheet and Google Sheets connections, we store placeholder values
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
-		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_db"
+		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
+			connection.Host = "google-sheets"
+			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
+			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
+			// Use the database name from the request or set a default
+			if req.Connection.Database != "" {
+				connection.Database = req.Connection.Database
+			} else {
+				connection.Database = "google_sheets_db"
+			}
+		} else {
+			connection.Host = "internal-spreadsheet"
+			connection.Database = "spreadsheet_db"
+		}
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -335,13 +349,26 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we store placeholder values
-	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+	// For spreadsheet and Google Sheets connections, we store placeholder values
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
-		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_db"
+		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
+			connection.Host = "google-sheets"
+			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
+			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
+			// Use the database name from the request or set a default
+			if req.Connection.Database != "" {
+				connection.Database = req.Connection.Database
+			} else {
+				connection.Database = "google_sheets_db"
+			}
+		} else {
+			connection.Host = "internal-spreadsheet"
+			connection.Database = "spreadsheet_db"
+		}
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -426,8 +453,8 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		utils.DecryptConnection(&existingConn)
 
 		// Check if critical connection details have changed
-		// For spreadsheet connections, we never consider credentials as changed since they use internal credentials
-		if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+		// For spreadsheet and Google Sheets connections, we never consider credentials as changed since they use internal credentials
+		if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 			credentialsChanged = false
 		} else {
 			credentialsChanged = existingConn.Database != req.Connection.Database ||
@@ -437,8 +464,8 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 				(req.Connection.Password != nil && existingConn.Password != nil && *existingConn.Password != *req.Connection.Password)
 		}
 
-		// Skip connection test for spreadsheet type as it doesn't have traditional database connection
-		if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+		// Skip connection test for spreadsheet and Google Sheets types as they don't have traditional database connection
+		if req.Connection.Type != constants.DatabaseTypeSpreadsheet && req.Connection.Type != constants.DatabaseTypeGoogleSheets {
 			// Test connection without creating a persistent connection
 			err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 				Type:           req.Connection.Type,
@@ -1817,9 +1844,9 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 		}
 
-		// For spreadsheet connections with default database name, update it based on tables
-		if chat.Connection.Type == constants.DatabaseTypeSpreadsheet &&
-			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data") {
+		// For spreadsheet and Google Sheets connections with default database name, update it based on tables
+		if (chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets) &&
+			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data" || chat.Connection.Database == "") {
 			log.Printf("ChatService -> GetAllTables -> Spreadsheet connection has default database name, updating it")
 			if err := s.updateSpreadsheetDatabaseName(chatID); err != nil {
 				log.Printf("ChatService -> GetAllTables -> Failed to update spreadsheet database name: %v", err)

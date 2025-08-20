@@ -676,7 +676,7 @@ export default function DataStructureTab({
 
       {tables.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
-          No tables found. Upload CSV or Excel files to see data structure.
+          No tables found. Upload CSV/Excel files or sync Google Sheets to see data structure.
         </div>
       ) : (
         <div className="space-y-4">

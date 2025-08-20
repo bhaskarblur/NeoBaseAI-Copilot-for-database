@@ -2,7 +2,7 @@ import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Mon
 import React, { useEffect, useRef, useState } from 'react';
 import { Chat, ChatSettings, Connection, TableInfo, FileUpload } from '../../types/chat';
 import chatService from '../../services/chatService';
-import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab } from './components';
+import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab, GoogleSheetsTab } from './components';
 import { useStream } from '../../contexts/StreamContext';
 
 // Connection tab type
@@ -196,7 +196,7 @@ export default function ConnectionModal({
   useEffect(() => {
     // Load tables when schema tab is active and we have either initialData or a new connection
     const shouldLoadTables = 
-      ((activeTab === 'schema' || (activeTab === 'connection' && formData.type === 'spreadsheet')) && 
+      ((activeTab === 'schema' || (activeTab === 'connection' && (formData.type === 'spreadsheet' || formData.type === 'google_sheets'))) && 
       ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length)));
     
     if (shouldLoadTables) {
@@ -460,11 +460,18 @@ export default function ConnectionModal({
     const newErrors: FormErrors = {};
     let hasErrors = false;
 
-    // Skip validation for Spreadsheet types as they don't need connection details
+    // Skip validation for Spreadsheet and Google Sheets types as they don't need connection details
     if (updatedFormData.type === 'spreadsheet') {
       // Validate that at least one file is uploaded
       if (!updatedFormData.file_uploads || updatedFormData.file_uploads.length === 0) {
         setError('Please upload at least one file');
+        setIsLoading(false);
+        return;
+      }
+    } else if (updatedFormData.type === 'google_sheets') {
+      // Validate that Google Sheets is authenticated and sheet ID is set
+      if (!updatedFormData.google_sheet_id || !updatedFormData.google_auth_token) {
+        setError('Please authenticate with Google and validate a Google Sheets URL');
         setIsLoading(false);
         return;
       }
@@ -755,8 +762,8 @@ export default function ConnectionModal({
             setNewChatId(result.chatId);
             setShowingNewlyCreatedSchema(true);
             
-            // For spreadsheet connections, establish connection first then upload files
-            if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+            // For spreadsheet and Google Sheets connections, establish connection first then upload files (if any)
+            if ((updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) || updatedFormData.type === 'google_sheets') {
               try {
                 setSuccessMessage("Establishing connection...");
                 
@@ -780,10 +787,12 @@ export default function ConnectionModal({
                 // Wait a bit for connection to stabilize
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
-                setSuccessMessage("Uploading files...");
-                
-                // Upload each file
-                for (const fileUpload of fileUploads) {
+                // Only upload files for spreadsheet type, not Google Sheets
+                if (updatedFormData.type === 'spreadsheet' && fileUploads.length > 0) {
+                  setSuccessMessage("Uploading files...");
+                  
+                  // Upload each file
+                  for (const fileUpload of fileUploads) {
                   if (!fileUpload.file) {
                     console.error('No file object found for upload:', fileUpload.filename);
                     continue;
@@ -806,22 +815,25 @@ export default function ConnectionModal({
                     formData.append('deleteMissing', String(fileUpload.mergeOptions.deleteMissing ?? false));
                   }
                   
-                  const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${result.chatId}/file`, {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': `Bearer ${localStorage.getItem('token')}`
-                    },
-                    body: formData
-                  });
-                  
-                  if (!response.ok) {
-                    const errorData = await response.json();
-                    console.error('Upload error response:', errorData);
-                    throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+                    const response = await fetch(`${import.meta.env.VITE_API_URL}/upload/${result.chatId}/file`, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                      },
+                      body: formData
+                    });
+                    
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      console.error('Upload error response:', errorData);
+                      throw new Error(errorData.error || `Failed to upload file: ${response.status} ${response.statusText}`);
+                    }
                   }
+                  
+                  setSuccessMessage("Files uploaded successfully. Loading data structure...");
+                } else if (updatedFormData.type === 'google_sheets') {
+                  setSuccessMessage("Syncing Google Sheets data...");
                 }
-                
-                setSuccessMessage("Files uploaded successfully. Loading data structure...");
               } catch (error: any) {
                 console.error('Failed to upload files:', error);
                 setError(error.message || 'Failed to upload files');
@@ -1047,8 +1059,8 @@ DATABASE_PASSWORD=`; // Mask password
   const handleUpdateSchema = async () => {
     if (!initialData && !showingNewlyCreatedSchema) return;
     
-    // For spreadsheet connections, just close the modal since data is already saved
-    if (formData.type === 'spreadsheet') {
+    // For spreadsheet/Google Sheets connections, just close the modal since data is already saved
+    if (formData.type === 'spreadsheet' || formData.type === 'google_sheets') {
       setSuccessMessage("Data structure saved successfully");
       // Give the success message time to show before closing
       setTimeout(() => {
@@ -1139,6 +1151,7 @@ DATABASE_PASSWORD=`; // Mask password
                     { value: 'clickhouse', label: 'ClickHouse' },
                     { value: 'mongodb', label: 'MongoDB' },
                     { value: 'spreadsheet', label: 'Spreadsheet Files (CSV, Excel)' },
+                    { value: 'google_sheets', label: 'Google Sheets' },
                   ].map(option => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -1153,8 +1166,8 @@ DATABASE_PASSWORD=`; // Mask password
               <div className="my-6 border-t border-gray-200"></div>
             )} */}
             
-            {/* Connection type tabs - Hide for CSV/Excel */}
-            {formData.type !== 'spreadsheet' && (
+            {/* Connection type tabs - Hide for CSV/Excel and Google Sheets */}
+            {formData.type !== 'spreadsheet' && formData.type !== 'google_sheets' && (
               <div className="flex border-b border-gray-200 mb-6">
                 <button
                   type="button"
@@ -1200,6 +1213,19 @@ DATABASE_PASSWORD=`; // Mask password
                 chatId={initialData?.id || newChatId}
                 preloadedTables={tables}
               />
+            ) : formData.type === 'google_sheets' ? (
+              <GoogleSheetsTab
+                formData={formData}
+                handleChange={handleChange}
+                onGoogleAuthChange={(authData) => {
+                  setFormData(prev => ({ 
+                    ...prev, 
+                    google_sheet_id: authData.google_sheet_id,
+                    google_auth_token: authData.google_auth_token,
+                    google_refresh_token: authData.google_refresh_token
+                  }));
+                }}
+              />
             ) : connectionType === 'basic' ? (
               <BasicConnectionTab
                 formData={formData}
@@ -1226,7 +1252,7 @@ DATABASE_PASSWORD=`; // Mask password
           </>
         );
       case 'schema':
-        return formData.type === 'spreadsheet' ? (
+        return formData.type === 'spreadsheet' || formData.type === 'google_sheets' ? (
           <DataStructureTab
             chatId={newChatId || initialData?.id || ''}
             isLoadingData={isLoadingTables}
@@ -1283,7 +1309,7 @@ DATABASE_PASSWORD=`; // Mask password
               <div className="flex flex-col gap-1 mt-2">
                 <h2 className="text-2xl font-bold">
                   {initialData ? 'Edit Connection' : 'New Connection'}
-                  {(currentChatData || (showingNewlyCreatedSchema && formData.type === 'spreadsheet')) && formData.database && formData.database !== 'spreadsheet_db' && (
+                  {(currentChatData || (showingNewlyCreatedSchema && (formData.type === 'spreadsheet' || formData.type === 'google_sheets'))) && formData.database && formData.database !== 'spreadsheet_db' && (
                     <span className="text-lg font-normal text-gray-600 ml-2">- {formData.database}</span>
                   )}
                 </h2>
@@ -1327,7 +1353,7 @@ DATABASE_PASSWORD=`; // Mask password
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">{formData.type === 'spreadsheet' ? 'Data Structure' : 'Schema'}</span>
+                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Data Structure' : 'Schema'}</span>
               </div>
             </button>
           )}
@@ -1408,14 +1434,14 @@ DATABASE_PASSWORD=`; // Mask password
                 <span>
                   {!initialData 
                     ? (showingNewlyCreatedSchema && activeTab === 'schema') 
-                      ? (formData.type === 'spreadsheet' ? 'Save Structure' : 'Save Schema') 
+                      ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Save Structure' : 'Save Schema') 
                       : (showingNewlyCreatedSchema && activeTab === 'connection' && formData.type === 'spreadsheet')
                         ? 'Upload Files'
                         : 'Create' 
                     : activeTab === 'settings' 
                       ? 'Update Settings' 
                       : activeTab === 'schema' 
-                        ? (formData.type === 'spreadsheet' ? 'Update Structure' : 'Update Schema') 
+                        ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Update Structure' : 'Update Schema') 
                         : (showingNewlyCreatedSchema && formData.type === 'spreadsheet' && fileUploads.length > 0)
                           ? 'Upload Files'
                           : 'Update Connection'}

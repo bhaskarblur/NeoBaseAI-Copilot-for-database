@@ -23,6 +23,7 @@ import { SendMessageResponse } from './types/messages';
 import { StreamResponse } from './types/stream';
 import WelcomeSection from './components/app/WelcomeSection';
 import LoadingComponent from './components/app/Loading';
+import GoogleAuthCallback from './pages/GoogleAuthCallback';
 
 function AppContent() {
   const navigate = useNavigate();
@@ -1581,6 +1582,7 @@ function App() {
         <Routes>
           <Route path="/" element={<AppContent />} />
           <Route path="/chat/:chatId" element={<AppContent />} />
+          <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
           <Route path='*' element={<Navigate to="/" replace />} />
         </Routes>
       </StreamProvider>

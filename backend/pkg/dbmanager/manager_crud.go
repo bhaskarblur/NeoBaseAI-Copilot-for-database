@@ -128,6 +128,13 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		return NewMongoDBSchemaFetcher(db)
 	})
 
+	// Add Google Sheets schema fetcher registration
+	m.RegisterFetcher("google_sheets", func(db DBExecutor) SchemaFetcher {
+		return &SpreadsheetDriver{
+			postgresDriver: NewPostgresDriver(),
+		}
+	})
+
 	m.registerDefaultDrivers()
 
 	return m, nil
@@ -222,6 +229,9 @@ func (m *Manager) registerDefaultDrivers() {
 
 	// Register Spreadsheet (CSV/Excel) driver
 	m.RegisterDriver("spreadsheet", NewSpreadsheetDriver())
+
+	// Register Google Sheets driver
+	m.RegisterDriver("google_sheets", NewGoogleSheetsDriver())
 }
 
 // GetPoolMetrics returns metrics about the connection pools
@@ -360,6 +370,10 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		}
 	} else {
 		// Create a new connection
+		// For Google Sheets, pass the ChatID in config so it can create the correct schema
+		if config.Type == "google_sheets" || config.Type == "spreadsheet" {
+			config.ChatID = chatID
+		}
 		conn, err = driver.Connect(config)
 		if err != nil {
 			log.Printf("DBManager -> Connect -> Driver connection failed: %v", err)
@@ -399,8 +413,8 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 		conn.ConfigKey = configKey
 	}
 
-	// For spreadsheet connections, create the schema after ChatID is set
-	if config.Type == "spreadsheet" && chatID != "" {
+	// For spreadsheet and Google Sheets connections, create the schema after ChatID is set
+	if (config.Type == "spreadsheet" || config.Type == "google_sheets") && chatID != "" {
 		schemaName := fmt.Sprintf("conn_%s", chatID)
 		if err := m.createSpreadsheetSchema(conn, schemaName); err != nil {
 			// Clean up on error
@@ -411,11 +425,11 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 				delete(m.dbPools, configKey)
 				m.dbPoolsMu.Unlock()
 			}
-			return fmt.Errorf("failed to create spreadsheet schema: %w", err)
+			return fmt.Errorf("failed to create schema: %w", err)
 		}
 		// Store schema name in config for later use
 		conn.Config.SchemaName = schemaName
-		log.Printf("DBManager -> Connect -> Created spreadsheet schema: %s", schemaName)
+		log.Printf("DBManager -> Connect -> Created schema for %s: %s", config.Type, schemaName)
 	}
 
 	// Initialize subscribers map with existing subscribers
@@ -545,8 +559,8 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 		log.Printf("DBManager -> Disconnect -> Cleared schema cache for chatID: %s", chatID)
 	}
 
-	// For spreadsheet connections, delete the schema and all data when requested
-	if deleteSchema && conn.Config.Type == "spreadsheet" {
+	// For spreadsheet and Google Sheets connections, delete the schema and all data when requested
+	if deleteSchema && (conn.Config.Type == "spreadsheet" || conn.Config.Type == "google_sheets") {
 		// Use the shared internal PostgreSQL connection for deletion
 		internalConn, err := m.getSpreadsheetInternalConnection()
 		if err != nil {
@@ -629,8 +643,8 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 			return nil, fmt.Errorf("failed to create MongoDB executor: %v", err)
 		}
 		return executor, nil
-	case "spreadsheet":
-		// For Spreadsheet, we need to create a wrapper that includes the schema name
+	case "spreadsheet", constants.DatabaseTypeGoogleSheets:
+		// For Spreadsheet and Google Sheets, we need to create a wrapper that includes the schema name
 		wrapper := &spreadsheetSchemaWrapper{
 			conn:       conn,
 			schemaName: conn.Config.SchemaName,

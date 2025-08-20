@@ -12,12 +12,12 @@ type ChatSettingsResponse struct {
 	NonTechMode      bool `json:"non_tech_mode"`
 }
 type CreateConnectionRequest struct {
-	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet"`
-	Host         string  `json:"host" binding:"required_unless=Type spreadsheet"`
+	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet google_sheets"`
+	Host         string  `json:"host"`
 	Port         *string `json:"port"`
-	Username     string  `json:"username" binding:"required_unless=Type spreadsheet"`
+	Username     string  `json:"username"`
 	Password     *string `json:"password"`
-	Database     string  `json:"database" binding:"required_unless=Type spreadsheet"`
+	Database     string  `json:"database"`
 	AuthDatabase *string `json:"auth_database,omitempty"` // Database to authenticate against (for MongoDB)
 
 	// SSL/TLS Configuration
@@ -26,6 +26,11 @@ type CreateConnectionRequest struct {
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
+
+	// Google Sheets specific fields
+	GoogleSheetID      *string `json:"google_sheet_id,omitempty"`
+	GoogleAuthToken    *string `json:"google_auth_token,omitempty"`
+	GoogleRefreshToken *string `json:"google_refresh_token,omitempty"`
 }
 
 type ConnectionResponse struct {
@@ -44,6 +49,9 @@ type ConnectionResponse struct {
 	SSLCertURL     *string `json:"ssl_cert_url,omitempty"`
 	SSLKeyURL      *string `json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
+
+	// Google Sheets specific fields (no tokens exposed in response)
+	GoogleSheetID *string `json:"google_sheet_id,omitempty"`
 }
 
 type CreateChatRequest struct {

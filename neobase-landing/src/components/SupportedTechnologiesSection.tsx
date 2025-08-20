@@ -16,8 +16,8 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'MySQL', isSupported: true, priority: 2 },
     { name: 'Clickhouse', isSupported: true, priority: 5 },
     { name: 'Spreadsheet - CSV/XL', isSupported: true, priority: 7 },
-    { name: 'Microsoft Excel', isSupported: false, priority: 7 },
-    { name: 'Google Sheets', isSupported: false, priority: 7 }
+    { name: 'Google Sheets', isSupported: true, priority: 7 },
+    { name: 'Microsoft Excel', isSupported: false, priority: 8 }
   ];
 
   const llmClients: Technology[] = [

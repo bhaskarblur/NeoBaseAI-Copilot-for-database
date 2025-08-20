@@ -41,6 +41,12 @@ type ConnectionConfig struct {
 	SSHPassphrase    *string `json:"ssh_passphrase,omitempty"`
 	MongoDBURI       *string `json:"mongodb_uri,omitempty"`
 	SchemaName       string  `json:"schema_name,omitempty"` // For spreadsheet connections
+	// Google Sheets specific fields
+	GoogleSheetID      *string `json:"google_sheet_id,omitempty"`
+	GoogleAuthToken    *string `json:"google_auth_token,omitempty"`
+	GoogleRefreshToken *string `json:"google_refresh_token,omitempty"`
+	// ChatID for schema naming
+	ChatID string `json:"chat_id,omitempty"`
 }
 
 // Connection represents an active database connection
