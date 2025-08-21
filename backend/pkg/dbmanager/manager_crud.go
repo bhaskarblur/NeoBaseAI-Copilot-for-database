@@ -231,7 +231,7 @@ func (m *Manager) registerDefaultDrivers() {
 	m.RegisterDriver("spreadsheet", NewSpreadsheetDriver())
 
 	// Register Google Sheets driver
-	m.RegisterDriver("google_sheets", NewGoogleSheetsDriver())
+	m.RegisterDriver("google_sheets", NewGoogleSheetsDriver(m.redisRepo))
 }
 
 // GetPoolMetrics returns metrics about the connection pools
@@ -251,6 +251,11 @@ func (m *Manager) GetPoolMetrics() map[string]interface{} {
 		"total_connections": totalRefs,
 		"reuse_count":       m.poolMetrics.reuseCount,
 	}
+}
+
+// GetRedisRepo returns the Redis repository
+func (m *Manager) GetRedisRepo() redis.IRedisRepositories {
+	return m.redisRepo
 }
 
 // RegisterDriver registers a new database driver

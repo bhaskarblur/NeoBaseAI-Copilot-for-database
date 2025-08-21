@@ -201,12 +201,32 @@ func (s *chatService) StoreSpreadsheetData(userID, chatID, tableName string, col
 		valueStrings := make([]string, 0, len(batch))
 		for _, row := range batch {
 			values := make([]string, len(columns))
-			for j, val := range row {
-				// Escape single quotes
-				escapedVal := strings.ReplaceAll(val, "'", "''")
-				values[j] = fmt.Sprintf("'%s'", escapedVal)
+			for j := range columns {
+				if j < len(row) && row[j] != "" {
+					// Escape single quotes
+					escapedVal := strings.ReplaceAll(row[j], "'", "''")
+					values[j] = fmt.Sprintf("'%s'", escapedVal)
+				} else {
+					// Use NULL for missing or empty values
+					values[j] = "NULL"
+				}
 			}
-			valueStrings = append(valueStrings, fmt.Sprintf("(%s)", strings.Join(values, ", ")))
+			// Only add the row if it has at least one non-NULL value
+			hasData := false
+			for _, v := range values {
+				if v != "NULL" {
+					hasData = true
+					break
+				}
+			}
+			if hasData {
+				valueStrings = append(valueStrings, fmt.Sprintf("(%s)", strings.Join(values, ", ")))
+			}
+		}
+		
+		// Skip this batch if no valid rows
+		if len(valueStrings) == 0 {
+			continue
 		}
 
 		sanitizedColumns := make([]string, len(columns))
@@ -366,19 +386,27 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 		selectClause = strings.Join(columnNames, ", ")
 	}
 
-	// Get paginated data - include _id for row operations
+	// Get paginated data - include ID column for row operations
 	offset := (page - 1) * pageSize
-	// Always include _id in the select clause for row identification
-	selectWithId := "_id"
+	
+	// Determine the ID column name based on connection type
+	idColumn := "_id"
+	if connInfo.Config.Type == "google_sheets" {
+		idColumn = "_row_id"
+	}
+	
+	// Always include ID column in the select clause for row identification
+	selectWithId := idColumn
 	if selectClause != "*" && selectClause != "" {
-		selectWithId = "_id, " + selectClause
+		selectWithId = idColumn + ", " + selectClause
 	}
 	
 	dataQuery := fmt.Sprintf(
-		"SELECT %s FROM %s.%s ORDER BY _id LIMIT %d OFFSET %d",
+		"SELECT %s FROM %s.%s ORDER BY %s LIMIT %d OFFSET %d",
 		selectWithId,
 		schemaName,
 		tableName,
+		idColumn,
 		pageSize,
 		offset,
 	)
@@ -394,18 +422,27 @@ func (s *chatService) GetSpreadsheetTableData(userID, chatID, tableName string, 
 	// Process rows: decrypt and handle empty values
 	for i, row := range rows {
 		for key, value := range row {
-			// Skip internal columns except _id (needed for row operations)
-			if strings.HasPrefix(key, "_") && key != "_id" {
+			// Skip internal columns except ID columns (needed for row operations)
+			if strings.HasPrefix(key, "_") && key != "_id" && key != "_row_id" {
+				delete(rows[i], key)
 				continue
 			}
 			
-			// Handle null/empty values (but not for _id)
-			if key != "_id" && (value == nil || (fmt.Sprintf("%v", value) == "")) {
+			// Handle null/empty values (but not for ID columns)
+			if key != "_id" && key != "_row_id" && (value == nil || (fmt.Sprintf("%v", value) == "")) {
 				rows[i][key] = "-"
 				continue
 			}
 			
 			// No decryption needed - data is stored in plain text
+		}
+		
+		// Normalize ID column to always be "_id" for frontend consistency
+		if connInfo.Config.Type == "google_sheets" {
+			if rowId, exists := row["_row_id"]; exists {
+				rows[i]["_id"] = rowId
+				delete(rows[i], "_row_id")
+			}
 		}
 	}
 

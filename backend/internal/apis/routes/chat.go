@@ -56,5 +56,8 @@ func SetupChatRoutes(router *gin.Engine) {
 
 		// Query recommendations
 		protected.GET("/:id/recommendations", chatHandler.GetQueryRecommendations)
+		
+		// Import metadata for spreadsheets and Google Sheets
+		protected.GET("/:id/import-metadata", chatHandler.GetImportMetadata)
 	}
 }

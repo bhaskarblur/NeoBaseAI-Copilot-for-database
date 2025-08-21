@@ -74,6 +74,7 @@ type ChatService interface {
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
+	GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error)
 }
 
 type chatService struct {
@@ -1949,4 +1950,56 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 			Tables: tables,
 		}, http.StatusOK, nil
 	}
+}
+
+// GetImportMetadata retrieves import metadata for a chat
+func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error) {
+	// Verify the chat belongs to the user
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
+		return nil, http.StatusInternalServerError, err
+	}
+
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	
+	// Verify ownership
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Get Redis repo from dbManager
+	redisRepo := s.dbManager.GetRedisRepo()
+	if redisRepo == nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("redis not available")
+	}
+
+	// Create metadata store and retrieve metadata
+	metadataStore := dbmanager.NewImportMetadataStore(redisRepo)
+	metadata, err := metadataStore.GetMetadata(chatID)
+	if err != nil {
+		log.Printf("Error retrieving import metadata: %v", err)
+		return nil, http.StatusInternalServerError, err
+	}
+
+	if metadata == nil {
+		// No metadata found, return empty response
+		return nil, http.StatusNotFound, fmt.Errorf("no import metadata found")
+	}
+
+	return metadata, http.StatusOK, nil
 }

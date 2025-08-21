@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"neobase-ai/config"
+	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/pkg/redis"
 	"strings"
 
 	"golang.org/x/oauth2"
@@ -18,12 +20,14 @@ import (
 type GoogleSheetsDriver struct {
 	postgresDriver DatabaseDriver
 	sheetsService  *sheets.Service
+	redisRepo      redis.IRedisRepositories
 }
 
 // NewGoogleSheetsDriver creates a new Google Sheets driver
-func NewGoogleSheetsDriver() DatabaseDriver {
+func NewGoogleSheetsDriver(redisRepo redis.IRedisRepositories) DatabaseDriver {
 	return &GoogleSheetsDriver{
 		postgresDriver: NewPostgresDriver(),
+		redisRepo:      redisRepo,
 	}
 }
 
@@ -169,22 +173,89 @@ func (d *GoogleSheetsDriver) syncDataFromSheets(conn *Connection) error {
 			continue
 		}
 
-		// First row is headers
-		headers := make([]string, 0)
-		for _, cell := range resp.Values[0] {
-			headers = append(headers, fmt.Sprintf("%v", cell))
+		// Use intelligent analyzer to process the sheet
+		analyzer := NewSheetAnalyzer(resp.Values)
+		region, err := analyzer.AnalyzeSheet()
+		if err != nil {
+			log.Printf("Warning: Failed to analyze sheet %s: %v", sheetName, err)
+			// Fall back to old method
+			headers := make([]string, 0)
+			for _, cell := range resp.Values[0] {
+				headers = append(headers, fmt.Sprintf("%v", cell))
+			}
+			data := resp.Values[1:]
+			if err := d.storeSheetData(sqlDB, schemaName, tableName, headers, data); err != nil {
+				log.Printf("Warning: Failed to store sheet %s: %v", sheetName, err)
+				continue
+			}
+		} else {
+			// Log analysis results
+			log.Printf("GoogleSheetsDriver -> Sheet analysis for '%s':", sheetName)
+			log.Printf("  - Data quality: %.1f%%", region.Quality)
+			log.Printf("  - Headers detected: %v", region.Headers)
+			log.Printf("  - Data rows: %d", len(region.DataRows))
+			
+			if len(region.Issues) > 0 {
+				log.Printf("  - Issues detected:")
+				for _, issue := range region.Issues {
+					log.Printf("    • %s", issue)
+				}
+			}
+			
+			if len(region.Suggestions) > 0 {
+				log.Printf("  - Suggestions:")
+				for _, suggestion := range region.Suggestions {
+					log.Printf("    • %s", suggestion)
+				}
+			}
+			
+			// Store the analyzed data
+			if err := d.storeSheetData(sqlDB, schemaName, tableName, region.Headers, region.DataRows); err != nil {
+				log.Printf("Warning: Failed to store sheet %s: %v", sheetName, err)
+				continue
+			}
+			
+			// Analyze columns for metadata
+			columnAnalyses := analyzer.AnalyzeColumns(region)
+			
+			// Create and store import metadata
+			metadata := &dtos.ImportMetadata{
+				TableName:   tableName,
+				RowCount:    len(region.DataRows),
+				ColumnCount: len(region.Headers),
+				Quality:     region.Quality,
+				Issues:      region.Issues,
+				Suggestions: region.Suggestions,
+				Columns:     make([]dtos.ImportColumnMetadata, 0),
+			}
+			
+			for _, colAnalysis := range columnAnalyses {
+				metadata.Columns = append(metadata.Columns, dtos.ImportColumnMetadata{
+					Name:         colAnalysis.Name,
+					OriginalName: colAnalysis.OriginalName,
+					DataType:     colAnalysis.DataType,
+					NullCount:    colAnalysis.NullCount,
+					UniqueCount:  colAnalysis.UniqueCount,
+					IsEmpty:      colAnalysis.IsEmpty,
+					IsPrimaryKey: colAnalysis.IsPrimaryKey,
+				})
+			}
+			
+			// Store metadata if we have the connection ID
+			if conn.ChatID != "" && d.redisRepo != nil {
+				metadataStore := NewImportMetadataStore(d.redisRepo)
+				if err := metadataStore.StoreMetadata(conn.ChatID, metadata); err != nil {
+					log.Printf("Warning: Failed to store import metadata: %v", err)
+				} else {
+					log.Printf("GoogleSheetsDriver -> Successfully stored import metadata for chat %s", conn.ChatID)
+				}
+			}
+			
+			log.Printf("Import Metadata - Table: %s, Quality: %.1f%%, Rows: %d, Columns: %d", 
+				metadata.TableName, metadata.Quality, metadata.RowCount, metadata.ColumnCount)
+			
+			log.Printf("GoogleSheetsDriver -> Successfully synced sheet '%s' with %d rows", sheetName, len(region.DataRows))
 		}
-
-		// Remaining rows are data
-		data := resp.Values[1:]
-
-		// Store in PostgreSQL
-		if err := d.storeSheetData(sqlDB, schemaName, tableName, headers, data); err != nil {
-			log.Printf("Warning: Failed to store sheet %s: %v", sheetName, err)
-			continue
-		}
-
-		log.Printf("GoogleSheetsDriver -> Successfully synced sheet '%s' with %d rows", sheetName, len(data))
 	}
 
 	// Update the connection's schema name
@@ -202,43 +273,14 @@ func (d *GoogleSheetsDriver) storeSheetData(db *sql.DB, schemaName, tableName st
 		return fmt.Errorf("failed to drop existing table: %w", err)
 	}
 
-	// Validate and clean headers
-	cleanHeaders := make([]string, 0)
-	headerCount := make(map[string]int)
-	
-	for i, header := range headers {
-		if header == "" {
-			// Generate default column name for empty headers
-			header = fmt.Sprintf("column_%d", i+1)
-		}
-		
-		// Handle duplicate column names
-		originalHeader := header
-		count, exists := headerCount[strings.ToLower(header)]
-		if exists {
-			// Append a number to make it unique
-			header = fmt.Sprintf("%s_%d", originalHeader, count+1)
-		}
-		headerCount[strings.ToLower(originalHeader)] = count + 1
-		
-		cleanHeaders = append(cleanHeaders, header)
-	}
-	
-	// If no headers at all, create default columns based on first row
-	if len(cleanHeaders) == 0 && len(data) > 0 && len(data[0]) > 0 {
-		for i := range data[0] {
-			cleanHeaders = append(cleanHeaders, fmt.Sprintf("column_%d", i+1))
-		}
-	}
-	
-	// If still no headers, return error
-	if len(cleanHeaders) == 0 {
+	// Headers are already cleaned by the analyzer, just validate
+	if len(headers) == 0 {
 		return fmt.Errorf("no columns found in sheet")
 	}
 
 	// Create table with columns based on headers
 	columns := make([]string, 0)
-	for _, header := range cleanHeaders {
+	for _, header := range headers {
 		colName := sanitizeColumnName(header)
 		columns = append(columns, fmt.Sprintf("%s TEXT", colName))
 	}
@@ -256,14 +298,14 @@ func (d *GoogleSheetsDriver) storeSheetData(db *sql.DB, schemaName, tableName st
 	if len(data) > 0 {
 		// Prepare column names for insert
 		colNames := make([]string, 0)
-		for _, header := range cleanHeaders {
+		for _, header := range headers {
 			colNames = append(colNames, sanitizeColumnName(header))
 		}
 
 		// Build insert query
 		for _, row := range data {
 			values := make([]string, 0)
-			for i := range cleanHeaders {
+			for i := range headers {
 				var value string
 				if i < len(row) && row[i] != nil {
 					// Convert value to string

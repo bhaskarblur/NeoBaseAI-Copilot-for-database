@@ -1055,6 +1055,33 @@ func (h *ChatHandler) GetQueryRecommendations(c *gin.Context) {
 	})
 }
 
+// GetImportMetadata gets import metadata for a chat
+// @Summary Get import metadata
+// @Description Get import metadata for a Google Sheets or spreadsheet connection
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Success 200 {object} dtos.Response
+func (h *ChatHandler) GetImportMetadata(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	metadata, statusCode, err := h.chatService.GetImportMetadata(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    metadata,
+	})
+}
+
 // GetChatService returns the chat service instance
 func (h *ChatHandler) GetChatService() services.ChatService {
 	return h.chatService

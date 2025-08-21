@@ -11,6 +11,7 @@ import (
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/services"
+	"neobase-ai/pkg/dbmanager"
 
 	"github.com/gin-gonic/gin"
 
@@ -128,11 +129,55 @@ func (h *UploadHandler) processCSV(file io.Reader) ([][]string, []string, error)
 		return nil, nil, fmt.Errorf("CSV file is empty")
 	}
 
-	// First row is headers
-	columns := records[0]
-	data := records[1:]
+	// Convert records to [][]interface{} for the analyzer
+	interfaceRows := make([][]interface{}, len(records))
+	for i, row := range records {
+		interfaceRow := make([]interface{}, len(row))
+		for j, cell := range row {
+			interfaceRow[j] = cell
+		}
+		interfaceRows[i] = interfaceRow
+	}
 
-	return data, columns, nil
+	// Use intelligent analyzer to process the CSV data
+	analyzer := dbmanager.NewSheetAnalyzer(interfaceRows)
+	region, err := analyzer.AnalyzeSheet()
+	if err != nil {
+		// Fall back to simple extraction if analysis fails
+		log.Printf("Warning: Failed to analyze CSV: %v, falling back to simple extraction", err)
+		columns := records[0]
+		data := records[1:]
+		return data, columns, nil
+	}
+
+	// Log analysis results
+	log.Printf("CSV Analysis Results:")
+	log.Printf("  - Data quality: %.1f%%", region.Quality)
+	log.Printf("  - Headers detected: %v", region.Headers)
+	log.Printf("  - Data rows: %d", len(region.DataRows))
+	
+	if len(region.Issues) > 0 {
+		log.Printf("  - Issues detected:")
+		for _, issue := range region.Issues {
+			log.Printf("    • %s", issue)
+		}
+	}
+
+	// Convert data back to [][]string
+	data := make([][]string, len(region.DataRows))
+	for i, row := range region.DataRows {
+		stringRow := make([]string, len(row))
+		for j, cell := range row {
+			if cell != nil {
+				stringRow[j] = fmt.Sprintf("%v", cell)
+			} else {
+				stringRow[j] = ""
+			}
+		}
+		data[i] = stringRow
+	}
+
+	return data, region.Headers, nil
 }
 
 // processExcel reads and processes Excel file
@@ -166,11 +211,55 @@ func (h *UploadHandler) processExcel(file io.Reader, filename string) ([][]strin
 		return nil, nil, fmt.Errorf("Excel sheet is empty")
 	}
 
-	// First row is headers
-	columns := rows[0]
-	data := rows[1:]
+	// Convert rows to [][]interface{} for the analyzer
+	interfaceRows := make([][]interface{}, len(rows))
+	for i, row := range rows {
+		interfaceRow := make([]interface{}, len(row))
+		for j, cell := range row {
+			interfaceRow[j] = cell
+		}
+		interfaceRows[i] = interfaceRow
+	}
 
-	return data, columns, nil
+	// Use intelligent analyzer to process the Excel data
+	analyzer := dbmanager.NewSheetAnalyzer(interfaceRows)
+	region, err := analyzer.AnalyzeSheet()
+	if err != nil {
+		// Fall back to simple extraction if analysis fails
+		log.Printf("Warning: Failed to analyze Excel sheet: %v, falling back to simple extraction", err)
+		columns := rows[0]
+		data := rows[1:]
+		return data, columns, nil
+	}
+
+	// Log analysis results
+	log.Printf("Excel Analysis Results:")
+	log.Printf("  - Data quality: %.1f%%", region.Quality)
+	log.Printf("  - Headers detected: %v", region.Headers)
+	log.Printf("  - Data rows: %d", len(region.DataRows))
+	
+	if len(region.Issues) > 0 {
+		log.Printf("  - Issues detected:")
+		for _, issue := range region.Issues {
+			log.Printf("    • %s", issue)
+		}
+	}
+
+	// Convert data back to [][]string
+	data := make([][]string, len(region.DataRows))
+	for i, row := range region.DataRows {
+		stringRow := make([]string, len(row))
+		for j, cell := range row {
+			if cell != nil {
+				stringRow[j] = fmt.Sprintf("%v", cell)
+			} else {
+				stringRow[j] = ""
+			}
+		}
+		data[i] = stringRow
+	}
+
+	return data, region.Headers, nil
 }
 
 // GetTableData retrieves data from a spreadsheet table
