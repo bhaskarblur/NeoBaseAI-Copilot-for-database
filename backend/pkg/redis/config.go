@@ -33,7 +33,7 @@ func RedisClient(redisHost, redisPort, redisUsername, redisPassword string) (*re
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
 		if err := client.Ping(ctx).Err(); err != nil {
-			log.Printf("Failed to connect to Redis (attempt %d/%d): %v", i+1, maxRetries, err)
+			log.Printf("Failed to connect to Redis with username %s (attempt %d/%d): %v", redisUsername, i+1, maxRetries, err)
 			if i == maxRetries-1 {
 				return nil, fmt.Errorf("failed to connect to Redis after %d attempts: %w", maxRetries, err)
 			}
