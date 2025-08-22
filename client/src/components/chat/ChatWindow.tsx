@@ -1218,14 +1218,14 @@ export default function ChatWindow({
               }
               setViewMode('chats');
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
               viewMode === 'chats' 
                 ? 'bg-black text-white' 
                 : 'bg-white text-black hover:bg-gray-100'
             }`}
           >
             <MessageSquare className="w-4 h-4" />
-            Chats
+            
           </button>
           <button
             onClick={() => {
@@ -1235,14 +1235,14 @@ export default function ChatWindow({
               }
               setViewMode('pinned');
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
               viewMode === 'pinned' 
                 ? 'bg-black text-white' 
                 : 'bg-white text-black hover:bg-gray-100'
             }`}
           >
             <Pin className="w-4 h-4 rotate-45" />
-            Pinned
+            
           </button>
         </div>
       </div>

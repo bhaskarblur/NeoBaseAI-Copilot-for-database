@@ -1283,9 +1283,6 @@ DATABASE_PASSWORD=`; // Mask password
               <div className="flex flex-col gap-1 mt-2">
                 <h2 className="text-2xl font-bold">
                   {initialData ? 'Edit Connection' : 'New Connection'}
-                  {(currentChatData || (showingNewlyCreatedSchema && formData.type === 'spreadsheet')) && formData.database && formData.database !== 'spreadsheet_db' && (
-                    <span className="text-lg font-normal text-gray-600 ml-2">- {formData.database}</span>
-                  )}
                 </h2>
                 <p className="text-gray-500 text-sm">Your data source credentials are stored in <strong>encrypted form</strong>.</p>
               </div>

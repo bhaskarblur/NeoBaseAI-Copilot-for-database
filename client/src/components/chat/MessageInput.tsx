@@ -201,7 +201,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                                 isLoadingRecommendations
                                     ? "Recommending queries for you..."
                                     : isConnected
-                                        ? "Talk to your database..."
+                                        ? "Ask what you want to know.."
                                         : "You are not connected to your database..."
                             }
                             className="
