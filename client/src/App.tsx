@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
@@ -51,6 +51,18 @@ function AppContent() {
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
   const [isSettingUpSSE, setIsSettingUpSSE] = useState(false);
   const [isSelectingConnection, setIsSelectingConnection] = useState(false);
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [voiceSteps, setVoiceSteps] = useState<string[]>([]);
+  const [currentVoiceStep, setCurrentVoiceStep] = useState('');
+  const [voiceResponseComplete, setVoiceResponseComplete] = useState(false);
+  const voiceResponseCompleteRef = useRef(false); // Immediate blocking with ref
+
+  const handleResetVoiceSteps = () => {
+    setVoiceSteps([]);
+    setCurrentVoiceStep('');
+    setVoiceResponseComplete(false);
+    voiceResponseCompleteRef.current = false;
+  };
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
@@ -487,6 +499,8 @@ function AppContent() {
     }
     
     console.log('handleSelectConnection happened in app.tsx', { id });
+    // Ensure voice mode is turned off when switching chats (always)
+    setIsVoiceMode(false);
     const currentConnection = selectedConnection;
     const connection = chats.find(c => c.id === id);
     if (connection) {
@@ -696,10 +710,8 @@ function AppContent() {
       console.log('handleCancelStream -> streamId', streamId);
       await chatService.cancelStream(selectedConnection.id, streamId);
 
-      // Remove temporary streaming message
-      setMessages(prev => {
-        return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
-      });
+      // Remove any temporary streaming messages
+      setMessages(prev => prev.filter(msg => !msg.is_streaming));
 
       // Set isStreaming to false for all messages
       setMessages(prev => {
@@ -893,7 +905,7 @@ function AppContent() {
 
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
-          id: `temp`,
+          id: `temp-${Date.now()}`,
           type: 'assistant',
           content: '',
           queries: [],
@@ -945,41 +957,68 @@ function AppContent() {
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
 
+            // Handle voice mode steps separately (only if response not complete)
+            if (isVoiceMode && !voiceResponseCompleteRef.current) {
+              console.log('Voice mode: processing step', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
+              setCurrentVoiceStep(response.data);
+              setVoiceSteps(prev => [...prev, response.data]);
+            } else if (isVoiceMode) {
+              console.log('Voice mode: IGNORING step after completion', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
+            } 
             if (!temporaryMessage ) {
-              console.log('ai-response-step -> creating new temp message');
+                console.log('ai-response-step -> creating new temp message');
             } else {
-              console.log('ai-response-step -> updating existing temp message');
-              // Update the existing message with new step
-              setMessages(prev => {
-                // Find the streaming message
-                const streamingMessage = prev.find(msg => msg.is_streaming);
-                if (!streamingMessage) return prev;
+                console.log('ai-response-step -> updating existing temp message');
+                // Update the existing message with new step
+                setMessages(prev => {
+                  // Find the most recent streaming message
+                  const streamingCandidates = prev.filter(msg => msg.is_streaming);
+                  const streamingMessage = streamingCandidates[streamingCandidates.length - 1];
+                  if (!streamingMessage) return prev;
 
-                // No need to update the message if the step is NeoBase is analyzing your request..
-                if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
-                  return prev;
-                }
+                  // No need to update the message if the step is NeoBase is analyzing your request..
+                  if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
+                    return prev;
+                  }
 
-                // Create updated message with new step
-                const updatedMessage = {
-                  ...streamingMessage,
-                  loading_steps: [
-                    ...(streamingMessage.loading_steps || []).map((step: LoadingStep) => ({ ...step, done: true })),
-                    { text: response.data, done: false }
-                  ]
-                };
+                  // Create updated message with new step
+                  const updatedMessage = {
+                    ...streamingMessage,
+                    loading_steps: [
+                      ...(streamingMessage.loading_steps || []).map((step: LoadingStep) => ({ ...step, done: true })),
+                      { text: response.data, done: false }
+                    ]
+                  };
 
-                // Replace the streaming message in the array
-                return prev.map(msg =>
-                  msg.id === streamingMessage.id ? updatedMessage : msg
-                );
-              });
+                  // Replace the streaming message in the array
+                  return prev.map(msg =>
+                    msg.id === streamingMessage.id ? updatedMessage : msg
+                  );
+                });
             }
             break;
 
           case 'ai-response':
             if (response.data) {
               console.log('ai-response -> response.data', response.data);
+
+              // Handle voice mode response
+              if (isVoiceMode) {
+                console.log('AI response received - blocking further voice steps IMMEDIATELY');
+                // Mark response as complete to ignore further steps IMMEDIATELY using ref
+                voiceResponseCompleteRef.current = true; // ✅ Immediate blocking
+                setVoiceResponseComplete(true);
+                // Signal that response is ready in voice mode
+                setCurrentVoiceStep('AI Response Received!');
+                // Clear existing voice steps immediately to prevent showing old steps
+                setVoiceSteps([]);
+                // Clear voice steps after a delay - wait for VoiceMode component to complete its flow
+                setTimeout(() => {
+                  setCurrentVoiceStep('');
+                  setVoiceResponseComplete(false); // Reset for next message
+                  voiceResponseCompleteRef.current = false; // Reset ref too
+                }, 5000); // Increased to 5 seconds to allow VoiceMode to handle restart
+              }
 
               // Check if this is a response to an edited message
               const isEditedResponse = response.data.user_message_id && 
@@ -1103,6 +1142,17 @@ function AppContent() {
             break;
 
           case 'ai-response-error':
+            // Handle voice mode error
+            if (isVoiceMode) {
+              const errorMessage = typeof response.data === 'object' ? response.data.error : response.data;
+              setCurrentVoiceStep(`Error: ${errorMessage}`);
+              // Clear voice steps quickly and return to idle listening state
+              setTimeout(() => {
+                setVoiceSteps([]);
+                setCurrentVoiceStep('');
+              }, 1000);
+            }
+
             // Show error message instead of temporary message
             setMessages(prev => {
               const withoutTemp = prev.filter(msg => !msg.is_streaming);
@@ -1473,6 +1523,11 @@ function AppContent() {
             onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
             userId={user?.id || ''}
             userName={user?.username || ''}
+            isVoiceMode={isVoiceMode}
+            onVoiceModeChange={setIsVoiceMode}
+            voiceSteps={voiceSteps}
+            currentVoiceStep={currentVoiceStep}
+            onResetVoiceSteps={handleResetVoiceSteps}
           />
         ) : (
           <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />

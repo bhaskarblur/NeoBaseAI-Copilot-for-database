@@ -185,6 +185,9 @@ export default function ChatHeader({
                             >
                                 <RefreshCw className="w-5 h-5" />
                             </button>
+                            <div className="absolute invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-opacity duration-200 bottom-[-35px] left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-50 before:content-[''] before:absolute before:top-[-5px] before:left-1/2 before:transform before:-translate-x-1/2 before:border-[5px] before:border-transparent before:border-b-black">
+                                Reconnect
+                            </div>
                             <DisconnectionTooltip
                                 isVisible={showDisconnectionTooltip}
                                 onClose={() => setShowDisconnectionTooltip(false)}

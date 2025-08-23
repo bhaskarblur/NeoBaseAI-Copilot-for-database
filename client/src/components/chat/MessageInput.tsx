@@ -1,10 +1,11 @@
-import { Send, Dices, X, Dice2, Dice3, Dice5, LucideDice1, LucideDices } from 'lucide-react';
+import { Send, X, LucideDices, Mic, Square } from 'lucide-react';
 import { FormEvent, useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import chatService from '../../services/chatService';
 import RecommendationTooltip from './RecommendationTooltip';
 import { recommendationStorage } from '../../utils/recommendationStorage';
 import analyticsService from '../../services/analyticsService';
+import VoiceMode from './VoiceMode';
 
 interface Recommendation {
     text: string;
@@ -18,13 +19,22 @@ interface MessageInputProps {
     chatId?: string;
     userId?: string;
     userName?: string;
+    isVoiceMode?: boolean;
+    onVoiceModeChange?: (isActive: boolean) => void;
+    voiceSteps?: string[];
+    currentVoiceStep?: string;
+    onResetVoiceSteps?: () => void;
+    isStreaming?: boolean;
+    onCancelStream?: () => void;
 }
 
-export default function MessageInput({ isConnected, onSendMessage, isExpanded, chatId, userId, userName }: MessageInputProps) {
+export default function MessageInput({ isConnected, onSendMessage, isExpanded, chatId, userId, userName, isVoiceMode, onVoiceModeChange, voiceSteps: externalVoiceSteps, currentVoiceStep: externalCurrentVoiceStep, onResetVoiceSteps, isStreaming, onCancelStream }: MessageInputProps) {
     const [input, setInput] = useState('');
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
     const [showTooltip, setShowTooltip] = useState(false);
+    const [isVoiceActive, setIsVoiceActive] = useState(false);
+    const [voiceCancelSeq, setVoiceCancelSeq] = useState(0);
 
     // Check if tooltip should be shown for new chats
     useEffect(() => {
@@ -140,6 +150,27 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
         handleGetRecommendations();
     };
 
+    const handleVoiceToggle = () => {
+        if (!isVoiceActive) {
+            setIsVoiceActive(true);
+            onVoiceModeChange?.(true);
+        } else {
+            setIsVoiceActive(false);
+            onVoiceModeChange?.(false);
+            // Increment cancel sequence to tell VoiceMode to fully release mic
+            setVoiceCancelSeq(s => s + 1);
+        }
+    };
+
+    // Voice mode effects
+    useEffect(() => {
+        if (isVoiceMode && !isVoiceActive) {
+            setIsVoiceActive(true);
+        } else if (!isVoiceMode && isVoiceActive) {
+            setIsVoiceActive(false);
+        }
+    }, [isVoiceMode, isVoiceActive]);
+
 
     return (
         <form
@@ -160,7 +191,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                 }
         `}
         >
-            <div className="max-w-5xl mx-auto chat-input-1440">
+            <div className="max-w-5xl mx-auto chat-input-1440 relative">
                 {/* Recommendations chips */}
                 {recommendations.length > 0 && (
                     <div className="mb-3 flex flex-wrap gap-2 items-center">
@@ -186,7 +217,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                     </div>
                 )}
 
-                <div className="flex gap-4 justify-center">
+                <div className="flex gap-4 justify-center relative">
                     <div className="relative flex-1">
                         <textarea
                             value={input}
@@ -201,7 +232,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                                 isLoadingRecommendations
                                     ? "Recommending queries for you..."
                                     : isConnected
-                                        ? "Ask what you want to know.."
+                                        ? "Ask what you want.."
                                         : "You are not connected to your database..."
                             }
                             className="
@@ -211,7 +242,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                     resize-y
                     py-3
                     px-4
-                    pr-12
+                    pr-24
                     leading-normal
                     whitespace-pre-wrap
                   "
@@ -222,12 +253,39 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                                 ),
                                 5
                             )}
-                            disabled={!isConnected || isLoadingRecommendations}
+                            disabled={!isConnected || isLoadingRecommendations || isVoiceActive}
                         />
+                        {/* Microphone button */}
+                        <button
+                            type="button"
+                            onClick={handleVoiceToggle}
+                            disabled={!isConnected}
+                            className={`
+                        absolute right-12 top-2.5
+                        p-2 rounded-lg
+                        hover:bg-gray-100 
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        transition-colors duration-200
+                        flex items-center justify-center
+                        hover-tooltip
+                        z-10
+                        ${isVoiceActive ? 'bg-neo-gray text-green-500' : 'text-gray-600'}
+                    `}
+                            data-tooltip={isVoiceActive ? "Exit voice mode" : "Enter voice mode"}
+                            aria-label={isVoiceActive ? "Exit voice mode" : "Enter voice mode"}
+                        >
+                            {isVoiceActive ? (
+                                <Mic className="w-5 h-5 text-green-500" />
+                            ) : (
+                                <Mic className="w-5 h-5" />
+                            )}
+                        </button>
+
+                        {/* Dice button */}
                         <button
                             type="button"
                             onClick={handleGetRecommendations}
-                            disabled={!isConnected || isLoadingRecommendations}
+                            disabled={!isConnected || isLoadingRecommendations || isVoiceActive}
                             className={`
                         absolute right-3 top-2.5
                         p-2 rounded-lg
@@ -257,12 +315,35 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                         </button>
                     </div>
                     <button
-                        type="submit"
-                        className="neo-button px-4 md:px-8 self-end mb-1.5"
-                        disabled={!isConnected || isLoadingRecommendations}
+                        type={isStreaming ? "button" : "submit"}
+                        onClick={isStreaming ? () => { onCancelStream?.(); setVoiceCancelSeq(s => s + 1); } : undefined}
+                        className={`neo-button px-4 md:px-6 self-end mb-1.5`}
+                        disabled={(!isConnected || isLoadingRecommendations || isVoiceActive) && !isStreaming}
+                        title={isStreaming ? "Cancel request" : "Send message"}
                     >
-                        <Send className="w-6 h-8" />
+                        {isStreaming ? (
+                            <Square className="w-6 h-8 fill-current" />
+                        ) : (
+                            <Send className="w-6 h-8" />
+                        )}
                     </button>
+
+                    {/* Voice Mode Component - expands upward from input field top */}
+                    <div className={`absolute bottom-full left-0 right-0 z-50 transition-all duration-600 ease-out origin-bottom ${
+                        isVoiceActive 
+                            ? 'opacity-100 scale-y-100 translate-y-0' 
+                            : 'opacity-0 scale-y-0 translate-y-4 pointer-events-none'
+                    }`}>
+                        <VoiceMode
+                            isOpen={isVoiceActive}
+                            onClose={handleVoiceToggle}
+                            onSendMessage={onSendMessage}
+                            voiceSteps={externalVoiceSteps}
+                            currentVoiceStep={externalCurrentVoiceStep}
+                            onResetVoiceSteps={onResetVoiceSteps}
+                            resetOnCancelKey={voiceCancelSeq}
+                        />
+                    </div>
                 </div>
             </div>
         </form>
