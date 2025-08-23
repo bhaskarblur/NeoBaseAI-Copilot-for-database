@@ -54,8 +54,10 @@ function AppContent() {
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [voiceSteps, setVoiceSteps] = useState<string[]>([]);
   const [currentVoiceStep, setCurrentVoiceStep] = useState('');
-  const [voiceResponseComplete, setVoiceResponseComplete] = useState(false);
+  const [, setVoiceResponseComplete] = useState(false);
   const voiceResponseCompleteRef = useRef(false); // Immediate blocking with ref
+  const [recoRefreshToken, setRecoRefreshToken] = useState(0);
+  // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
 
   const handleResetVoiceSteps = () => {
     setVoiceSteps([]);
@@ -1137,6 +1139,9 @@ function AppContent() {
                   });
                 });
               }
+
+              // Trigger recommendations refresh shimmer/load in ChatWindow
+              setRecoRefreshToken(prev => prev + 1);
             }
             setTemporaryMessage(null);
             break;
@@ -1168,6 +1173,8 @@ function AppContent() {
               }, ...withoutTemp];
             });
             setTemporaryMessage(null);
+            // Trigger recommendations refresh on error
+            setRecoRefreshToken(prev => prev + 1);
 
             break;
 
@@ -1375,25 +1382,6 @@ function AppContent() {
     }
   };
 
-  const _handleUpdateAutoExecuteQuery = async (chatId: string, autoExecuteQuery: boolean): Promise<void> => {
-    try {
-      const updatedChat = await chatService.updateAutoExecuteQuery(chatId, autoExecuteQuery);
-      
-      // Update the chat in the state
-      setChats(prev => prev.map(chat => 
-        updatedChat.id === chatId ? { ...chat, auto_execute_query: autoExecuteQuery } : chat
-      ));
-      
-      // If this is the selected connection, update it too
-      if (selectedConnection?.id === chatId) {
-        setSelectedConnection(prev => prev ? { ...prev, auto_execute_query: autoExecuteQuery } : prev);
-      }
-      
-    } catch (error: any) {
-      console.error('Failed to update auto execute query setting:', error);
-      toast.error(error.message, errorToast);
-    }
-  };
 
   const handleEditConnectionFromChatWindow = () => {
     setIsEditingConnection(true);
@@ -1528,6 +1516,7 @@ function AppContent() {
             voiceSteps={voiceSteps}
             currentVoiceStep={currentVoiceStep}
             onResetVoiceSteps={handleResetVoiceSteps}
+            recoVersion={recoRefreshToken}
           />
         ) : (
           <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />
