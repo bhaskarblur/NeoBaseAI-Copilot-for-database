@@ -1,6 +1,5 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import toast from 'react-hot-toast';
 
 // TypeScript declarations for Web Speech API
 interface SpeechRecognitionEvent {
@@ -17,12 +16,19 @@ interface SpeechRecognition extends EventTarget {
     continuous: boolean;
     interimResults: boolean;
     lang: string;
+    maxAlternatives?: number;
     start(): void;
     stop(): void;
+    abort?(): void;
     onstart: (() => void) | null;
     onend: (() => void) | null;
     onresult: ((event: SpeechRecognitionEvent) => void) | null;
     onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+    onnomatch?: (() => void) | null;
+    onsoundstart?: (() => void) | null;
+    onsoundend?: (() => void) | null;
+    onspeechstart?: (() => void) | null;
+    onspeechend?: (() => void) | null;
 }
 
 declare global {
@@ -80,6 +86,8 @@ export default function VoiceMode({
     const lastSentRef = useRef('');
     const [isSpeechSupported, setIsSpeechSupported] = useState(false);
     const [micPermission, setMicPermission] = useState<'granted' | 'denied' | 'prompt' | 'checking'>('checking');
+    const messageSentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastActivityTimeRef = useRef(Date.now());
 
     // Play notification sound
     const playNotificationSound = () => {
@@ -137,7 +145,12 @@ export default function VoiceMode({
                 // Request microphone access with basic audio settings
                 console.log('Requesting microphone stream...');
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: true  // Simplified audio constraints for better compatibility
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 16000
+                    }
                 });
                 
                 console.log('Microphone stream obtained:', stream);
@@ -190,7 +203,7 @@ export default function VoiceMode({
                 setTimeout(() => initializeSpeechRecognition(hasPermission), 300);
             } else {
                 setIsSpeechSupported(false);
-                toast.error('Speech recognition not supported in this browser.');
+                setErrorMessage('Speech recognition not supported in this browser.');
             }
             return;
         } else if (!isSpeechSupported) {
@@ -241,7 +254,32 @@ export default function VoiceMode({
             console.log('Configuring speech recognition...');
             recognition.continuous = true;
             recognition.interimResults = true;
-            recognition.lang = 'en-US';
+            recognition.lang = navigator.language || 'en-US';
+            if ('maxAlternatives' in recognition) {
+                recognition.maxAlternatives = 1;
+            }
+            
+            // Mobile-specific configurations
+            const userAgent = navigator.userAgent.toLowerCase();
+            const isIOS = /iphone|ipad|ipod/.test(userAgent);
+            const isAndroid = /android/.test(userAgent);
+            const isSamsung = /samsung/.test(userAgent);
+            
+            if (isIOS || isAndroid) {
+                console.log('Detected mobile device, applying mobile-specific settings');
+                // Disable continuous mode on iOS to prevent permission issues
+                if (isIOS) {
+                    recognition.continuous = false;
+                    console.log('iOS device detected: disabled continuous mode');
+                }
+                
+                // Samsung-specific optimizations
+                if (isSamsung || isAndroid) {
+                    console.log('Android/Samsung device detected: applying specific settings');
+                    // Reduce interim results on Android to improve accuracy
+                    recognition.interimResults = false;
+                }
+            }
         
             recognition.onstart = () => {
                 console.log('Speech recognition started successfully');
@@ -280,12 +318,7 @@ export default function VoiceMode({
                 // Reset silence timeout whenever we get speech
                 if (silenceTimeoutRef.current) {
                     clearTimeout(silenceTimeoutRef.current);
-                }
-                
-                // IMPORTANT: Do NOT stop the mic on silence.
-                // We keep the mic open; we only gate processing using shouldListen.
-                if (silenceTimeoutRef.current) {
-                    clearTimeout(silenceTimeoutRef.current);
+                    silenceTimeoutRef.current = null;
                 }
                 
                 // If we have a final transcript, send it immediately
@@ -293,14 +326,52 @@ export default function VoiceMode({
                     console.log('Final transcript received, sending immediately:', finalTranscript.trim());
                     if (silenceTimeoutRef.current) {
                         clearTimeout(silenceTimeoutRef.current);
+                        silenceTimeoutRef.current = null;
                     }
-                    // Do NOT stop recognition; just pause processing and send
-                    setShouldListen(false);
-                    shouldListenRef.current = false;
-                    ignoreNextOnEndRef.current = true; // suppress immediate onend fallback
-                    lastSentRef.current = finalTranscript.trim();
-                    handleVoiceMessage(finalTranscript.trim());
-                    // We'll resume after response completed path
+                    
+                    // For mobile devices, add debounce to prevent double triggers
+                    const userAgent = navigator.userAgent.toLowerCase();
+                    const isMobile = /iphone|ipad|ipod|android/.test(userAgent);
+                    const isSamsung = /samsung/.test(userAgent);
+                    const sendDelay = isSamsung ? 500 : (isMobile ? 300 : 0);
+                    
+                    // Clear any existing message timeout
+                    if (messageSentTimeoutRef.current) {
+                        clearTimeout(messageSentTimeoutRef.current);
+                    }
+                    
+                    // Debounce message sending
+                    messageSentTimeoutRef.current = setTimeout(() => {
+                        // Check if we haven't already sent this message
+                        if (lastSentRef.current === finalTranscript.trim()) {
+                            console.log('Duplicate message prevented');
+                            return;
+                        }
+                        
+                        // Check if enough time has passed since last activity (for Samsung double-click issue)
+                        const timeSinceLastActivity = Date.now() - lastActivityTimeRef.current;
+                        if (isSamsung && timeSinceLastActivity < 1000) {
+                            console.log('Samsung: Ignoring rapid fire transcript');
+                            return;
+                        }
+                        
+                        // Minimum transcript length for mobile devices to avoid accidental triggers
+                        const minLength = isMobile ? 3 : 1;
+                        if (finalTranscript.trim().length < minLength) {
+                            console.log('Transcript too short, ignoring');
+                            return;
+                        }
+                        
+                        lastActivityTimeRef.current = Date.now();
+                        
+                        // Do NOT stop recognition; just pause processing and send
+                        setShouldListen(false);
+                        shouldListenRef.current = false;
+                        ignoreNextOnEndRef.current = true; // suppress immediate onend fallback
+                        lastSentRef.current = finalTranscript.trim();
+                        handleVoiceMessage(finalTranscript.trim());
+                        // We'll resume after response completed path
+                    }, sendDelay);
                 }
             };
         
@@ -308,9 +379,14 @@ export default function VoiceMode({
                 console.error('Speech recognition error:', event.error, event.message);
                 setIsListening(false);
                 
-                if (event.error === 'not-allowed') {
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
                     setMicPermission('denied');
-                    // toast.error('Microphone permission was denied. Please enable it in your browser settings.');
+                    setErrorMessage('Microphone access denied. Please enable it in your device settings.');
+                    
+                    // iOS-specific handling
+                    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                        setErrorMessage('Please allow microphone access in Settings > Safari > Microphone');
+                    }
                 } else if (event.error === 'no-speech') {
                     // Restart recognition automatically after no-speech timeout (only if should be listening)
                     if (shouldListen) {
@@ -334,8 +410,15 @@ export default function VoiceMode({
                     } else {
                         console.log('No speech detected but not currently listening for input - no restart needed');
                     }
+                } else if (event.error === 'network') {
+                    setErrorMessage('Network error. Please check your connection.');
+                } else if (event.error === 'audio-capture') {
+                    setErrorMessage('Audio capture failed. Please check your microphone.');
+                } else if (event.error === 'aborted') {
+                    // Silently handle aborted errors (common on mobile)
+                    console.log('Recognition aborted, will restart');
                 } else {
-                    toast.error(`Voice recognition error: ${event.error}. Please try again.`);
+                    setErrorMessage(`Voice recognition error: ${event.error}. Please try again.`);
                 }
             };
             
@@ -399,7 +482,7 @@ export default function VoiceMode({
                             console.warn('New recognition start raced; ignoring');
                         } else {
                             console.error('Failed to start speech recognition:', error);
-                            toast.error('Failed to start voice recognition. Please try again.');
+                            setErrorMessage('Failed to start voice recognition. Please try again.');
                         }
                         isStartingRef.current = false;
                     }
@@ -408,43 +491,25 @@ export default function VoiceMode({
             
         } catch (error) {
             console.error('Failed to initialize speech recognition:', error);
-            toast.error('Failed to initialize voice recognition.');
+            setErrorMessage('Failed to initialize voice recognition.');
         }
     };
 
-    const startListening = async () => {
-        console.log('startListening called, recognitionRef exists:', !!recognitionRef.current);
-        
-        if (!recognitionRef.current) {
-            console.log('No recognition ref, initializing...');
-            initializeSpeechRecognition();
-            return;
-        }
-        
-        if (micPermission !== 'granted') {
-            console.log('Mic permission not granted:', micPermission);
-            toast.error('Microphone permission is required.');
-            return;
-        }
-        
-        if (!isListening) {
-            try {
-                console.log('Starting recognition...');
-                recognitionRef.current.start();
-            } catch (error) {
-                console.error('Failed to start speech recognition:', error);
-                toast.error('Failed to start listening. Please try again.');
-            }
-        } else {
-            console.log('Already listening');
-        }
-    };
+    // Removed unused function startListening - using initializeSpeechRecognition directly
 
     const handleVoiceMessage = async (voiceText: string) => {
         console.log('Processing voice message, pausing listening...');
+        
+        // Clear any previous timeouts
+        if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+        }
+        
         setShouldListen(false); // Pause accepting speech input
         setIsProcessingVoice(true);
         setTranscript('');
+        transcriptRef.current = '';
         setShowVoiceResponse(false);
         setShowResponseReceived(false);
         setHasError(false);
@@ -454,7 +519,7 @@ export default function VoiceMode({
             await onSendMessage(voiceText);
         } catch (error) {
             console.error('Error sending voice message:', error);
-            toast.error('Failed to send voice message');
+            setErrorMessage('Failed to send voice message');
         } finally {
             setIsProcessingVoice(false);
         }
@@ -502,16 +567,22 @@ export default function VoiceMode({
                     if (recognitionRef.current && !isListening) {
                         try {
                             console.log('Restarting existing recognition...');
-                            recognitionRef.current.start();
-                            playNotificationSound();
+                            // For iOS, recreate recognition instead of restarting
+                            if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                                recognitionRef.current = null;
+                                initializeSpeechRecognition(true);
+                            } else {
+                                recognitionRef.current.start();
+                                playNotificationSound();
+                            }
                         } catch (error) {
                             console.error('Failed to restart recognition:', error);
                             // Just log the error, don't recreate - mic should stay persistent
-                            toast.error('Failed to restart voice recognition. Please try again.');
+                            setErrorMessage('Failed to restart voice recognition. Please try again.');
                         }
                     } else if (!recognitionRef.current) {
                         console.log('No recognition object - this should not happen in persistent mode');
-                        toast.error('Voice recognition lost. Please close and reopen voice mode.');
+                        setErrorMessage('Voice recognition lost. Please close and reopen voice mode.');
                     }
                 }, 2000);
             }, 1500);
@@ -705,6 +776,9 @@ export default function VoiceMode({
             if (silenceTimeoutRef.current) {
                 clearTimeout(silenceTimeoutRef.current);
             }
+            if (messageSentTimeoutRef.current) {
+                clearTimeout(messageSentTimeoutRef.current);
+            }
         };
     }, []);
 
@@ -731,7 +805,9 @@ export default function VoiceMode({
                         <p className="text-sm text-gray-600">
                             {!isSpeechSupported 
                                 ? 'Please use Chrome, Safari, or Edge for voice features.'
-                                : 'Please allow microphone access to use voice mode.'
+                                : /iPhone|iPad|iPod/i.test(navigator.userAgent)
+                                    ? 'Please allow microphone access in Settings > Safari > Microphone.'
+                                    : 'Please allow microphone access to use voice mode.'
                             }
                         </p>
                     </div>
@@ -745,7 +821,7 @@ export default function VoiceMode({
                                         await navigator.mediaDevices.getUserMedia({ audio: true });
                                         setMicPermission('granted');
                                     } catch (error) {
-                                        toast.error('Please enable microphone in browser settings.');
+                                        setErrorMessage('Please enable microphone in browser settings.');
                                     }
                                 }}
                                 className="px-4 py-2 bg-black text-white text-sm rounded hover:bg-gray-800 transition-colors"

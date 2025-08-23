@@ -286,7 +286,14 @@ export default function ChatWindow({
   useEffect(() => {
     if (!chat?.id) return;
     let cancelled = false;
-    // Start shimmer immediately
+    
+    // Only start shimmer if we're actually going to fetch
+    const key = `${chat.id}-${recoVersion}`;
+    if (lastRecoKeyRef.current === key) {
+      return;
+    }
+    
+    // Start shimmer only when we know we're fetching
     setIsLoadingRecommendations(true);
     setShimmerTexts([
       "This is a placeholder - good data",
@@ -294,13 +301,9 @@ export default function ChatWindow({
       "This also is a placeholder - shows data ",
       "This is a placeholder for the recommendations very good",
     ]);
+    
     (async () => {
       try {
-        // Avoid duplicate fetches if another effect already fetched for same chat id
-        const key = `${chat.id}-${recoVersion}`;
-        if (lastRecoKeyRef.current === key) {
-          return;
-        }
         lastRecoKeyRef.current = key;
         const resp = await chatService.getQueryRecommendations(chat.id);
         if (!cancelled) {
@@ -605,8 +608,6 @@ export default function ChatWindow({
         analyticsService.trackMessageSent(chat.id, content.length, userId || '', userName || '');
       }
 
-      // Start shimmer for new recommendations immediately
-      setIsLoadingRecommendations(true);
 
       await onSendMessage(content);
     } catch (error) {
@@ -618,6 +619,9 @@ export default function ChatWindow({
     if (content.trim()) {
       // Set message source to prevent auto-scroll
       messageUpdateSource.current = 'query';
+      
+      // Hide recommendations immediately to prevent shimmer when editing
+      setRecommendations([]);
       
       // Find the message and its index
       const messageIndex = messages.findIndex(msg => msg.id === id);
@@ -1257,7 +1261,7 @@ export default function ChatWindow({
             {isLoadingMessages && (
               <div className="flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm text-gray-600">Loading older messages...</span>
+                <span className="text-sm text-gray-600">Loading more messages...</span>
               </div>
             )}
           </div>
@@ -1359,9 +1363,10 @@ export default function ChatWindow({
                 const lastMessageIsStreaming = messages.length > 0 && messages[messages.length - 1].is_streaming === true;
                 // Only show block after the last AI message in the last date section
                 const isLastDateGroup = index === Object.keys(groupMessagesByDate(messages)).length - 1;
-                if (!isLastDateGroup || lastMessageIsStreaming) return null;
+                // Also hide if we have no recommendations (prevents shimmer flash)
+                if (!isLastDateGroup || lastMessageIsStreaming || (!isLoadingRecommendations && recommendations.length === 0)) return null;
                 return (
-                  <div className="mt-4 mb-2">
+                  <div className="mt-6 md:mt-4 mb-6 md:mb-2">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-sm text-gray-600 font-medium">{isLoadingRecommendations ? "Loading recommendations..." : "You may try asking:"}</span>
                     </div>
@@ -1381,6 +1386,8 @@ export default function ChatWindow({
                             key={`${text}-${idx}`}
                             onClick={async () => {
                               analyticsService.trackRecommendationChipClick(chat.id, text, userId || '', userName || '');
+                              // Hide recommendations immediately to prevent shimmer
+                              setRecommendations([]);
                               // Send immediately
                               await handleMessageSubmit(text);
                             }}
@@ -1465,7 +1472,7 @@ export default function ChatWindow({
               )}
               {/* Recommendations under default welcome message when chat is empty */}
               {viewMode === 'chats' && (
-                <div className="mt-4 mb-8">
+                <div className="mt-6 md:xmt-4 mb-6 md:mb-2">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm text-gray-600 font-medium">{isLoadingRecommendations ? "Loading recommendations..." : "You may try asking:"}</span>
                   </div>
@@ -1485,6 +1492,8 @@ export default function ChatWindow({
                           key={`${text}-${idx}`}
                           onClick={async () => {
                             analyticsService.trackRecommendationChipClick(chat.id, text, userId || '', userName || '');
+                            // Hide recommendations immediately to prevent shimmer
+                            setRecommendations([]);
                             await handleMessageSubmit(text);
                           }}
                           className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 hover:border-gray-400 rounded-full text-sm font-medium text-black transition-all duration-200 max-w-base truncate"
