@@ -130,27 +130,42 @@ export default function VoiceMode({
             if (!isOpen) return;
             
             try {
-                // First check if permissions are already granted
-                const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-                console.log('Current mic permission:', permission.state);
+                // Skip permission query check on iOS Chrome as it may not be reliable
+                const userAgent = navigator.userAgent;
+                const isIOSChrome = /iPhone|iPad|iPod/i.test(userAgent) && (/CriOS|Chrome/i.test(userAgent));
                 
-                if (permission.state === 'granted') {
-                    setMicPermission('granted');
-                    if (isOpenRef.current && !closingRef.current) {
-                        initializeSpeechRecognition(true); // Pass permission state directly
+                if (!isIOSChrome) {
+                    // First check if permissions are already granted (not on iOS Chrome)
+                    const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+                    console.log('Current mic permission:', permission.state);
+                    
+                    if (permission.state === 'granted') {
+                        setMicPermission('granted');
+                        if (isOpenRef.current && !closingRef.current) {
+                            initializeSpeechRecognition(true); // Pass permission state directly
+                        }
+                        return;
                     }
-                    return;
                 }
                 
                 // Request microphone access with basic audio settings
                 console.log('Requesting microphone stream...');
+                
+                // Use different audio constraints for iOS Chrome
+                let audioConstraints: MediaTrackConstraints = {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 16000
+                };
+                
+                // Simplify constraints for iOS Chrome
+                if (isIOSChrome) {
+                    audioConstraints = { echoCancellation: true };
+                }
+                
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: 16000
-                    }
+                    audio: audioConstraints
                 });
                 
                 console.log('Microphone stream obtained:', stream);
@@ -163,6 +178,15 @@ export default function VoiceMode({
                 
                 console.log('Audio tracks found:', audioTracks.length);
                 
+                // For iOS Chrome, also check track state
+                if (isIOSChrome) {
+                    const track = audioTracks[0];
+                    console.log('Track state:', track.readyState, 'Enabled:', track.enabled);
+                    if (track.readyState !== 'live') {
+                        throw new Error('Audio track not active');
+                    }
+                }
+                
                 // Stop the stream immediately - we just needed to test access
                 stream.getTracks().forEach(track => {
                     console.log('Stopping track:', track.label);
@@ -171,13 +195,14 @@ export default function VoiceMode({
                 
                 setMicPermission('granted');
                 
-                // Wait a bit before initializing speech recognition
+                // Wait a bit longer for iOS Chrome before initializing speech recognition
+                const initDelay = isIOSChrome ? 1000 : 500;
                 setTimeout(() => {
                     console.log('Initializing speech recognition...');
                     if (isOpenRef.current && !closingRef.current) {
                         initializeSpeechRecognition(true); // Pass permission state directly
                     }
-                }, 500);
+                }, initDelay);
                 
             } catch (error) {
                 console.error('Microphone access failed:', error);
@@ -381,11 +406,29 @@ export default function VoiceMode({
                 
                 if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
                     setMicPermission('denied');
-                    setErrorMessage('Microphone access denied. Please enable it in your device settings.');
                     
-                    // iOS-specific handling
-                    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-                        setErrorMessage('Please allow microphone access in Settings > Safari > Microphone');
+                    // Browser and platform specific handling
+                    const userAgent = navigator.userAgent;
+                    const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+                    const isChrome = /Chrome/i.test(userAgent) && !/EdgA|OPR/i.test(userAgent);
+                    const isSafari = /Safari/i.test(userAgent) && !/Chrome|CriOS|EdgA|OPR/i.test(userAgent);
+                    const isFirefox = /Firefox/i.test(userAgent);
+                    const isEdge = /EdgA|Edge/i.test(userAgent);
+                    
+                    if (isIOS) {
+                        if (isChrome || /CriOS/i.test(userAgent)) {
+                            setErrorMessage('Please allow microphone access in Chrome. Tap the microphone icon in the address bar or go to Settings > Privacy & Security > Site Settings > Microphone.');
+                        } else if (isSafari) {
+                            setErrorMessage('Please allow microphone access in Settings > Safari > Microphone.');
+                        } else if (isFirefox || /FxiOS/i.test(userAgent)) {
+                            setErrorMessage('Please allow microphone access in Firefox settings or try refreshing the page.');
+                        } else if (isEdge || /EdgiOS/i.test(userAgent)) {
+                            setErrorMessage('Please allow microphone access in Edge settings or try refreshing the page.');
+                        } else {
+                            setErrorMessage('Please allow microphone access in your browser settings or try refreshing the page.');
+                        }
+                    } else {
+                        setErrorMessage('Microphone access denied. Please enable it in your browser settings.');
                     }
                 } else if (event.error === 'no-speech') {
                     // Restart recognition automatically after no-speech timeout (only if should be listening)
@@ -803,11 +846,31 @@ export default function VoiceMode({
                             {!isSpeechSupported ? 'Speech not supported' : 'Microphone access needed'}
                         </p>
                         <p className="text-sm text-gray-600">
-                            {!isSpeechSupported 
-                                ? 'Please use Chrome, Safari, or Edge for voice features.'
-                                : /iPhone|iPad|iPod/i.test(navigator.userAgent)
-                                    ? 'Please allow microphone access in Settings > Safari > Microphone.'
-                                    : 'Please allow microphone access to use voice mode.'
+                            {!isSpeechSupported ? (
+                                'Please use Chrome, Safari, or Edge for voice features.'
+                            ) : (() => {
+                                const userAgent = navigator.userAgent;
+                                const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+                                const isChrome = /Chrome/i.test(userAgent) && !/EdgA|OPR/i.test(userAgent);
+                                const isSafari = /Safari/i.test(userAgent) && !/Chrome|CriOS|EdgA|OPR/i.test(userAgent);
+                                const isFirefox = /Firefox/i.test(userAgent);
+                                const isEdge = /EdgA|Edge/i.test(userAgent);
+                                
+                                if (isIOS) {
+                                    if (isChrome || /CriOS/i.test(userAgent)) {
+                                        return 'Please allow microphone access in Chrome. Tap the microphone icon in the address bar.';
+                                    } else if (isSafari) {
+                                        return 'Please allow microphone access in Settings > Safari > Microphone.';
+                                    } else if (isFirefox || /FxiOS/i.test(userAgent)) {
+                                        return 'Please allow microphone access in Firefox settings.';
+                                    } else if (isEdge || /EdgiOS/i.test(userAgent)) {
+                                        return 'Please allow microphone access in Edge settings.';
+                                    } else {
+                                        return 'Please allow microphone access in your browser settings.';
+                                    }
+                                }
+                                return 'Please allow microphone access to use voice mode.';
+                            })()
                             }
                         </p>
                     </div>
@@ -820,8 +883,23 @@ export default function VoiceMode({
                                     try {
                                         await navigator.mediaDevices.getUserMedia({ audio: true });
                                         setMicPermission('granted');
+                                        // Force re-initialize speech recognition after permission granted
+                                        setTimeout(() => {
+                                            if (isOpenRef.current && !closingRef.current) {
+                                                initializeSpeechRecognition(true);
+                                            }
+                                        }, 100);
                                     } catch (error) {
-                                        setErrorMessage('Please enable microphone in browser settings.');
+                                        console.error('Failed to get microphone permission:', error);
+                                        const userAgent = navigator.userAgent;
+                                        const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+                                        const isChrome = /Chrome/i.test(userAgent) && !/EdgA|OPR/i.test(userAgent);
+                                        
+                                        if (isIOS && (isChrome || /CriOS/i.test(userAgent))) {
+                                            setErrorMessage('Please tap the microphone icon in Chrome address bar and allow access.');
+                                        } else {
+                                            setErrorMessage('Please enable microphone in browser settings.');
+                                        }
                                     }
                                 }}
                                 className="px-4 py-2 bg-black text-white text-sm rounded hover:bg-gray-800 transition-colors"
