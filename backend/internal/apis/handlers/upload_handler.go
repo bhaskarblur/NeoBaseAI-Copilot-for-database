@@ -11,7 +11,6 @@ import (
 
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/services"
-	"neobase-ai/pkg/dbmanager"
 
 	"github.com/gin-gonic/gin"
 
@@ -87,26 +86,27 @@ func (h *UploadHandler) UploadFile(c *gin.Context) {
 
 	log.Printf("UploadHandler -> Processing file: %s as table: %s", header.Filename, tableName)
 
-	// Process the file based on type
-	var data [][]string
-	var columns []string
+	// Process the file based on type and get raw data
+	var interfaceData [][]interface{}
 
 	if ext == ".csv" {
-		data, columns, err = h.processCSV(file)
+		interfaceData, err = h.processCSVRaw(file)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to process CSV: %v", err)})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to read CSV: %v", err)})
 			return
 		}
 	} else {
-		data, columns, err = h.processExcel(file, header.Filename)
+		interfaceData, err = h.processExcelRaw(file, header.Filename)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to process Excel: %v", err)})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to read Excel: %v", err)})
 			return
 		}
 	}
-
-	// Store the data in the spreadsheet database
-	result, statusCode, err := h.chatService.StoreSpreadsheetData(userID, chatID, tableName, columns, data, mergeStrategy, mergeOptions)
+	
+	// Use unified processor (exactly like Google Sheets)
+	// This will handle all analysis, region detection, and storage
+	result, statusCode, err := h.chatService.ProcessAndStoreSpreadsheetUnified(
+		userID, chatID, tableName, interfaceData, mergeStrategy, mergeOptions)
 	if err != nil {
 		c.JSON(int(statusCode), gin.H{"error": err.Error()})
 		return
@@ -115,21 +115,21 @@ func (h *UploadHandler) UploadFile(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// processCSV reads and processes CSV file
-func (h *UploadHandler) processCSV(file io.Reader) ([][]string, []string, error) {
+// processCSVRaw reads CSV file and returns raw data without analysis
+func (h *UploadHandler) processCSVRaw(file io.Reader) ([][]interface{}, error) {
 	reader := csv.NewReader(file)
 
 	// Read all records
 	records, err := reader.ReadAll()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read CSV: %w", err)
+		return nil, fmt.Errorf("failed to read CSV: %w", err)
 	}
 
 	if len(records) == 0 {
-		return nil, nil, fmt.Errorf("CSV file is empty")
+		return nil, fmt.Errorf("CSV file is empty")
 	}
 
-	// Convert records to [][]interface{} for the analyzer
+	// Convert records to [][]interface{} for processing
 	interfaceRows := make([][]interface{}, len(records))
 	for i, row := range records {
 		interfaceRow := make([]interface{}, len(row))
@@ -139,79 +139,41 @@ func (h *UploadHandler) processCSV(file io.Reader) ([][]string, []string, error)
 		interfaceRows[i] = interfaceRow
 	}
 
-	// Use intelligent analyzer to process the CSV data
-	analyzer := dbmanager.NewSheetAnalyzer(interfaceRows)
-	region, err := analyzer.AnalyzeSheet()
-	if err != nil {
-		// Fall back to simple extraction if analysis fails
-		log.Printf("Warning: Failed to analyze CSV: %v, falling back to simple extraction", err)
-		columns := records[0]
-		data := records[1:]
-		return data, columns, nil
-	}
-
-	// Log analysis results
-	log.Printf("CSV Analysis Results:")
-	log.Printf("  - Data quality: %.1f%%", region.Quality)
-	log.Printf("  - Headers detected: %v", region.Headers)
-	log.Printf("  - Data rows: %d", len(region.DataRows))
-	
-	if len(region.Issues) > 0 {
-		log.Printf("  - Issues detected:")
-		for _, issue := range region.Issues {
-			log.Printf("    • %s", issue)
-		}
-	}
-
-	// Convert data back to [][]string
-	data := make([][]string, len(region.DataRows))
-	for i, row := range region.DataRows {
-		stringRow := make([]string, len(row))
-		for j, cell := range row {
-			if cell != nil {
-				stringRow[j] = fmt.Sprintf("%v", cell)
-			} else {
-				stringRow[j] = ""
-			}
-		}
-		data[i] = stringRow
-	}
-
-	return data, region.Headers, nil
+	return interfaceRows, nil
 }
 
-// processExcel reads and processes Excel file
-func (h *UploadHandler) processExcel(file io.Reader, filename string) ([][]string, []string, error) {
+// processExcelRaw reads Excel file and returns raw data without analysis
+func (h *UploadHandler) processExcelRaw(file io.Reader, filename string) ([][]interface{}, error) {
 	// Read file into memory
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Open Excel file from bytes
 	f, err := excelize.OpenReader(strings.NewReader(string(fileBytes)))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open Excel file: %w", err)
+		return nil, fmt.Errorf("failed to open Excel file: %w", err)
 	}
 	defer f.Close()
 
 	// Get first sheet
 	sheets := f.GetSheetList()
 	if len(sheets) == 0 {
-		return nil, nil, fmt.Errorf("no sheets found in Excel file")
+		return nil, fmt.Errorf("no sheets found in Excel file")
 	}
 
 	sheetName := sheets[0]
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get rows: %w", err)
+		return nil, fmt.Errorf("failed to get rows: %w", err)
 	}
 
 	if len(rows) == 0 {
-		return nil, nil, fmt.Errorf("Excel sheet is empty")
+		return nil, fmt.Errorf("Excel sheet is empty")
 	}
 
-	// Convert rows to [][]interface{} for the analyzer
+	// Convert rows to [][]interface{}
 	interfaceRows := make([][]interface{}, len(rows))
 	for i, row := range rows {
 		interfaceRow := make([]interface{}, len(row))
@@ -221,45 +183,7 @@ func (h *UploadHandler) processExcel(file io.Reader, filename string) ([][]strin
 		interfaceRows[i] = interfaceRow
 	}
 
-	// Use intelligent analyzer to process the Excel data
-	analyzer := dbmanager.NewSheetAnalyzer(interfaceRows)
-	region, err := analyzer.AnalyzeSheet()
-	if err != nil {
-		// Fall back to simple extraction if analysis fails
-		log.Printf("Warning: Failed to analyze Excel sheet: %v, falling back to simple extraction", err)
-		columns := rows[0]
-		data := rows[1:]
-		return data, columns, nil
-	}
-
-	// Log analysis results
-	log.Printf("Excel Analysis Results:")
-	log.Printf("  - Data quality: %.1f%%", region.Quality)
-	log.Printf("  - Headers detected: %v", region.Headers)
-	log.Printf("  - Data rows: %d", len(region.DataRows))
-	
-	if len(region.Issues) > 0 {
-		log.Printf("  - Issues detected:")
-		for _, issue := range region.Issues {
-			log.Printf("    • %s", issue)
-		}
-	}
-
-	// Convert data back to [][]string
-	data := make([][]string, len(region.DataRows))
-	for i, row := range region.DataRows {
-		stringRow := make([]string, len(row))
-		for j, cell := range row {
-			if cell != nil {
-				stringRow[j] = fmt.Sprintf("%v", cell)
-			} else {
-				stringRow[j] = ""
-			}
-		}
-		data[i] = stringRow
-	}
-
-	return data, region.Headers, nil
+	return interfaceRows, nil
 }
 
 // GetTableData retrieves data from a spreadsheet table
