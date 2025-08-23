@@ -173,27 +173,49 @@ func (d *GoogleSheetsDriver) syncDataFromSheets(conn *Connection) error {
 			continue
 		}
 
-		// Use intelligent analyzer to process the sheet
-		analyzer := NewSheetAnalyzer(resp.Values)
-		region, err := analyzer.AnalyzeSheet()
+		// Use robust analyzer to process the sheet
+		robustAnalyzer := NewRobustSheetAnalyzer(resp.Values)
+		regions, err := robustAnalyzer.AnalyzeRobust()
 		if err != nil {
 			log.Printf("Warning: Failed to analyze sheet %s: %v", sheetName, err)
-			// Fall back to old method
-			headers := make([]string, 0)
-			for _, cell := range resp.Values[0] {
-				headers = append(headers, fmt.Sprintf("%v", cell))
+			// Fall back to basic unstructured handling
+			region := &DataRegion{
+				Headers:  []string{"row_num", "col_num", "value"},
+				DataRows: make([][]interface{}, 0),
 			}
-			data := resp.Values[1:]
-			if err := d.storeSheetData(sqlDB, schemaName, tableName, headers, data); err != nil {
+			for rowIdx, row := range resp.Values {
+				for colIdx, cell := range row {
+					if cell != nil && fmt.Sprintf("%v", cell) != "" {
+						region.DataRows = append(region.DataRows, []interface{}{
+							rowIdx + 1,
+							columnIndexToName(colIdx),
+							cell,
+						})
+					}
+				}
+			}
+			if len(region.DataRows) == 0 {
+				region.DataRows = append(region.DataRows, []interface{}{1, "A", "No data found"})
+			}
+			if err := d.storeSheetData(sqlDB, schemaName, tableName, region.Headers, region.DataRows); err != nil {
 				log.Printf("Warning: Failed to store sheet %s: %v", sheetName, err)
 				continue
 			}
-		} else {
+		} else if len(regions) > 0 {
+			// Process all detected regions
+			for regionIdx, region := range regions {
 			// Log analysis results
-			log.Printf("GoogleSheetsDriver -> Sheet analysis for '%s':", sheetName)
-			log.Printf("  - Data quality: %.1f%%", region.Quality)
-			log.Printf("  - Headers detected: %v", region.Headers)
-			log.Printf("  - Data rows: %d", len(region.DataRows))
+				// Use different table names for multiple regions
+				currentTableName := tableName
+				if len(regions) > 1 {
+					currentTableName = fmt.Sprintf("%s_%d", tableName, regionIdx+1)
+				}
+				
+				log.Printf("GoogleSheetsDriver -> Sheet analysis for '%s' (region %d/%d):", sheetName, regionIdx+1, len(regions))
+				log.Printf("  - Table name: %s", currentTableName)
+				log.Printf("  - Data quality: %.1f%%", region.Quality)
+				log.Printf("  - Headers detected: %v", region.Headers)
+				log.Printf("  - Data rows: %d", len(region.DataRows))
 			
 			if len(region.Issues) > 0 {
 				log.Printf("  - Issues detected:")
@@ -209,18 +231,19 @@ func (d *GoogleSheetsDriver) syncDataFromSheets(conn *Connection) error {
 				}
 			}
 			
-			// Store the analyzed data
-			if err := d.storeSheetData(sqlDB, schemaName, tableName, region.Headers, region.DataRows); err != nil {
-				log.Printf("Warning: Failed to store sheet %s: %v", sheetName, err)
-				continue
-			}
+				// Store the analyzed data
+				if err := d.storeSheetData(sqlDB, schemaName, currentTableName, region.Headers, region.DataRows); err != nil {
+					log.Printf("Warning: Failed to store sheet %s region %d: %v", sheetName, regionIdx+1, err)
+					continue
+				}
 			
-			// Analyze columns for metadata
-			columnAnalyses := analyzer.AnalyzeColumns(region)
+				// Analyze columns for metadata
+				analyzer := NewSheetAnalyzer(resp.Values)
+				columnAnalyses := analyzer.AnalyzeColumns(region)
 			
-			// Create and store import metadata
-			metadata := &dtos.ImportMetadata{
-				TableName:   tableName,
+				// Create and store import metadata
+				metadata := &dtos.ImportMetadata{
+					TableName:   currentTableName,
 				RowCount:    len(region.DataRows),
 				ColumnCount: len(region.Headers),
 				Quality:     region.Quality,
@@ -254,7 +277,10 @@ func (d *GoogleSheetsDriver) syncDataFromSheets(conn *Connection) error {
 			log.Printf("Import Metadata - Table: %s, Quality: %.1f%%, Rows: %d, Columns: %d", 
 				metadata.TableName, metadata.Quality, metadata.RowCount, metadata.ColumnCount)
 			
-			log.Printf("GoogleSheetsDriver -> Successfully synced sheet '%s' with %d rows", sheetName, len(region.DataRows))
+				log.Printf("GoogleSheetsDriver -> Successfully synced sheet '%s' region %d with %d rows", sheetName, regionIdx+1, len(region.DataRows))
+			}
+		} else {
+			log.Printf("Warning: No data regions found in sheet %s", sheetName)
 		}
 	}
 
@@ -488,6 +514,16 @@ func sanitizeTableName(name string) string {
 	}
 	
 	return result
+}
+
+// Helper function to convert column index to letter
+func columnIndexToName(index int) string {
+	name := ""
+	for index >= 0 {
+		name = string(rune('A'+index%26)) + name
+		index = index/26 - 1
+	}
+	return name
 }
 
 // Helper function to sanitize column names
