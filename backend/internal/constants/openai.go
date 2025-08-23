@@ -716,7 +716,7 @@ json
   ]
 }
 `
-	
+
 	OpenAISpreadsheetPrompt = OpenAIPostgreSQLPrompt + `
 
 **IMPORTANT SPREADSHEET CONTEXT**: The data you're working with comes from spreadsheet files (CSV/Excel) uploaded by users. This means:
@@ -1522,9 +1522,9 @@ var OpenAIGPT4MongoDBLLMResponseSchema = `{
 }`
 
 // Query Recommendations Prompt and Schema
-const OpenAIRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 3 diverse and practical question recommendations that users can ask about their database.
+const OpenAIRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 4 diverse and practical question recommendations that users can ask about their database.
 
-Generate exactly 3 different question recommendations that are:
+Generate exactly 4 different question recommendations that are:
 - Diverse (data exploration, analytics, insights, etc.)
 - Practical and commonly useful
 - Natural language questions that users would ask
@@ -1554,7 +1554,7 @@ const OpenAIRecommendationsResponseSchema = `{
   "properties": {
     "recommendations": {
       "type": "array",
-      "description": "An array of exactly 3 query recommendations",
+      "description": "An array of exactly 4 query recommendations",
       "items": {
         "type": "object",
         "required": ["text"],

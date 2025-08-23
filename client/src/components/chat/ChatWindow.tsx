@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, MessageSquare, Pin, RefreshCcw, XCircle } from 'lucide-react';
+import { ArrowDown, Loader2, MessageSquare, Pin, RefreshCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -35,6 +35,12 @@ interface ChatWindowProps {
   onEditConnectionFromChatWindow?: () => void;
   userId?: string;
   userName?: string;
+  isVoiceMode?: boolean;
+  onVoiceModeChange?: (isActive: boolean) => void;
+  voiceSteps?: string[];
+  currentVoiceStep?: string;
+  onResetVoiceSteps?: () => void;
+  recoVersion?: number;
 }
 
 interface QueryState {
@@ -106,7 +112,13 @@ export default function ChatWindow({
   onUpdateSelectedCollections,
   onEditConnectionFromChatWindow,
   userId,
-  userName
+  userName,
+  isVoiceMode,
+  onVoiceModeChange,
+  voiceSteps,
+  currentVoiceStep,
+  onResetVoiceSteps,
+  recoVersion
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -155,6 +167,12 @@ export default function ChatWindow({
   const [viewMode, setViewMode] = useState<'chats' | 'pinned'>('chats');
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const scrollPositions = useRef<{ chats: number; pinned: number }>({ chats: 0, pinned: 0 });
+  const [recommendations, setRecommendations] = useState<string[]>([]);
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(false);
+  const [inputPrefill, setInputPrefill] = useState<string | null>(null);
+  // recoVersion comes from props to trigger recommendation refresh
+  const [shimmerTexts, setShimmerTexts] = useState<string[]>([]);
+  const lastRecoKeyRef = useRef<string | null>(null);
 
   // Search functionality
   const performSearch = useCallback((query: string) => {
@@ -263,6 +281,45 @@ export default function ChatWindow({
       setIsConnecting(false);
     }
   }, [isConnected]);
+
+  // When App signals reco refresh, shimmer then refetch
+  useEffect(() => {
+    if (!chat?.id) return;
+    let cancelled = false;
+    // Start shimmer immediately
+    setIsLoadingRecommendations(true);
+    setShimmerTexts([
+      "This is a placeholder - good data",
+      "This is a placeholder for the recommendations",
+      "This also is a placeholder - shows data ",
+      "This is a placeholder for the recommendations very good",
+    ]);
+    (async () => {
+      try {
+        // Avoid duplicate fetches if another effect already fetched for same chat id
+        const key = `${chat.id}-${recoVersion}`;
+        if (lastRecoKeyRef.current === key) {
+          return;
+        }
+        lastRecoKeyRef.current = key;
+        const resp = await chatService.getQueryRecommendations(chat.id);
+        if (!cancelled) {
+          if (resp.success && resp.data?.recommendations) {
+            setRecommendations(resp.data.recommendations.map((r: any) => r.text));
+          } else {
+            setRecommendations([]);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) setRecommendations([]);
+      } finally {
+        if (!cancelled) setIsLoadingRecommendations(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [recoVersion, chat?.id]);
 
   const setMessage = (message: Message) => {
     console.log('setMessage called with message:', message);
@@ -548,6 +605,9 @@ export default function ChatWindow({
         analyticsService.trackMessageSent(chat.id, content.length, userId || '', userName || '');
       }
 
+      // Start shimmer for new recommendations immediately
+      setIsLoadingRecommendations(true);
+
       await onSendMessage(content);
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -611,6 +671,18 @@ export default function ChatWindow({
         if (page === 1) {
           // For initial load, set messages and scroll to bottom
           setMessages(newMessages);
+          // Trigger recommendations fetch for this chat (single call) only if not already fetched for this chat
+          if (lastRecoKeyRef.current !== chat.id) {
+            lastRecoKeyRef.current = chat.id;
+            setIsLoadingRecommendations(true);
+            const resp = await chatService.getQueryRecommendations(chat.id).catch(() => null);
+            if (resp && resp.success && resp.data?.recommendations) {
+              setRecommendations(resp.data.recommendations.map((r: any) => r.text));
+            } else {
+              setRecommendations([]);
+            }
+            setIsLoadingRecommendations(false);
+          }
           if (isInitialLoad.current) {
             // Use multiple timeouts to ensure DOM is fully updated and all images/content loaded
             setTimeout(() => {
@@ -1001,92 +1073,6 @@ export default function ChatWindow({
     }
   };
 
-  // @Deprecated the below logic for now & testing the new one
-  const _handleFixErrorAction = (message: Message) => {
-    // Find the user message that this AI response is replying to
-    const userMessageId = message.user_message_id;
-    if (!userMessageId) {
-      toast.error("Could not find the original message to fix");
-      return;
-    }
-
-    // Find the user message in the messages array
-    const userMessage = messages.find(m => m.id === userMessageId);
-    if (!userMessage) {
-      toast.error("Could not find the original message to fix");
-      return;
-    }
-
-    // Collect all queries with errors
-    const queriesWithErrors = message.queries?.filter(q => q.error) || [];
-    if (queriesWithErrors.length === 0) {
-      toast.error("No errors found to fix");
-      // Remove the "Fix Error" action button from the message
-      setMessages(prev => prev.map(msg => {
-        if (msg.id === userMessageId) {
-          return {
-            ...msg,
-            action_buttons: msg.action_buttons?.filter(b => b.action !== "fix_error")
-          };
-        }
-        return msg;
-      }));
-      return;
-    }
-
-    // Create the error message content
-    let fixErrorContent = userMessage.content + "\n\nFix Errors:\n";
-    queriesWithErrors.forEach(query => {
-      fixErrorContent += `Query: '${query.query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
-    });
-
-    // Edit the user message to include the error message
-    onEditMessage(userMessageId, fixErrorContent);
-  };
-
-  // @Deprecated the below logic for now & testing the new one
-  const _handleFixRollbackErrorAction = (message: Message) => {
-    // Find the user message that this AI response is replying to
-    const userMessageId = message.user_message_id;
-    if (!userMessageId) {
-      toast.error("Could not find the original message to fix");
-      return;
-    }
-
-    // Find the user message in the messages array
-    const userMessage = messages.find(m => m.id === userMessageId);
-    if (!userMessage) {
-      toast.error("Could not find the original message to fix");
-      return;
-    }
-
-    // Collect all queries with errors
-    const queriesWithErrors = message.queries?.filter(q => q.error) || [];
-    if (queriesWithErrors.length === 0) {
-      toast.error("No errors found to fix");
-      // Remove the "Fix Error" action button from the message
-      setMessages(prev => prev.map(msg => {
-        if (msg.id === userMessageId) {
-          return {
-            ...msg,
-            action_buttons: msg.action_buttons?.filter(b => b.action !== "fix_rollback_error")
-          };
-        }
-        return msg;
-      }));
-      return;
-    }
-
-    // Create the error message content
-    let fixRollbackErrorContent = userMessage.content + "\n\nFix Rollback Errors:\n";
-    queriesWithErrors.forEach(query => {
-      fixRollbackErrorContent += `Query: '${query.rollback_query != null && query.rollback_query != "" ? query.rollback_query : query.rollback_dependent_query}' faced an error: '${query.error?.message || "Unknown error"}'.\n`;
-    });
-
-    // Edit the user message to include the error message
-    onEditMessage(userMessageId, fixRollbackErrorContent);
-  }
-
   const handleFixErrorAction = (message: Message) => {
 
     const queriesWithErrors = message.queries?.filter(q => q.error) || [];
@@ -1130,6 +1116,7 @@ export default function ChatWindow({
     }
 
     await onClearChat();
+    setPinnedMessages([]);
     setShowClearConfirm(false);
   }, [chat?.id, onClearChat]);
 
@@ -1218,14 +1205,14 @@ export default function ChatWindow({
               }
               setViewMode('chats');
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
               viewMode === 'chats' 
                 ? 'bg-black text-white' 
                 : 'bg-white text-black hover:bg-gray-100'
             }`}
           >
             <MessageSquare className="w-4 h-4" />
-            Chats
+            
           </button>
           <button
             onClick={() => {
@@ -1235,14 +1222,14 @@ export default function ChatWindow({
               }
               setViewMode('pinned');
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium text-sm transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
               viewMode === 'pinned' 
                 ? 'bg-black text-white' 
                 : 'bg-white text-black hover:bg-gray-100'
             }`}
           >
             <Pin className="w-4 h-4 rotate-45" />
-            Pinned
+            
           </button>
         </div>
       </div>
@@ -1296,6 +1283,7 @@ export default function ChatWindow({
             }
           `}
         >
+          {/* Move recommendations next to the latest AI message; omitted at top */}
           {Object.entries(groupMessagesByDate(viewMode === 'chats' ? messages : pinnedMessages)).map(([date, dateMessages], index) => (
             <div key={date}>
               <div className={`flex items-center justify-center ${index === 0 ? 'mb-4' : 'my-6'}`}>
@@ -1360,6 +1348,53 @@ export default function ChatWindow({
                   }}
                 />
               ))}
+              {/* Inline recommendations under the latest AI message within this date group */}
+              {viewMode === 'chats' && (() => {
+                // Find latest AI message index in this date group
+                const aiIndices = dateMessages
+                  .map((m, idx) => (m.type === 'assistant' ? idx : -1))
+                  .filter(idx => idx >= 0);
+                if (aiIndices.length === 0) return null;
+                // Determine if the latest chat message overall is streaming; if so, hide recos
+                const lastMessageIsStreaming = messages.length > 0 && messages[messages.length - 1].is_streaming === true;
+                // Only show block after the last AI message in the last date section
+                const isLastDateGroup = index === Object.keys(groupMessagesByDate(messages)).length - 1;
+                if (!isLastDateGroup || lastMessageIsStreaming) return null;
+                return (
+                  <div className="mt-4 mb-2">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-sm text-gray-600 font-medium">{isLoadingRecommendations ? "Loading recommendations..." : "You may try asking:"}</span>
+                    </div>
+                    {isLoadingRecommendations && (
+                      <div className="flex flex-wrap gap-2 items-center max-w-4xl">
+                        {shimmerTexts.map((t, i) => (
+                          <div key={i} className="inline-flex items-center px-6 py-1 bg-gray-100 border-2 border-gray-300 rounded-full fb-shimmer whitespace-nowrap max-w-[20rem] md:max-w-[22rem]">
+                            <span className="opacity-0">{t}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!isLoadingRecommendations && recommendations.length > 0 && (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {recommendations.slice(0, 4).map((text, idx) => (
+                          <button
+                            key={`${text}-${idx}`}
+                            onClick={async () => {
+                              analyticsService.trackRecommendationChipClick(chat.id, text, userId || '', userName || '');
+                              // Send immediately
+                              await handleMessageSubmit(text);
+                            }}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 hover:border-gray-400 rounded-full text-sm font-medium text-black transition-all duration-200 max-w-base truncate"
+                            title={text}
+                          >
+                            <span className="truncate">{text}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
           {(viewMode === 'chats' ? messages : pinnedMessages).length === 0 && (
@@ -1428,41 +1463,46 @@ export default function ChatWindow({
                   <p className="text-sm mt-2">Pin frequently asked or important messages to access them quickly</p>
                 </div>
               )}
+              {/* Recommendations under default welcome message when chat is empty */}
+              {viewMode === 'chats' && (
+                <div className="mt-4 mb-8">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-sm text-gray-600 font-medium">{isLoadingRecommendations ? "Loading recommendations..." : "You may try asking:"}</span>
+                  </div>
+                  {isLoadingRecommendations && (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {shimmerTexts.map((t, i) => (
+                          <div key={i} className="inline-flex items-center px-3 py-1.5 bg-gray-100 border-2 border-gray-300 rounded-full fb-shimmer whitespace-nowrap max-w-[20rem] md:max-w-[22rem]">
+                            <span className="opacity-0">{t}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  {!isLoadingRecommendations && recommendations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {recommendations.slice(0, 4).map((text, idx) => (
+                        <button
+                          key={`${text}-${idx}`}
+                          onClick={async () => {
+                            analyticsService.trackRecommendationChipClick(chat.id, text, userId || '', userName || '');
+                            await handleMessageSubmit(text);
+                          }}
+                          className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-gray-300 hover:border-gray-400 rounded-full text-sm font-medium text-black transition-all duration-200 max-w-base truncate"
+                          title={text}
+                        >
+                          <span className="truncate">{text}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
         <div ref={messagesEndRef} />
 
-        {messages.some(m => m.is_streaming) && (
-          <div className="
-            fixed 
-            bottom-[88px]  // Position it above message input
-            left-1/2 
-            -translate-x-1/2 
-            z-50
-          ">
-            <button
-              onClick={handleCancelStreamClick}
-              className="
-                neo-border
-                px-3
-                py-2
-                flex
-                items-center
-                gap-1.5
-                bg-white
-                text-sm
-                font-medium
-                hover:bg-red-50
-                active:translate-y-[1px]
-                active:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
-              "
-            >
-              <XCircle className="w-3.5 h-3.5" />
-              <span>Cancel Request</span>
-            </button>
-          </div>
-        )}
+
 
         {showScrollButton && (
           <button
@@ -1484,6 +1524,15 @@ export default function ChatWindow({
           chatId={chat.id}
           userId={userId || ''}
           userName={userName || ''}
+          isVoiceMode={isVoiceMode}
+          onVoiceModeChange={onVoiceModeChange}
+          voiceSteps={voiceSteps}
+          currentVoiceStep={currentVoiceStep}
+          onResetVoiceSteps={onResetVoiceSteps}
+          isStreaming={messages.some(m => m.is_streaming)}
+          onCancelStream={handleCancelStreamClick}
+          prefillText={inputPrefill || ''}
+          onConsumePrefill={() => setInputPrefill(null)}
         />
       )}
 

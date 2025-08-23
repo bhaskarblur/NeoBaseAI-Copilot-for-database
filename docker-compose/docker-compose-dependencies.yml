@@ -36,8 +36,7 @@ services:
     restart: always
     command: >
       redis-server 
-      --requirepass default
-      --user neobase on >default ~* &* +@all
+      --aclfile /usr/local/etc/redis/redis.acl
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --stop-writes-on-bgsave-error no
@@ -45,6 +44,7 @@ services:
       - 6379:6379
     volumes:
       - neobase-redis-data:/data
+      - ./redis.acl:/usr/local/etc/redis/redis.acl:ro
     networks:
       - neobase-network
 
