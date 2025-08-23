@@ -1865,6 +1865,12 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		if err != nil {
 			log.Printf("ChatService -> GetAllTables -> Connection not found, attempting to connect: %v", err)
 
+			// Determine schema name for spreadsheet connections
+			schemaName := ""
+			if chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+				schemaName = fmt.Sprintf("conn_%s", chatID)
+			}
+
 			// Connection not found, try to connect with proper config
 			connectErr := s.dbManager.Connect(chatID, userID, "", dbmanager.ConnectionConfig{
 				Type:         chat.Connection.Type,
@@ -1874,6 +1880,7 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 				Password:     chat.Connection.Password,
 				Database:     chat.Connection.Database,
 				AuthDatabase: chat.Connection.AuthDatabase,
+				SchemaName:   schemaName,
 			})
 			if connectErr != nil {
 				log.Printf("ChatService -> GetAllTables -> Failed to connect: %v", connectErr)

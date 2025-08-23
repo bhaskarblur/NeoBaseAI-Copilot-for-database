@@ -604,6 +604,12 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		chat.Connection.Port = &defaultPort
 	}
 
+	// Determine schema name for spreadsheet connections
+	schemaName := ""
+	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+		schemaName = fmt.Sprintf("conn_%s", chatID)
+	}
+
 	// Connect to database
 	err = s.dbManager.Connect(chatID, userID, streamID, dbmanager.ConnectionConfig{
 		Type:               chat.Connection.Type,
@@ -621,6 +627,7 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		GoogleSheetID:      chat.Connection.GoogleSheetID,
 		GoogleAuthToken:    chat.Connection.GoogleAuthToken,
 		GoogleRefreshToken: chat.Connection.GoogleRefreshToken,
+		SchemaName:         schemaName,
 	})
 
 	if err != nil {
