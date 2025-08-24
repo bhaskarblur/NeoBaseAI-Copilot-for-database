@@ -8,8 +8,8 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
   const features = [
     {
       icon: <MessageSquare className="w-6 h-6 md:w-8 md:h-8" />,
-      title: "AI-Powered Conversations",
-      description: "Ask questions, get answers, and manage your database with natural language.",
+      title: "AI-Powered Conversations & Insights",
+      description: "Ask questions, get answers, and manage your datasources with natural language.",
       width: "md:col-span-2 lg:col-span-2",
       transform: "rotate(-1deg)",
       importance: "primary",
@@ -17,7 +17,7 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
     },
     {
       icon: <Database className="w-5 h-5 md:w-6 md:h-6" />,
-      title: "Multi-Database Support",
+      title: "Multi-Data Source Support",
       description: "Connect to PostgreSQL, YugabyteDB, MySQL, MongoDB, Redis, Neo4j and more.",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(1deg)",
@@ -26,7 +26,7 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
     },
     {
       icon: <Zap className="w-5 h-5 md:w-7 md:h-7" />,
-      title: "Query Optimization & Suggestions",
+      title: "Quick, Accurate Insights in Real-time",
       description: "Get AI-driven suggestions to improve database performance.",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(-0.5deg)",
@@ -44,7 +44,7 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
     },
     {
       icon: <Server className="w-5 h-5 md:w-6 md:h-6" />,
-      title: "Query Execution & Transaction Management",
+      title: "Query Execution & Data Management",
       description: "Execute queries, rollback if needed, and visualize large volumes of data with ease.",
       width: "md:col-span-2 lg:col-span-2",
       transform: "rotate(-0.8deg)",
@@ -53,8 +53,8 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
     },
     {
       icon: <Boxes className="w-5 h-5 md:w-6 md:h-6" />,
-      title: "Smart Schema Management",
-      description: "NeoBase manages your database schema for you, while giving you the flexibility to control it.",
+      title: "Smart Decision Making",
+      description: "NeoBase manages your data smartly for you & enables you to take decisions and act smarter. ",
       width: "md:col-span-1 lg:col-span-1",
       transform: "rotate(0.5deg)",
       importance: "secondary",
@@ -80,7 +80,7 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
             <span className="text-yellow-500">Features</span> Your Data deserves
           </h2>
           <p className="text-lg sm:text-lg text-gray-700 max-w-3xl mx-auto px-2">
-            NeoBase makes database management simple and intuitive with these powerful features.
+            NeoBase makes data analysis simple and intuitive with these powerful features.
           </p>
         </div>
 
