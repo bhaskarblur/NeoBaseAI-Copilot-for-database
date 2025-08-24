@@ -19,13 +19,16 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'Neo4j', src: '/neo4j-logo.png', alt: 'Neo4j Logo' },
     { name: 'Google Sheets', src: '/gsheets-logo.png', alt: 'Google Sheets Logo' },
     { name: 'Microsoft Excel', src: '/excel-logo.png', alt: 'Microsoft Excel Logo' },
-    {name: 'SQLite', src: '/sqlite-logo.png', alt: 'SQLite Logo'},
-    {name: 'CockroachDB', src: '/cockroachdb-logo.png', alt: 'CockroachDB Logo'},
-    {name: 'MariaDB', src: '/mariadb-logo.png', alt: 'MariaDB Logo'},
+    { name: 'SQLite', src: '/sqlite-logo.png', alt: 'SQLite Logo' },
+    { name: 'CockroachDB', src: '/cockroachdb-logo.webp', alt: 'CockroachDB Logo' },
+    {name: "MariaDB", src: "/mariadb-logo.png", alt: "MariaDB Logo"},
   ];
 
-  // Duplicate logos for seamless infinite scroll
+  // Create seamless infinite scroll - ensure all logos show
   const duplicatedLogos = [...allLogos, ...allLogos];
+  
+  console.log('Total logos:', allLogos.length);
+  console.log('All logo names:', allLogos.map(logo => logo.name));
 
   return (
     <section id="technologies" className="py-12 sm:py-16 md:py-20 lg:py-24 bg-white relative overflow-hidden">
@@ -48,7 +51,7 @@ const SupportedTechnologiesSection: React.FC = () => {
           <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-white to-transparent z-10"></div>
           
           {/* Marquee container */}
-          <div className="flex animate-marquee hover:pause-marquee">
+          <div className="flex animate-marquee hover:pause-marquee" style={{ width: 'calc(200% + 100px)' }}>
             {duplicatedLogos.map((logo, index) => (
               <div key={`${logo.name}-${index}`} className="flex-shrink-0 mx-4 sm:mx-6">
                 <div className="flex flex-col items-center group cursor-pointer">
@@ -56,7 +59,7 @@ const SupportedTechnologiesSection: React.FC = () => {
                     <img 
                       src={logo.src} 
                       alt={logo.alt}
-                      className="w-12 h-12 sm:w-12 sm:h-12 md:w-14 md:h-14 object-contain transition-all duration-300"
+                      className="w-14 h-14 object-contain transition-all duration-300"
                     />
                   </div>
                   <span className="text-xs sm:text-sm font-medium text-gray-600 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
@@ -98,7 +101,7 @@ const SupportedTechnologiesSection: React.FC = () => {
           
           @media (min-width: 1024px) {
             .animate-marquee {
-              animation: marquee 15s linear infinite;
+              animation: marquee 16s linear infinite;
             }
           }
           
