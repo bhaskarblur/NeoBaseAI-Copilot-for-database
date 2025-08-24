@@ -782,8 +782,28 @@ function AppContent() {
   };
 
   // Add helper function for animating queries
-  const animateQueryTyping = async (messageId: string, queries: QueryResult[]) => {
+  const animateQueryTyping = async (messageId: string, queries: QueryResult[], nonTechMode: boolean = false) => {
+    console.log('animateQueryTyping -> NonTechMode:', nonTechMode);
     if (!queries || queries.length === 0) return;
+
+    // If in non-tech mode, set queries directly without animation
+    if (nonTechMode) {
+      setMessages(prev => {
+        return prev.map(msg => {
+          if (msg.id === messageId) {
+            return {
+              ...msg,
+              queries: queries,
+              is_streaming: false,
+              // Preserve action buttons
+              action_buttons: msg.action_buttons
+            };
+          }
+          return msg;
+        });
+      });
+      return;
+    }
 
     // First ensure queries are initialized with empty strings
     setMessages(prev => {
@@ -1053,10 +1073,12 @@ function AppContent() {
                         id: msg.id, // Keep the original ID
                         content: '', // Reset content to empty for animation
                         action_buttons: response.data.action_buttons, // Update action buttons from response
-                        queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings
+                        queries: response.data.non_tech_mode 
+                          ? response.data.queries || [] // In non-tech mode, set queries directly
+                          : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                         is_loading: false,
                         loading_steps: [],
-                        is_streaming: true,
+                        is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
                         action_at: response.data.action_at,
@@ -1072,7 +1094,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(existingMessage.id, response.data.queries);
+                  await animateQueryTyping(existingMessage.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming
@@ -1098,10 +1120,12 @@ function AppContent() {
                   type: 'assistant' as const,
                   content: '',
                   action_buttons: response.data.action_buttons,
-                  queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [],
+                  queries: response.data.non_tech_mode 
+                    ? response.data.queries || [] // In non-tech mode, set queries directly
+                    : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                   is_loading: false,
                   loading_steps: [], // Clear loading steps for final message
-                  is_streaming: true,
+                  is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
                   action_at: response.data.action_at,
@@ -1120,7 +1144,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(response.data.id, response.data.queries);
+                  await animateQueryTyping(response.data.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming for new messages
