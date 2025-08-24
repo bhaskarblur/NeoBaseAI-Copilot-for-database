@@ -1515,6 +1515,7 @@ function AppContent() {
           }}
           onSubmit={handleAddConnection}
           onUpdateSelectedCollections={handleUpdateSelectedCollections}
+          onRefreshSchema={handleRefreshSchema}
           initialData={isEditingConnection ? selectedConnection : undefined}
           onEdit={isEditingConnection ? async (connection, settings) => {
             try {

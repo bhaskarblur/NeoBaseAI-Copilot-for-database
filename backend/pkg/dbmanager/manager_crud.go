@@ -506,17 +506,143 @@ func (m *Manager) createSpreadsheetSchema(conn *Connection, schemaName string) e
 	return nil
 }
 
-// Disconnect closes a database connection
-func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
+// cleanupSchemaForInactiveConnection attempts to clean up schema for connections that were never active
+// This is specifically for spreadsheet/Google Sheets connections where a chat was created but never connected
+// CRITICAL SAFETY: This method should ONLY be called for spreadsheet/google_sheets connections
+func (m *Manager) cleanupSchemaForInactiveConnection(chatID string, connectionType string) error {
+	// CRITICAL SAFETY CHECK: Only allow schema deletion for spreadsheet and Google Sheets connections
+	// This prevents accidental deletion of user database schemas
+	if connectionType != "spreadsheet" && connectionType != "google_sheets" {
+		log.Printf("DBManager -> cleanupSchemaForInactiveConnection -> SAFETY CHECK FAILED: Attempted to delete schema for non-spreadsheet connection type '%s' for chat %s", connectionType, chatID)
+		return fmt.Errorf("SAFETY VIOLATION: Schema deletion is only allowed for spreadsheet/google_sheets connections, not for '%s'", connectionType)
+	}
+
+	log.Printf("DBManager -> cleanupSchemaForInactiveConnection -> SAFETY CHECK PASSED: Connection type '%s' is allowed for schema deletion", connectionType)
+
+	// Use the shared internal PostgreSQL connection for deletion
+	internalConn, err := m.getSpreadsheetInternalConnection()
+	if err != nil {
+		return fmt.Errorf("failed to get internal connection for cleanup: %v", err)
+	}
+
+	// Delete the schema directly using the internal connection
+	schemaName := fmt.Sprintf("conn_%s", chatID)
+	sqlDB, err := internalConn.DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get SQL DB for cleanup: %v", err)
+	}
+
+	// Check if schema exists first
+	checkQuery := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.schemata 
+			WHERE schema_name = '%s'
+		)
+	`, schemaName)
+	
+	var exists bool
+	row := sqlDB.QueryRow(checkQuery)
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to check if schema exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("DBManager -> cleanupSchemaForInactiveConnection -> Schema %s does not exist, nothing to clean up", schemaName)
+		return nil
+	}
+
+	// Drop the schema
+	query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)
+	if _, err := sqlDB.Exec(query); err != nil {
+		return fmt.Errorf("failed to drop schema %s: %v", schemaName, err)
+	}
+
+	log.Printf("DBManager -> cleanupSchemaForInactiveConnection -> Successfully dropped schema: %s", schemaName)
+	return nil
+}
+
+// DisconnectWithType closes a database connection with connection type for safety validation
+// This method includes strict safety checks to prevent accidental schema deletion for regular databases
+func (m *Manager) DisconnectWithType(chatID, userID, connectionType string, deleteSchema bool) error {
+	log.Printf("DBManager -> DisconnectWithType -> Starting disconnect for chatID: %s, connectionType: %s, deleteSchema: %t", chatID, connectionType, deleteSchema)
+
 	m.mu.RLock()
 	conn, exists := m.connections[chatID]
 	m.mu.RUnlock()
 
+	// If no active connection exists but we need to delete schema, 
+	// we still need to proceed for spreadsheet/Google Sheets connections
 	if !exists {
+		if deleteSchema {
+			log.Printf("DBManager -> DisconnectWithType -> No active connection found for chat %s, but attempting schema cleanup", chatID)
+			
+			// CRITICAL SAFETY CHECK: Only allow schema deletion for spreadsheet and Google Sheets connections
+			if connectionType != "spreadsheet" && connectionType != "google_sheets" {
+				log.Printf("DBManager -> DisconnectWithType -> SAFETY CHECK FAILED: Schema deletion requested for connection type '%s' for chat %s - REFUSING", connectionType, chatID)
+				return fmt.Errorf("SAFETY VIOLATION: Schema deletion is only allowed for spreadsheet/google_sheets connections, not for '%s'", connectionType)
+			}
+
+			// For Google Sheets/spreadsheet connections, we still need to clean up the schema even without an active connection
+			if err := m.cleanupSchemaForInactiveConnection(chatID, connectionType); err != nil {
+				log.Printf("DBManager -> DisconnectWithType -> Failed to cleanup schema for inactive connection: %v", err)
+				return fmt.Errorf("failed to cleanup schema for chat %s: %v", chatID, err)
+			}
+			log.Printf("DBManager -> DisconnectWithType -> Successfully attempted schema cleanup for inactive connection: %s", chatID)
+			return nil // Return success since schema cleanup was attempted
+		}
 		return fmt.Errorf("connection not found for chat %s", chatID)
 	}
 
-	log.Printf("DBManager -> Disconnect -> Starting disconnect for chatID: %s", chatID)
+	// For active connections, verify the connection type matches what was stored
+	if conn.Config.Type != connectionType {
+		log.Printf("DBManager -> DisconnectWithType -> WARNING: Connection type mismatch for chat %s. Active: %s, Expected: %s", 
+			chatID, conn.Config.Type, connectionType)
+		// Use the active connection type for further processing (it's more reliable)
+		connectionType = conn.Config.Type
+	}
+
+	// ADDITIONAL SAFETY CHECK: Even for active connections, ensure schema deletion is only for allowed types
+	if deleteSchema && connectionType != "spreadsheet" && connectionType != "google_sheets" {
+		log.Printf("DBManager -> DisconnectWithType -> SAFETY CHECK FAILED: Schema deletion requested for active connection type '%s' for chat %s - REFUSING", connectionType, chatID)
+		return fmt.Errorf("SAFETY VIOLATION: Schema deletion is only allowed for spreadsheet/google_sheets connections, not for '%s'", connectionType)
+	}
+
+	// Proceed with normal disconnect logic
+	return m.disconnectInternal(chatID, userID, deleteSchema, conn)
+}
+
+// Disconnect closes a database connection (legacy method - should use DisconnectWithType for safety)
+// This method is kept for backward compatibility but should be avoided for schema deletion
+func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
+	log.Printf("DBManager -> Disconnect (LEGACY) -> DEPRECATED: This method should not be used for schema deletion without connection type validation")
+	
+	m.mu.RLock()
+	conn, exists := m.connections[chatID]
+	m.mu.RUnlock()
+
+	// If no active connection exists and schema deletion is requested, REFUSE for safety
+	// This legacy method cannot safely determine connection type for inactive connections
+	if !exists {
+		if deleteSchema {
+			log.Printf("DBManager -> Disconnect (LEGACY) -> SAFETY VIOLATION: Schema deletion requested without connection type validation for chat %s - REFUSING", chatID)
+			return fmt.Errorf("SAFETY VIOLATION: Legacy Disconnect method cannot safely delete schemas for inactive connections. Use DisconnectWithType instead")
+		}
+		return fmt.Errorf("connection not found for chat %s", chatID)
+	}
+
+	// ADDITIONAL SAFETY CHECK: Verify connection type for active connections with schema deletion
+	if deleteSchema && conn.Config.Type != "spreadsheet" && conn.Config.Type != "google_sheets" {
+		log.Printf("DBManager -> Disconnect (LEGACY) -> SAFETY VIOLATION: Schema deletion requested for active connection type '%s' for chat %s - REFUSING", conn.Config.Type, chatID)
+		return fmt.Errorf("SAFETY VIOLATION: Schema deletion is only allowed for spreadsheet/google_sheets connections, not for '%s'", conn.Config.Type)
+	}
+
+	// Proceed with normal disconnect logic for active connections
+	return m.disconnectInternal(chatID, userID, deleteSchema, conn)
+}
+
+// disconnectInternal contains the actual disconnect logic for active connections
+func (m *Manager) disconnectInternal(chatID, userID string, deleteSchema bool, conn *Connection) error {
+	log.Printf("DBManager -> disconnectInternal -> Starting disconnect for chatID: %s", chatID)
 
 	// Get the config key for the shared pool
 	configKey := conn.ConfigKey
@@ -531,7 +657,7 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 		refCount := pool.RefCount
 		pool.Mutex.Unlock()
 
-		log.Printf("DBManager -> Disconnect -> Decremented pool refCount to %d", refCount)
+		log.Printf("DBManager -> disconnectInternal -> Decremented pool refCount to %d", refCount)
 
 		// If reference count is zero, close the actual connection
 		if refCount <= 0 {
@@ -546,7 +672,7 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 
 			// Remove from pool
 			delete(m.dbPools, configKey)
-			log.Printf("DBManager -> Disconnect -> Removed pool from dbPools map")
+			log.Printf("DBManager -> disconnectInternal -> Removed pool from dbPools map")
 		}
 	}
 	m.dbPoolsMu.Unlock()
@@ -556,12 +682,12 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 	delete(m.connections, chatID)
 	m.mu.Unlock()
 
-	log.Printf("DBManager -> Disconnect -> Removed connection from connections map")
+	log.Printf("DBManager -> disconnectInternal -> Removed connection from connections map")
 
 	// Delete schema if requested
 	if deleteSchema && m.schemaManager != nil {
 		m.schemaManager.ClearSchemaCache(chatID)
-		log.Printf("DBManager -> Disconnect -> Cleared schema cache for chatID: %s", chatID)
+		log.Printf("DBManager -> disconnectInternal -> Cleared schema cache for chatID: %s", chatID)
 	}
 
 	// For spreadsheet and Google Sheets connections, delete the schema and all data when requested
@@ -569,19 +695,19 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 		// Use the shared internal PostgreSQL connection for deletion
 		internalConn, err := m.getSpreadsheetInternalConnection()
 		if err != nil {
-			log.Printf("DBManager -> Disconnect -> Failed to get internal connection for deletion: %v", err)
+			log.Printf("DBManager -> disconnectInternal -> Failed to get internal connection for deletion: %v", err)
 		} else {
 			// Delete the schema directly using the internal connection
 			schemaName := fmt.Sprintf("conn_%s", chatID)
 			sqlDB, err := internalConn.DB.DB()
 			if err != nil {
-				log.Printf("DBManager -> Disconnect -> Failed to get SQL DB: %v", err)
+				log.Printf("DBManager -> disconnectInternal -> Failed to get SQL DB: %v", err)
 			} else {
 				query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)
 				if _, err := sqlDB.Exec(query); err != nil {
-					log.Printf("DBManager -> Disconnect -> Failed to drop schema: %v", err)
+					log.Printf("DBManager -> disconnectInternal -> Failed to drop schema: %v", err)
 				} else {
-					log.Printf("DBManager -> Disconnect -> Successfully dropped schema: %s", schemaName)
+					log.Printf("DBManager -> disconnectInternal -> Successfully dropped schema: %s", schemaName)
 				}
 			}
 		}
@@ -589,7 +715,7 @@ func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 
 	// Notify subscribers
 	m.notifySubscribers(chatID, userID, StatusDisconnected, "")
-	log.Printf("DBManager -> Disconnect -> Notified subscribers")
+	log.Printf("DBManager -> disconnectInternal -> Notified subscribers")
 
 	return nil
 }

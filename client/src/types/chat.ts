@@ -50,6 +50,7 @@ export interface Connection {
     schema_name?: string; // Schema name in the CSV PostgreSQL database
     // Google Sheets specific fields
     google_sheet_id?: string;
+    google_sheet_url?: string;
     google_auth_token?: string;
     google_refresh_token?: string;
 }

@@ -29,6 +29,7 @@ type CreateConnectionRequest struct {
 
 	// Google Sheets specific fields
 	GoogleSheetID      *string `json:"google_sheet_id,omitempty"`
+	GoogleSheetURL     *string `json:"google_sheet_url,omitempty"`
 	GoogleAuthToken    *string `json:"google_auth_token,omitempty"`
 	GoogleRefreshToken *string `json:"google_refresh_token,omitempty"`
 }
@@ -51,7 +52,8 @@ type ConnectionResponse struct {
 	SSLRootCertURL *string `json:"ssl_root_cert_url,omitempty"`
 
 	// Google Sheets specific fields (no tokens exposed in response)
-	GoogleSheetID *string `json:"google_sheet_id,omitempty"`
+	GoogleSheetID  *string `json:"google_sheet_id,omitempty"`
+	GoogleSheetURL *string `json:"google_sheet_url,omitempty"`
 }
 
 type CreateChatRequest struct {

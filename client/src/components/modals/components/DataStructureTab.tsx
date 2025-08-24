@@ -16,6 +16,7 @@ import {
 import ConfirmationModal from '../../modals/ConfirmationModal';
 import Tooltip from '../../ui/Tooltip';
 import toast from 'react-hot-toast';
+import chatService from '../../../services/chatService';
 
 interface DataStructureTabProps {
   chatId: string;
@@ -24,6 +25,7 @@ interface DataStructureTabProps {
   onDownloadData?: (tableName: string) => void;
   onRefreshData?: () => void;
 }
+
 
 interface TableData {
   name: string;
@@ -58,6 +60,7 @@ export default function DataStructureTab({
   const [loadingPreview, setLoadingPreview] = useState<Record<string, boolean>>({});
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ show: boolean; tableName: string | null; isSelectedRows?: boolean; rowId?: string | number }>({ show: false, tableName: null, isSelectedRows: false });
   const [downloadMenu, setDownloadMenu] = useState<{ show: boolean; tableName: string | null; x: number; y: number }>({ show: false, tableName: null, x: 0, y: 0 });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (chatId) {
@@ -67,48 +70,60 @@ export default function DataStructureTab({
 
   const loadTableData = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/chats/${chatId}/tables`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const tablesResponse = await chatService.getTables(chatId);
+      
+      if (tablesResponse.tables && tablesResponse.tables.length > 0) {
+        // Transform API response to match TableData structure
+        const transformedTables = tablesResponse.tables.map((table: any) => ({
+          name: table.name,
+          columns: table.columns || [],
+          rowCount: table.row_count || 0,
+          sizeBytes: table.size_bytes || 0,
+          sourceFile: table.source_file || 'uploaded file',
+          previewData: []
+        }));
+        setTables(transformedTables);
+        
+        // Initialize pagination for each table
+        const initialPagination: Record<string, PaginationState> = {};
+        transformedTables.forEach((table: any) => {
+          initialPagination[table.name] = {
+            page: 1,
+            pageSize: 15,
+            totalRows: table.rowCount || 0
+          };
+        });
+        setPagination(initialPagination);
+        
+        // Load preview data for first table by default
+        if (transformedTables.length > 0) {
+          setExpandedTables({ [transformedTables[0].name]: true });
+          loadTablePreviewData(transformedTables[0].name, 1, 15);
         }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.data?.tables && data.data.tables.length > 0) {
-          // Transform API response to match TableData structure
-          const transformedTables = data.data.tables.map((table: any) => ({
-            name: table.name,
-            columns: table.columns || [],
-            rowCount: table.row_count || 0,
-            sizeBytes: table.size_bytes || 0,
-            sourceFile: table.source_file || 'uploaded file',
-            previewData: []
-          }));
-          setTables(transformedTables);
-          
-          // Initialize pagination for each table
-          const initialPagination: Record<string, PaginationState> = {};
-          transformedTables.forEach((table: any) => {
-            initialPagination[table.name] = {
-              page: 1,
-              pageSize: 15,
-              totalRows: table.rowCount || 0
-            };
-          });
-          setPagination(initialPagination);
-          // Load preview data for first table by default
-          if (transformedTables.length > 0) {
-            setExpandedTables({ [transformedTables[0].name]: true });
-            loadTablePreviewData(transformedTables[0].name, 1, 15);
-          }
-        } else {
-          setTables([]);
-        }
+      } else {
+        setTables([]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load table data:', error);
+      setError(error.message || 'Failed to load table data');
       setTables([]);
+      
+      // Show error toast
+      toast.error(error.message || 'Failed to load table data', {
+        duration: 4000,
+        style: {
+          background: '#ff4444',
+          color: '#fff',
+          border: '4px solid #cc0000',
+          borderRadius: '12px',
+          boxShadow: '4px 4px 0px 0px rgba(0,0,0,1)',
+          padding: '12px 24px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+        },
+      });
     } finally {
       setLoading(false);
     }
@@ -663,7 +678,8 @@ export default function DataStructureTab({
     <div className="space-y-4">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Data Structure</h3>
-        <Tooltip content="Refresh table data">
+        {/* Commented for now, will be added back later */}
+        {/* <Tooltip content="Refresh table data">
           <button
             onClick={onRefreshData}
             className="neo-button-secondary flex items-center gap-2 px-3 py-1.5 text-sm"
@@ -671,14 +687,36 @@ export default function DataStructureTab({
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-        </Tooltip>
+        </Tooltip> */}
       </div>
 
-      {tables.length === 0 ? (
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-50 rounded-lg border-2 border-red-200 mb-4">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <div>
+              <h4 className="font-medium text-red-800">Failed to Load Data Structure</h4>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  loadTableData();
+                }}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tables.length === 0 && !error ? (
         <div className="text-center py-8 text-gray-500">
           No tables found. Upload CSV/Excel files or sync Google Sheets to see data structure.
         </div>
-      ) : (
+      ) : tables.length > 0 ? (
         <div className="space-y-4">
           {tables.map((table) => (
             <div key={table.name} className="border-2 border-gray-200 rounded-lg overflow-hidden">
@@ -897,7 +935,7 @@ export default function DataStructureTab({
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Download Menu Popup */}
       {downloadMenu.show && (

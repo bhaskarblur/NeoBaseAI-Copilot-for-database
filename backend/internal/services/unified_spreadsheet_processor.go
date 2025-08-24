@@ -7,8 +7,10 @@ import (
 	"log"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
+	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,6 +104,12 @@ func (s *chatService) ProcessAndStoreSpreadsheetUnified(
 	totalColumns := 0
 	var totalSizeBytes int64
 	
+	// Track overall error information
+	allErrors := make([]string, 0)
+	totalProcessed := 0
+	totalSuccessful := 0
+	totalFailed := 0
+	
 	for regionIdx, region := range regions {
 		// Determine table name (same naming convention as Google Sheets)
 		currentTableName := baseTableName
@@ -180,9 +188,25 @@ func (s *chatService) ProcessAndStoreSpreadsheetUnified(
 		}
 		
 		// Store the region data (exactly like Google Sheets)
-		if err := s.storeSheetDataUnified(sqlDB, schemaName, currentTableName, region.Headers, region.DataRows); err != nil {
+		insertResult, err := s.storeSheetDataUnified(sqlDB, schemaName, currentTableName, region.Headers, region.DataRows)
+		if err != nil {
 			log.Printf("Warning: Failed to store region %d: %v", regionIdx+1, err)
+			if insertResult != nil {
+				// Still collect error information even if storing failed
+				totalProcessed += insertResult.TotalRowsProcessed
+				totalSuccessful += insertResult.SuccessfulRows
+				totalFailed += insertResult.FailedRows
+				allErrors = append(allErrors, insertResult.Errors...)
+			}
 			continue
+		}
+		
+		// Collect insertion statistics
+		if insertResult != nil {
+			totalProcessed += insertResult.TotalRowsProcessed
+			totalSuccessful += insertResult.SuccessfulRows
+			totalFailed += insertResult.FailedRows
+			allErrors = append(allErrors, insertResult.Errors...)
 		}
 		
 		allTables = append(allTables, currentTableName)
@@ -217,12 +241,19 @@ func (s *chatService) ProcessAndStoreSpreadsheetUnified(
 				Columns:     make([]dtos.ImportColumnMetadata, 0),
 			}
 			
-			// Add column metadata
+			// Add column metadata with inferred types
 			for _, header := range region.Headers {
+				dataType := "text" // default fallback
+				if inferredTypes, err := utils.NewDataTypeInferrer().InferColumnTypes(region.Headers, region.DataRows); err == nil {
+					if colType, exists := inferredTypes[header]; exists {
+						dataType = strings.ToLower(colType.PostgreSQLType)
+					}
+				}
+				
 				metadata.Columns = append(metadata.Columns, dtos.ImportColumnMetadata{
 					Name:         sanitizeColumnName(header),
 					OriginalName: header,
-					DataType:     "text",
+					DataType:     dataType,
 				})
 			}
 			
@@ -255,37 +286,75 @@ func (s *chatService) ProcessAndStoreSpreadsheetUnified(
 		log.Printf("Warning: Failed to update database name: %v", err)
 	}
 	
-	// Prepare response
+	// Prepare response with error information
 	response := &dtos.SpreadsheetUploadResponse{
-		TableName:   strings.Join(allTables, ", "),
-		RowCount:    totalRows,
-		ColumnCount: totalColumns,
-		SizeBytes:   totalSizeBytes,
-		UploadedAt:  time.Now(),
+		TableName:          strings.Join(allTables, ", "),
+		RowCount:           totalSuccessful, // Only count successfully inserted rows
+		ColumnCount:        totalColumns,
+		SizeBytes:          totalSizeBytes,
+		UploadedAt:         time.Now(),
+		TotalRowsProcessed: totalProcessed,
+		SuccessfulRows:     totalSuccessful,
+		FailedRows:         totalFailed,
+		Errors:             allErrors,
+		HasErrors:          len(allErrors) > 0 || totalFailed > 0,
 	}
 	
 	log.Printf("ProcessAndStoreSpreadsheetUnified -> Successfully created/updated %d table(s)", len(allTables))
 	return response, http.StatusOK, nil
 }
 
+// DataInsertionResult contains results of data insertion including error details
+type DataInsertionResult struct {
+	TotalRowsProcessed int
+	SuccessfulRows     int
+	FailedRows         int
+	Errors             []string
+}
+
+// HasErrors returns true if there were any errors during insertion
+func (r *DataInsertionResult) HasErrors() bool {
+	return r.FailedRows > 0 || len(r.Errors) > 0
+}
+
 // storeSheetDataUnified stores sheet data exactly like Google Sheets driver
-func (s *chatService) storeSheetDataUnified(db *sql.DB, schemaName, tableName string, headers []string, data [][]interface{}) error {
+func (s *chatService) storeSheetDataUnified(db *sql.DB, schemaName, tableName string, headers []string, data [][]interface{}) (*DataInsertionResult, error) {
 	// Drop existing table if it exists
 	dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS %s.%s", schemaName, tableName)
 	if _, err := db.Exec(dropQuery); err != nil {
-		return fmt.Errorf("failed to drop existing table: %w", err)
+		return nil, fmt.Errorf("failed to drop existing table: %w", err)
 	}
 	
 	// Headers are already cleaned by the analyzer, just validate
 	if len(headers) == 0 {
-		return fmt.Errorf("no columns found in sheet")
+		return nil, fmt.Errorf("no columns found in sheet")
 	}
 	
-	// Create table with columns based on headers (same as Google Sheets)
+	// Infer data types for columns using intelligent sampling
+	inferrer := utils.NewDataTypeInferrer()
+	inferredTypes, err := inferrer.InferColumnTypes(headers, data)
+	if err != nil {
+		log.Printf("Warning: Failed to infer column types: %v, falling back to TEXT", err)
+		// Fallback to TEXT for all columns
+		inferredTypes = make(map[string]utils.ColumnDataType)
+		for _, header := range headers {
+			inferredTypes[header] = utils.ColumnDataType{
+				PostgreSQLType: "TEXT",
+				SQLType:        "TEXT",
+				IsNullable:     true,
+			}
+		}
+	}
+
+	// Create table with columns based on inferred types
 	columns := make([]string, 0)
 	for _, header := range headers {
 		colName := sanitizeColumnName(header)
-		columns = append(columns, fmt.Sprintf("%s TEXT", colName))
+		dataType := inferredTypes[header]
+		columns = append(columns, fmt.Sprintf("%s %s", colName, dataType.PostgreSQLType))
+		
+		log.Printf("Column %s -> %s (sample: %d, errors: %d)", 
+			header, dataType.PostgreSQLType, dataType.SampleSize, dataType.ErrorCount)
 	}
 	
 	// Add internal columns (same as Google Sheets)
@@ -294,7 +363,7 @@ func (s *chatService) storeSheetDataUnified(db *sql.DB, schemaName, tableName st
 	
 	createQuery := fmt.Sprintf("CREATE TABLE %s.%s (%s)", schemaName, tableName, strings.Join(columns, ", "))
 	if _, err := db.Exec(createQuery); err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
+		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 	
 	// Insert data
@@ -305,8 +374,12 @@ func (s *chatService) storeSheetDataUnified(db *sql.DB, schemaName, tableName st
 			colNames = append(colNames, sanitizeColumnName(header))
 		}
 		
-		// Build insert query (batch insert for performance)
+		// Build insert query with type-aware conversion (batch insert for performance)
 		batchSize := 100
+		totalRows := 0
+		successfulRows := 0
+		failedRows := 0
+		
 		for i := 0; i < len(data); i += batchSize {
 			end := i + batchSize
 			if end > len(data) {
@@ -314,44 +387,182 @@ func (s *chatService) storeSheetDataUnified(db *sql.DB, schemaName, tableName st
 			}
 			
 			batch := data[i:end]
-			valueStrings := make([]string, 0, len(batch))
+			validRows := make([]string, 0, len(batch)) // All rows for insertion
 			
-			for _, row := range batch {
+			for rowIdx, row := range batch {
 				values := make([]string, 0)
-				for j := range headers {
+				
+				for j, header := range headers {
 					var value string
 					if j < len(row) && row[j] != nil {
-						// Convert value to string
-						switch v := row[j].(type) {
-						case string:
-							value = v
-						case float64:
-							value = fmt.Sprintf("%v", v)
-						case bool:
-							value = fmt.Sprintf("%v", v)
-						default:
-							value = fmt.Sprintf("%v", v)
+						rawValue := fmt.Sprintf("%v", row[j])
+						dataType := inferredTypes[header]
+						
+						// Convert value according to inferred type
+						convertedValue, conversionErr := s.convertValueToType(rawValue, dataType.PostgreSQLType)
+						if conversionErr != nil {
+							// Instead of skipping the row, store NULL for invalid values
+							log.Printf("CONVERSION_WARNING: Table '%s', Column '%s', Row %d: Cannot convert '%s' to %s, storing as NULL", 
+								tableName, header, i+rowIdx+1, rawValue, dataType.PostgreSQLType)
+							value = "" // Will be formatted as NULL by formatSQLValue
+						} else {
+							value = convertedValue
 						}
-						// Escape single quotes for SQL
-						value = strings.ReplaceAll(value, "'", "''")
 					}
-					values = append(values, fmt.Sprintf("'%s'", value))
+					// Use appropriate SQL value formatting
+					values = append(values, s.formatSQLValue(value, inferredTypes[header].PostgreSQLType))
 				}
-				valueStrings = append(valueStrings, fmt.Sprintf("(%s)", strings.Join(values, ", ")))
+				
+				// Add all rows to the batch (no longer skipping rows with conversion errors)
+				validRows = append(validRows, fmt.Sprintf("(%s)", strings.Join(values, ", ")))
+				successfulRows++
+				totalRows++
 			}
 			
-			insertQuery := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES %s",
-				schemaName, tableName,
-				strings.Join(colNames, ", "),
-				strings.Join(valueStrings, ", "))
-			
-			if _, err := db.Exec(insertQuery); err != nil {
-				log.Printf("Warning: Failed to insert batch %d-%d: %v", i, end, err)
-				// Continue with other batches
+			// Insert all rows (we no longer skip rows with conversion errors)
+			if len(validRows) > 0 {
+				insertQuery := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES %s",
+					schemaName, tableName,
+					strings.Join(colNames, ", "),
+					strings.Join(validRows, ", "))
+				
+				if _, err := db.Exec(insertQuery); err != nil {
+					// Log the batch failure but continue processing
+					log.Printf("Error: Failed to insert batch %d-%d with %d rows: %v", i, end, len(validRows), err)
+					log.Printf("Failed query: %s", insertQuery)
+					// Mark these rows as failed
+					failedRows += len(validRows)
+					successfulRows -= len(validRows)
+				}
 			}
 		}
+		
+		// Log comprehensive summary
+		log.Printf("DATA_INSERTION_SUMMARY for table '%s':", tableName)
+		log.Printf("  - Total rows processed: %d", totalRows)
+		log.Printf("  - Successfully inserted: %d", successfulRows)
+		log.Printf("  - Failed: %d", failedRows)
+		
+		// Return detailed results
+		result := &DataInsertionResult{
+			TotalRowsProcessed: totalRows,
+			SuccessfulRows:     successfulRows,
+			FailedRows:         failedRows,
+			Errors:             []string{}, // No longer tracking individual errors
+		}
+		
+		// Only return error if NO rows were successful
+		if successfulRows == 0 && totalRows > 0 {
+			return result, fmt.Errorf("no rows could be inserted into table '%s' - all %d rows failed database insertion", tableName, totalRows)
+		}
+		
+		return result, nil
 	}
 	
-	return nil
+	return &DataInsertionResult{
+		TotalRowsProcessed: 0,
+		SuccessfulRows:     0,
+		FailedRows:         0,
+		Errors:             []string{},
+	}, nil
+}
+
+// convertValueToType attempts to convert a string value to the specified PostgreSQL type
+func (s *chatService) convertValueToType(value string, postgresType string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil // NULL value
+	}
+
+	switch strings.ToUpper(postgresType) {
+	case "INTEGER":
+		// Remove common number formatting (commas, spaces) before parsing
+		cleanValue := strings.ReplaceAll(value, ",", "")
+		cleanValue = strings.ReplaceAll(cleanValue, " ", "")
+		
+		_, err := strconv.ParseInt(cleanValue, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("cannot convert '%s' to INTEGER: %w", value, err)
+		}
+		return cleanValue, nil
+
+	case "NUMERIC", "DECIMAL":
+		// Remove common number formatting (commas, spaces) before parsing
+		cleanValue := strings.ReplaceAll(value, ",", "")
+		cleanValue = strings.ReplaceAll(cleanValue, " ", "")
+		
+		_, err := strconv.ParseFloat(cleanValue, 64)
+		if err != nil {
+			return "", fmt.Errorf("cannot convert '%s' to NUMERIC: %w", value, err)
+		}
+		return cleanValue, nil
+
+	case "BOOLEAN":
+		lower := strings.ToLower(value)
+		switch lower {
+		case "true", "yes", "1", "y":
+			return "true", nil
+		case "false", "no", "0", "n":
+			return "false", nil
+		default:
+			return "", fmt.Errorf("cannot convert '%s' to BOOLEAN", value)
+		}
+
+	case "DATE":
+		// Try to parse various date formats
+		dateFormats := []string{
+			"2006-01-02",
+			"01/02/2006",
+			"01-02-2006",
+			"2006/01/02",
+			"02/01/2006",
+			"02-01-2006",
+		}
+		for _, format := range dateFormats {
+			if parsedTime, err := time.Parse(format, value); err == nil {
+				return parsedTime.Format("2006-01-02"), nil
+			}
+		}
+		return "", fmt.Errorf("cannot convert '%s' to DATE", value)
+
+	case "TIMESTAMP":
+		// Try to parse various timestamp formats
+		timestampFormats := []string{
+			time.RFC3339,
+			time.RFC3339Nano,
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05.000",
+			"01/02/2006 15:04:05",
+			"01-02-2006 15:04:05",
+		}
+		for _, format := range timestampFormats {
+			if parsedTime, err := time.Parse(format, value); err == nil {
+				return parsedTime.Format("2006-01-02 15:04:05"), nil
+			}
+		}
+		return "", fmt.Errorf("cannot convert '%s' to TIMESTAMP", value)
+
+	default:
+		// For TEXT, VARCHAR, UUID, etc., return as-is
+		return value, nil
+	}
+}
+
+// formatSQLValue formats a value for SQL insertion based on the column type
+func (s *chatService) formatSQLValue(value string, postgresType string) string {
+	if value == "" {
+		return "NULL"
+	}
+
+	switch strings.ToUpper(postgresType) {
+	case "INTEGER", "NUMERIC", "DECIMAL", "BOOLEAN":
+		// Numeric and boolean values don't need quotes
+		return value
+	default:
+		// String types need quotes and escaping
+		escaped := strings.ReplaceAll(value, "'", "''")
+		return fmt.Sprintf("'%s'", escaped)
+	}
 }
 

@@ -1,8 +1,9 @@
-import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, Settings, Table, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Chat, ChatSettings, Connection, TableInfo, FileUpload } from '../../types/chat';
 import chatService from '../../services/chatService';
 import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab, GoogleSheetsTab } from './components';
+import ConfirmationModal from './ConfirmationModal';
 import { useStream } from '../../contexts/StreamContext';
 
 // Connection tab type
@@ -23,6 +24,7 @@ interface ConnectionModalProps {
     selectedCollections?: string;
   }>;
   onUpdateSelectedCollections?: (chatId: string, selectedCollections: string) => Promise<void>;
+  onRefreshSchema?: () => Promise<void>;
 }
 
 export interface FormErrors {
@@ -46,6 +48,7 @@ export default function ConnectionModal({
   onEdit, 
   onSubmit,
   onUpdateSelectedCollections,
+  onRefreshSchema,
 }: ConnectionModalProps) {
   const { generateStreamId } = useStream();
   
@@ -75,6 +78,9 @@ export default function ConnectionModal({
   // Success message state
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
+  // Refresh schema modal state
+  const [showRefreshSchema, setShowRefreshSchema] = useState(false);
+  
   // Form states
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState<Connection>({
@@ -96,7 +102,12 @@ export default function ConnectionModal({
     ssh_username: initialData?.connection.ssh_username || '',
     ssh_private_key: initialData?.connection.ssh_private_key || '',
     ssh_passphrase: initialData?.connection.ssh_passphrase || '',
-    is_example_db: false
+    is_example_db: false,
+    // Google Sheets specific fields
+    google_sheet_id: initialData?.connection.google_sheet_id || '',
+    google_sheet_url: initialData?.connection.google_sheet_url || '',
+    google_auth_token: initialData?.connection.google_auth_token || '',
+    google_refresh_token: initialData?.connection.google_refresh_token || ''
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -951,6 +962,18 @@ export default function ConnectionModal({
     }));
   };
 
+  // Handle refresh schema
+  const handleRefreshSchema = async () => {
+    if (!onRefreshSchema) return;
+    
+    try {
+      await onRefreshSchema();
+      setShowRefreshSchema(false);
+    } catch (error) {
+      console.error('Failed to refresh schema:', error);
+    }
+  };
+
   // Removed unused parseConnectionString function
 
   const formatConnectionString = (connection: Connection): string => {
@@ -1217,10 +1240,14 @@ DATABASE_PASSWORD=`; // Mask password
               <GoogleSheetsTab
                 formData={formData}
                 handleChange={handleChange}
+                isEditMode={!!initialData}
+                chatId={initialData?.id || newChatId}
+                onRefreshData={() => setShowRefreshSchema(true)}
                 onGoogleAuthChange={(authData) => {
                   setFormData(prev => ({ 
                     ...prev, 
                     google_sheet_id: authData.google_sheet_id,
+                    google_sheet_url: authData.google_sheet_url,
                     google_auth_token: authData.google_auth_token,
                     google_refresh_token: authData.google_refresh_token
                   }));
@@ -1389,7 +1416,7 @@ DATABASE_PASSWORD=`; // Mask password
         {(activeTab === 'connection' || activeTab === 'settings' || (activeTab === 'schema'  && !isLoadingTables)) && (
           <>
             {/* Password notice for updating connections */}
-            {initialData && !successMessage && !isLoading && activeTab === 'connection' && formData.type !== 'spreadsheet' && (
+            {initialData && !successMessage && !isLoading && activeTab === 'connection' && formData.type !== 'spreadsheet' && formData.type !== 'google_sheets' && (
               <div className="mt-2 -mb-2 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
@@ -1458,6 +1485,20 @@ DATABASE_PASSWORD=`; // Mask password
         )}
       </form>
     </div>
+    
+    {/* Refresh Schema Modal */}
+    {showRefreshSchema && (
+      <ConfirmationModal
+        icon={<RefreshCcw className="w-6 h-6 text-black" />}
+        themeColor="black"
+        title="Refresh Knowledge/Data"
+        buttonText="Refresh"
+        message="This action will refetch the data from Google Sheets and update the knowledge base. This may take a few minutes depending on the size of the sheet."
+        onConfirm={handleRefreshSchema}
+        onCancel={() => setShowRefreshSchema(false)}
+        zIndex="z-[210]"
+      />
+    )}
   </div>
 );
 }

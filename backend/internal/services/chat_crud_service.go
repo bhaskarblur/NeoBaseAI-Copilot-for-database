@@ -255,6 +255,7 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 			connection.Host = "google-sheets"
 			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleSheetURL = req.Connection.GoogleSheetURL
 			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
 			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
 			// Use the database name from the request or set a default
@@ -359,6 +360,7 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 			connection.Host = "google-sheets"
 			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleSheetURL = req.Connection.GoogleSheetURL
 			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
 			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
 			// Use the database name from the request or set a default
@@ -624,8 +626,8 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 	}
 
 	go func() {
-		// Delete DB connection
-		if err := s.dbManager.Disconnect(chatID, userID, true); err != nil {
+		// Delete DB connection with connection type for safety validation
+		if err := s.dbManager.DisconnectWithType(chatID, userID, chat.Connection.Type, true); err != nil {
 			log.Printf("failed to delete DB connection: %v", err)
 		}
 	}()
@@ -1675,6 +1677,8 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			SSLCertURL:     connectionCopy.SSLCertURL,
 			SSLKeyURL:      connectionCopy.SSLKeyURL,
 			SSLRootCertURL: connectionCopy.SSLRootCertURL,
+			GoogleSheetID:  connectionCopy.GoogleSheetID,
+			GoogleSheetURL: connectionCopy.GoogleSheetURL,
 		},
 		SelectedCollections: chat.SelectedCollections,
 		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),

@@ -1512,9 +1512,9 @@ export default function ChatWindow({
         <ConfirmationModal
           icon={<RefreshCcw className="w-6 h-6 text-black" />}
           themeColor="black"
-          title="Refresh Knowledge Base"
+          title="Refresh Knowledge/Data"
           buttonText="Refresh"
-          message="This action will refetch the schema from the database and update the knowledge base. This may take a few minutes depending on the size of the database."
+          message="This action will refetch the schema from the data source and update the knowledge base. This may take a few minutes depending on the size of the database."
           onConfirm={handleConfirmRefreshSchema}
           onCancel={handleCancelRefreshSchema}
         />
@@ -1565,6 +1565,7 @@ export default function ChatWindow({
               return { success: result?.success || false, error: result?.error };
             }}
             onUpdateSelectedCollections={onUpdateSelectedCollections}
+            onRefreshSchema={handleConfirmRefreshSchema}
           />
         </div>
       )}

@@ -147,11 +147,15 @@ func (h *GoogleOAuthHandler) ValidateGoogleSheetAccess(c *gin.Context) {
 		}
 	}
 
+	// Construct sheet URL from the sheet ID
+	sheetURL := fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit", req.SheetID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"valid":       true,
 		"title":       sheetInfo["properties"].(map[string]interface{})["title"],
 		"sheet_count": len(sheets),
 		"sheets":      sheets,
+		"sheet_url":   sheetURL,
 	})
 }
 

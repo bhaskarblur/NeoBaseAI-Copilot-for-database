@@ -5,25 +5,43 @@ import { Connection } from '../../../types/chat';
 interface GoogleSheetsTabProps {
   formData: Connection;
   handleChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
+  isEditMode: boolean; // true if editing existing connection, false if creating new
   onGoogleAuthChange: (authData: { 
     google_sheet_id: string; 
+    google_sheet_url: string;
     google_auth_token: string; 
     google_refresh_token: string;
   }) => void;
+  chatId?: string; // Chat ID for refresh functionality
+  onRefreshData?: () => void; // Callback to trigger refresh knowledge modal
 }
 
 const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
   formData,
   handleChange,
+  isEditMode,
   onGoogleAuthChange,
+  chatId,
+  onRefreshData,
 }) => {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState(false);
   const [sheetUrl, setSheetUrl] = useState('');
-  const [sheetInfo, setSheetInfo] = useState<any>(null);
+  const [sheetInfo, setSheetInfo] = useState<{
+    title: string;
+    sheet_count: number;
+    sheets?: string[];
+  } | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // Load existing URL if available
+  useEffect(() => {
+    if (formData.google_sheet_url) {
+      setSheetUrl(formData.google_sheet_url);
+    }
+  }, [formData.google_sheet_url]);
 
   // Helper function to check if token is expired
   const isTokenExpired = (): boolean => {
@@ -102,7 +120,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
     };
     
     checkAuth();
-  }, []);
+  }, []); // Only run on mount
 
   // Extract sheet ID from URL
   const extractSheetId = (url: string): string | null => {
@@ -192,8 +210,9 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         }
       }, 1000);
       
-    } catch (error: any) {
-      setAuthError(error.message || 'Authentication failed');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
+      setAuthError(errorMessage);
       setIsAuthenticating(false);
     }
   };
@@ -216,9 +235,9 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
     }
     
     const accessToken = localStorage.getItem('google_access_token');
-    const refreshToken = localStorage.getItem('google_refresh_token');
+    const googleRefreshToken = localStorage.getItem('google_refresh_token');
     
-    if (!accessToken || !refreshToken) {
+    if (!accessToken || !googleRefreshToken) {
       setAuthError('Please authenticate with Google first');
       return;
     }
@@ -235,7 +254,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         },
         body: JSON.stringify({
           access_token: accessToken,
-          refresh_token: refreshToken,
+          refresh_token: googleRefreshToken,
           sheet_id: sheetId
         })
       });
@@ -251,8 +270,9 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
       // Update form data with Google Sheets info
       onGoogleAuthChange({
         google_sheet_id: sheetId,
+        google_sheet_url: sheetUrl,
         google_auth_token: accessToken,
-        google_refresh_token: refreshToken
+        google_refresh_token: googleRefreshToken
       });
       
       // Set database name based on sheet title
@@ -265,8 +285,9 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
       } as React.ChangeEvent<HTMLInputElement>;
       handleChange(event);
       
-    } catch (error: any) {
-      setAuthError(error.message || 'Failed to validate sheet');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to validate sheet';
+      setAuthError(errorMessage);
       setSheetInfo(null);
     } finally {
       setIsValidating(false);
@@ -301,9 +322,9 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
             <p className="font-medium mb-2">How to connect Google Sheets:</p>
             <ol className="list-decimal ml-4 space-y-1">
               <li>Click "Authenticate with Google" to sign in to your Google account</li>
-              <li>Grant read-only access to your Google Sheets</li>
+              <li><strong>Grant read-only</strong> access to your Google Sheets</li>
               <li>Paste your Google Sheets URL</li>
-              <li>Click "Validate Access" to verify the connection</li>
+              <li>Click "Connect" to connect with the sheet</li>
             </ol>
           </div>
         </div>
@@ -321,16 +342,16 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
             type="button"
             onClick={handleGoogleAuth}
             disabled={isAuthenticating}
-            className="neo-button w-full flex items-center justify-center gap-2"
+            className="neo-button-secondary w-full flex items-center justify-center gap-2"
           >
             {isAuthenticating ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin" />
                 <span>Authenticating...</span>
               </>
             ) : (
               <>
-                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
                 <span>Authenticate with Google</span>
               </>
             )}
@@ -338,7 +359,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         ) : (
           <div className="p-4 bg-green-50 border-2 border-green-200 rounded-lg">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <div>
                   <p className="font-medium text-green-800">Authenticated</p>
@@ -350,10 +371,13 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
               <button
                 type="button"
                 onClick={handleReAuth}
-                className="p-2 hover:bg-green-100 rounded-lg transition-colors"
-                title="Re-authenticate"
+                className="px-3 py-2 text-sm text-black hover:bg-green-100 hover:text-green-800 rounded-lg transition-colors border border-black hover:border-green-400"
+                title="Switch/Reconnect"
               >
-                <RefreshCw className="w-4 h-4 text-green-600" />
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4" />
+                  <span className="hidden sm:inline">Switch / Reconnect</span>
+                </div>
               </button>
             </div>
           </div>
@@ -365,7 +389,10 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         <div>
           <label className="block font-bold mb-2 text-lg">Google Sheets URL</label>
           <p className="text-gray-600 text-sm mb-4">
-            Paste the URL of your Google Sheet
+            {isEditMode && formData.google_sheet_url
+              ? "Connected Google Sheet URL (read-only)"
+              : "Paste the URL of your Google Sheet you want to connect"
+            }
           </p>
           
           <div className="flex gap-2">
@@ -374,21 +401,36 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
               value={sheetUrl}
               onChange={handleSheetUrlChange}
               placeholder="https://docs.google.com/spreadsheets/d/..."
-              className="neo-input flex-1"
-              disabled={isValidating}
+              className={`neo-input flex-1 ${isEditMode && formData.google_sheet_url ? 'bg-gray-100 text-gray-600' : ''}`}
+              disabled={isValidating || (isEditMode && Boolean(formData.google_sheet_url))}
+              title={isEditMode && formData.google_sheet_url ? "URL cannot be modified when editing existing connections" : ""}
             />
-            <button
-              type="button"
-              onClick={validateSheetAccess}
-              disabled={!sheetUrl || isValidating}
-              className="neo-button-secondary"
-            >
-              {isValidating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                'Validate Access'
-              )}
-            </button>
+            {isEditMode && formData.google_sheet_url ? (
+              <button
+                type="button"
+                onClick={onRefreshData}
+                disabled={!onRefreshData}
+                className="neo-button-secondary flex items-center gap-2"
+                title="Refresh data from Google Sheets"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh Data
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={validateSheetAccess}
+                disabled={!sheetUrl || isValidating}
+                className="neo-button-secondary"
+                title="Connect to Google Sheets"
+              >
+                {isValidating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Connect'
+                )}
+              </button>
+            )}
           </div>
           
           {sheetUrl && (
@@ -396,7 +438,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
               href={sheetUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+              className="mt-3 inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
             >
               Open in Google Sheets
               <ExternalLink className="w-3 h-3" />
@@ -410,17 +452,17 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         <div className="p-4 bg-gray-50 border-2 border-gray-200 rounded-lg">
           <h4 className="font-bold mb-3">Sheet Information</h4>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Title:</span>
+            <div className="flex gap-1">
+              <span className="text-gray-600">Sheet Name:</span>
               <span className="font-medium">{sheetInfo.title}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Number of sheets:</span>
+            <div className="flex gap-1">
+              <span className="text-gray-600">Number of pages:</span>
               <span className="font-medium">{sheetInfo.sheet_count}</span>
             </div>
             {sheetInfo.sheets && sheetInfo.sheets.length > 0 && (
               <div>
-                <span className="text-gray-600">Sheets:</span>
+                <span className="text-gray-600">Pages:</span>
                 <ul className="mt-1 ml-4 list-disc">
                   {sheetInfo.sheets.map((sheet: string, index: number) => (
                     <li key={index} className="text-gray-800">{sheet}</li>
