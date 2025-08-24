@@ -35,11 +35,6 @@ interface ChatWindowProps {
   onEditConnectionFromChatWindow?: () => void;
   userId?: string;
   userName?: string;
-  isVoiceMode?: boolean;
-  onVoiceModeChange?: (isActive: boolean) => void;
-  voiceSteps?: string[];
-  currentVoiceStep?: string;
-  onResetVoiceSteps?: () => void;
   recoVersion?: number;
 }
 
@@ -113,11 +108,6 @@ export default function ChatWindow({
   onEditConnectionFromChatWindow,
   userId,
   userName,
-  isVoiceMode,
-  onVoiceModeChange,
-  voiceSteps,
-  currentVoiceStep,
-  onResetVoiceSteps,
   recoVersion
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
@@ -1511,11 +1501,6 @@ export default function ChatWindow({
           chatId={chat.id}
           userId={userId || ''}
           userName={userName || ''}
-          isVoiceMode={isVoiceMode}
-          onVoiceModeChange={onVoiceModeChange}
-          voiceSteps={voiceSteps}
-          currentVoiceStep={currentVoiceStep}
-          onResetVoiceSteps={onResetVoiceSteps}
           isStreaming={messages.some(m => m.is_streaming)}
           onCancelStream={handleCancelStreamClick}
           prefillText={inputPrefill || ''}

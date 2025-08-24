@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
@@ -51,20 +51,9 @@ function AppContent() {
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
   const [isSettingUpSSE, setIsSettingUpSSE] = useState(false);
   const [isSelectingConnection, setIsSelectingConnection] = useState(false);
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [voiceSteps, setVoiceSteps] = useState<string[]>([]);
-  const [currentVoiceStep, setCurrentVoiceStep] = useState('');
-  const [, setVoiceResponseComplete] = useState(false);
-  const voiceResponseCompleteRef = useRef(false); // Immediate blocking with ref
   const [recoRefreshToken, setRecoRefreshToken] = useState(0);
   // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
 
-  const handleResetVoiceSteps = () => {
-    setVoiceSteps([]);
-    setCurrentVoiceStep('');
-    setVoiceResponseComplete(false);
-    voiceResponseCompleteRef.current = false;
-  };
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
@@ -501,8 +490,6 @@ function AppContent() {
     }
     
     console.log('handleSelectConnection happened in app.tsx', { id });
-    // Ensure voice mode is turned off when switching chats (always)
-    setIsVoiceMode(false);
     const currentConnection = selectedConnection;
     const connection = chats.find(c => c.id === id);
     if (connection) {
@@ -979,14 +966,6 @@ function AppContent() {
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            // Handle voice mode steps separately (only if response not complete)
-            if (isVoiceMode && !voiceResponseCompleteRef.current) {
-              console.log('Voice mode: processing step', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
-              setCurrentVoiceStep(response.data);
-              setVoiceSteps(prev => [...prev, response.data]);
-            } else if (isVoiceMode) {
-              console.log('Voice mode: IGNORING step after completion', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
-            } 
             if (!temporaryMessage ) {
                 console.log('ai-response-step -> creating new temp message');
             } else {
@@ -1024,23 +1003,6 @@ function AppContent() {
             if (response.data) {
               console.log('ai-response -> response.data', response.data);
 
-              // Handle voice mode response
-              if (isVoiceMode) {
-                console.log('AI response received - blocking further voice steps IMMEDIATELY');
-                // Mark response as complete to ignore further steps IMMEDIATELY using ref
-                voiceResponseCompleteRef.current = true; // ✅ Immediate blocking
-                setVoiceResponseComplete(true);
-                // Signal that response is ready in voice mode
-                setCurrentVoiceStep('AI Response Received!');
-                // Clear existing voice steps immediately to prevent showing old steps
-                setVoiceSteps([]);
-                // Clear voice steps after a delay - wait for VoiceMode component to complete its flow
-                setTimeout(() => {
-                  setCurrentVoiceStep('');
-                  setVoiceResponseComplete(false); // Reset for next message
-                  voiceResponseCompleteRef.current = false; // Reset ref too
-                }, 5000); // Increased to 5 seconds to allow VoiceMode to handle restart
-              }
 
               // Check if this is a response to an edited message
               const isEditedResponse = response.data.user_message_id && 
@@ -1171,16 +1133,6 @@ function AppContent() {
             break;
 
           case 'ai-response-error':
-            // Handle voice mode error
-            if (isVoiceMode) {
-              const errorMessage = typeof response.data === 'object' ? response.data.error : response.data;
-              setCurrentVoiceStep(`Error: ${errorMessage}`);
-              // Clear voice steps quickly and return to idle listening state
-              setTimeout(() => {
-                setVoiceSteps([]);
-                setCurrentVoiceStep('');
-              }, 1000);
-            }
 
             // Show error message instead of temporary message
             setMessages(prev => {
@@ -1535,11 +1487,6 @@ function AppContent() {
             onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
             userId={user?.id || ''}
             userName={user?.username || ''}
-            isVoiceMode={isVoiceMode}
-            onVoiceModeChange={setIsVoiceMode}
-            voiceSteps={voiceSteps}
-            currentVoiceStep={currentVoiceStep}
-            onResetVoiceSteps={handleResetVoiceSteps}
             recoVersion={recoRefreshToken}
           />
         ) : (
