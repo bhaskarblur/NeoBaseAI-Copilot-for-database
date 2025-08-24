@@ -1,9 +1,11 @@
 import { Boxes, Github, Menu, X } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 const Navbar = ({ forks }: { forks: number }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const location = useLocation()
+  const isLegalPage = location.pathname === '/privacy' || location.pathname === '/terms'
 
 
   const formatForkCount = (count: number): string => {
@@ -50,10 +52,18 @@ const Navbar = ({ forks }: { forks: number }) => {
 
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center gap-6">
-              <Link to="/enterprise" className="font-medium text-yellow-600 hover:text-yellow-800 transition-colors">Enterprise</Link>
-              <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Features</a>
-              <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Technologies</a>
-              <a href="#use-cases" onClick={(e) => handleSmoothScroll(e, '#use-cases')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Use Cases</a>
+              {isLegalPage ? (
+                // Show only Home link on Privacy/Terms pages
+                <Link to="/" className="font-medium hover:text-gray-600 transition-colors">Home</Link>
+              ) : (
+                // Show full navigation on other pages
+                <>
+                  <Link to="/enterprise" className="font-medium text-yellow-600 hover:text-yellow-800 transition-colors">Enterprise</Link>
+                  <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Features</a>
+                  <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Technologies</a>
+                  <a href="#use-cases" onClick={(e) => handleSmoothScroll(e, '#use-cases')} className="font-medium hover:text-gray-600 transition-colors cursor-pointer">Use Cases</a>
+                </>
+              )}
               
               {/* Product Hunt Button */}
               <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{width: '220px', height: '48px'}} width="220" height="48" /></a>
@@ -88,10 +98,18 @@ const Navbar = ({ forks }: { forks: number }) => {
           {isMenuOpen && (
             <div className="md:hidden mt-4 py-4 border-t border-gray-200">
               <div className="flex flex-col gap-4">
-                <Link to="/enterprise" onClick={() => setIsMenuOpen(false)} className="font-medium text-yellow-600 hover:text-yellow-800 transition-colors py-2">Enterprise</Link>
-                <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Features</a>
-                <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Technologies</a>
-                <a href='#use-cases' onClick={(e) => handleSmoothScroll(e, '#use-cases')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Use-Cases</a>
+                {isLegalPage ? (
+                  // Show only Home link on Privacy/Terms pages
+                  <Link to="/" onClick={() => setIsMenuOpen(false)} className="font-medium hover:text-gray-600 transition-colors py-2">Home</Link>
+                ) : (
+                  // Show full navigation on other pages
+                  <>
+                    <Link to="/enterprise" onClick={() => setIsMenuOpen(false)} className="font-medium text-yellow-600 hover:text-yellow-800 transition-colors py-2">Enterprise</Link>
+                    <a href="#features" onClick={(e) => handleSmoothScroll(e, '#features')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Features</a>
+                    <a href="#technologies" onClick={(e) => handleSmoothScroll(e, '#technologies')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Technologies</a>
+                    <a href='#use-cases' onClick={(e) => handleSmoothScroll(e, '#use-cases')} className="font-medium hover:text-gray-600 transition-colors py-2 cursor-pointer">Use-Cases</a>
+                  </>
+                )}
                 
                 <div className="flex flex-col gap-3 mt-2">
                   {/* Product Hunt Button */}

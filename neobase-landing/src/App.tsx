@@ -11,6 +11,8 @@ import UseCasesSection from './components/UseCasesSection'
 import FAQSection from './components/FAQSection'
 import ContributeSection from './components/ContributeSection'
 import EnterprisePage from './components/EnterprisePage'
+import PrivacyPolicy from './components/PrivacyPolicy'
+import TermsOfService from './components/TermsOfService'
 import ScrollToTop from './components/ScrollToTop'
 import Clarity from '@microsoft/clarity';
 import { initializeApp } from "firebase/app";
@@ -76,6 +78,8 @@ function fetchStats() {
           </div>
         } />
         <Route path="/enterprise" element={<EnterprisePage />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
       </Routes>
     </Router>
   )
