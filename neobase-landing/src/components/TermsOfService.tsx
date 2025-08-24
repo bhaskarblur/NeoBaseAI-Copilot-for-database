@@ -3,11 +3,13 @@ import { ArrowLeft, FileText, Database, Users, AlertTriangle, Scale, Shield, Che
 import Navbar from './Navbar';
 import Footer from './Footer';
 import FloatingBackground from './FloatingBackground';
+import { useGitHubStats } from '../hooks/useGitHubStats';
 
 const TermsOfService = () => {
+  const { forks } = useGitHubStats();
   return (
     <div className="min-h-screen bg-[#FFDB58]/10">
-      <Navbar forks={0} />
+      <Navbar forks={forks} />
       
       {/* Main Content */}
       <main className="relative overflow-hidden">

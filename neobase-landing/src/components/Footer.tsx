@@ -1,4 +1,5 @@
 import { Github } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import FloatingBackground from './FloatingBackground';
 
 const Footer = () => {
@@ -44,6 +45,18 @@ const Footer = () => {
               </svg>
               <span>Product Hunt</span>
             </a>
+            <Link 
+              to="/privacy"
+              className="hover:text-[#FFDB58] transition-colors"
+            >
+              Privacy
+            </Link>
+            <Link 
+              to="/terms"
+              className="hover:text-[#FFDB58] transition-colors"
+            >
+              Terms
+            </Link>
             <a 
               href="https://github.com/bhaskarblur/neobase-ai-dba/issues" 
               target="_blank" 
