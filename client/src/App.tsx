@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
@@ -51,20 +51,9 @@ function AppContent() {
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
   const [isSettingUpSSE, setIsSettingUpSSE] = useState(false);
   const [isSelectingConnection, setIsSelectingConnection] = useState(false);
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [voiceSteps, setVoiceSteps] = useState<string[]>([]);
-  const [currentVoiceStep, setCurrentVoiceStep] = useState('');
-  const [, setVoiceResponseComplete] = useState(false);
-  const voiceResponseCompleteRef = useRef(false); // Immediate blocking with ref
   const [recoRefreshToken, setRecoRefreshToken] = useState(0);
   // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
 
-  const handleResetVoiceSteps = () => {
-    setVoiceSteps([]);
-    setCurrentVoiceStep('');
-    setVoiceResponseComplete(false);
-    voiceResponseCompleteRef.current = false;
-  };
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
@@ -501,8 +490,6 @@ function AppContent() {
     }
     
     console.log('handleSelectConnection happened in app.tsx', { id });
-    // Ensure voice mode is turned off when switching chats (always)
-    setIsVoiceMode(false);
     const currentConnection = selectedConnection;
     const connection = chats.find(c => c.id === id);
     if (connection) {
@@ -782,8 +769,28 @@ function AppContent() {
   };
 
   // Add helper function for animating queries
-  const animateQueryTyping = async (messageId: string, queries: QueryResult[]) => {
+  const animateQueryTyping = async (messageId: string, queries: QueryResult[], nonTechMode: boolean = false) => {
+    console.log('animateQueryTyping -> NonTechMode:', nonTechMode);
     if (!queries || queries.length === 0) return;
+
+    // If in non-tech mode, set queries directly without animation
+    if (nonTechMode) {
+      setMessages(prev => {
+        return prev.map(msg => {
+          if (msg.id === messageId) {
+            return {
+              ...msg,
+              queries: queries,
+              is_streaming: false,
+              // Preserve action buttons
+              action_buttons: msg.action_buttons
+            };
+          }
+          return msg;
+        });
+      });
+      return;
+    }
 
     // First ensure queries are initialized with empty strings
     setMessages(prev => {
@@ -959,14 +966,6 @@ function AppContent() {
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            // Handle voice mode steps separately (only if response not complete)
-            if (isVoiceMode && !voiceResponseCompleteRef.current) {
-              console.log('Voice mode: processing step', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
-              setCurrentVoiceStep(response.data);
-              setVoiceSteps(prev => [...prev, response.data]);
-            } else if (isVoiceMode) {
-              console.log('Voice mode: IGNORING step after completion', response.data, 'voiceResponseComplete:', voiceResponseCompleteRef.current);
-            } 
             if (!temporaryMessage ) {
                 console.log('ai-response-step -> creating new temp message');
             } else {
@@ -1004,23 +1003,6 @@ function AppContent() {
             if (response.data) {
               console.log('ai-response -> response.data', response.data);
 
-              // Handle voice mode response
-              if (isVoiceMode) {
-                console.log('AI response received - blocking further voice steps IMMEDIATELY');
-                // Mark response as complete to ignore further steps IMMEDIATELY using ref
-                voiceResponseCompleteRef.current = true; // ✅ Immediate blocking
-                setVoiceResponseComplete(true);
-                // Signal that response is ready in voice mode
-                setCurrentVoiceStep('AI Response Received!');
-                // Clear existing voice steps immediately to prevent showing old steps
-                setVoiceSteps([]);
-                // Clear voice steps after a delay - wait for VoiceMode component to complete its flow
-                setTimeout(() => {
-                  setCurrentVoiceStep('');
-                  setVoiceResponseComplete(false); // Reset for next message
-                  voiceResponseCompleteRef.current = false; // Reset ref too
-                }, 5000); // Increased to 5 seconds to allow VoiceMode to handle restart
-              }
 
               // Check if this is a response to an edited message
               const isEditedResponse = response.data.user_message_id && 
@@ -1053,10 +1035,12 @@ function AppContent() {
                         id: msg.id, // Keep the original ID
                         content: '', // Reset content to empty for animation
                         action_buttons: response.data.action_buttons, // Update action buttons from response
-                        queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings
+                        queries: response.data.non_tech_mode 
+                          ? response.data.queries || [] // In non-tech mode, set queries directly
+                          : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                         is_loading: false,
                         loading_steps: [],
-                        is_streaming: true,
+                        is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
                         action_at: response.data.action_at,
@@ -1072,7 +1056,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(existingMessage.id, response.data.queries);
+                  await animateQueryTyping(existingMessage.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming
@@ -1098,10 +1082,12 @@ function AppContent() {
                   type: 'assistant' as const,
                   content: '',
                   action_buttons: response.data.action_buttons,
-                  queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [],
+                  queries: response.data.non_tech_mode 
+                    ? response.data.queries || [] // In non-tech mode, set queries directly
+                    : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                   is_loading: false,
                   loading_steps: [], // Clear loading steps for final message
-                  is_streaming: true,
+                  is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
                   action_at: response.data.action_at,
@@ -1120,7 +1106,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(response.data.id, response.data.queries);
+                  await animateQueryTyping(response.data.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming for new messages
@@ -1147,16 +1133,6 @@ function AppContent() {
             break;
 
           case 'ai-response-error':
-            // Handle voice mode error
-            if (isVoiceMode) {
-              const errorMessage = typeof response.data === 'object' ? response.data.error : response.data;
-              setCurrentVoiceStep(`Error: ${errorMessage}`);
-              // Clear voice steps quickly and return to idle listening state
-              setTimeout(() => {
-                setVoiceSteps([]);
-                setCurrentVoiceStep('');
-              }, 1000);
-            }
 
             // Show error message instead of temporary message
             setMessages(prev => {
@@ -1511,11 +1487,6 @@ function AppContent() {
             onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
             userId={user?.id || ''}
             userName={user?.username || ''}
-            isVoiceMode={isVoiceMode}
-            onVoiceModeChange={setIsVoiceMode}
-            voiceSteps={voiceSteps}
-            currentVoiceStep={currentVoiceStep}
-            onResetVoiceSteps={handleResetVoiceSteps}
             recoVersion={recoRefreshToken}
           />
         ) : (
