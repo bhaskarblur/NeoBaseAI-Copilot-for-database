@@ -3,6 +3,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Facebook-like shimmer skeleton */
+.fb-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.fb-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  /* Stronger highlight for better visibility */
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.85) 35%,
+    rgba(255,255,255,0.97) 50%,
+    rgba(255,255,255,0.85) 65%,
+    rgba(255,255,255,0) 100%
+  );
+  animation: fb-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes fb-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 /* Custom animations */
 @keyframes fadeIn {
   from {

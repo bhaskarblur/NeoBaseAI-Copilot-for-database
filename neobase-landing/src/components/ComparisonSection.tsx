@@ -18,7 +18,7 @@ const ComparisonSection: React.FC = () => {
       highlight: true
     },
     { 
-      feature: "Multi-Database Support", 
+      feature: "Multi-Source Support", 
       neobase: true, 
       traditional: false 
     },

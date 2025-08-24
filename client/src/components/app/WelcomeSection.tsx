@@ -84,7 +84,7 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
         <Database className="w-6 h-6 text-black" />
       </div>
       <h3 className="text-lg font-bold mb-2">
-        Multi-Database Support
+        Multi-Source Support
       </h3>
       <p className="text-gray-600">
         Connect to PostgreSQL, MySQL, MongoDB, Redis, and more. One interface for all your databases.

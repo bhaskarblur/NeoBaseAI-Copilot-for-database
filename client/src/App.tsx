@@ -52,6 +52,9 @@ function AppContent() {
   const [newlyCreatedChat, setNewlyCreatedChat] = useState<Chat | null>(null);
   const [isSettingUpSSE, setIsSettingUpSSE] = useState(false);
   const [isSelectingConnection, setIsSelectingConnection] = useState(false);
+  const [recoRefreshToken, setRecoRefreshToken] = useState(0);
+  // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
+
   
   // Debug useEffect for isSSEReconnecting state changes
   useEffect(() => {
@@ -697,10 +700,8 @@ function AppContent() {
       console.log('handleCancelStream -> streamId', streamId);
       await chatService.cancelStream(selectedConnection.id, streamId);
 
-      // Remove temporary streaming message
-      setMessages(prev => {
-        return prev.filter(msg => !(msg.is_streaming && msg.id === 'temp'));
-      });
+      // Remove any temporary streaming messages
+      setMessages(prev => prev.filter(msg => !msg.is_streaming));
 
       // Set isStreaming to false for all messages
       setMessages(prev => {
@@ -769,8 +770,28 @@ function AppContent() {
   };
 
   // Add helper function for animating queries
-  const animateQueryTyping = async (messageId: string, queries: QueryResult[]) => {
+  const animateQueryTyping = async (messageId: string, queries: QueryResult[], nonTechMode: boolean = false) => {
+    console.log('animateQueryTyping -> NonTechMode:', nonTechMode);
     if (!queries || queries.length === 0) return;
+
+    // If in non-tech mode, set queries directly without animation
+    if (nonTechMode) {
+      setMessages(prev => {
+        return prev.map(msg => {
+          if (msg.id === messageId) {
+            return {
+              ...msg,
+              queries: queries,
+              is_streaming: false,
+              // Preserve action buttons
+              action_buttons: msg.action_buttons
+            };
+          }
+          return msg;
+        });
+      });
+      return;
+    }
 
     // First ensure queries are initialized with empty strings
     setMessages(prev => {
@@ -894,7 +915,7 @@ function AppContent() {
 
         console.log('ai-response-step -> creating new temp message');
         const tempMsg: Message = {
-          id: `temp`,
+          id: `temp-${Date.now()}`,
           type: 'assistant',
           content: '',
           queries: [],
@@ -947,40 +968,42 @@ function AppContent() {
             await new Promise(resolve => setTimeout(resolve, 500));
 
             if (!temporaryMessage ) {
-              console.log('ai-response-step -> creating new temp message');
+                console.log('ai-response-step -> creating new temp message');
             } else {
-              console.log('ai-response-step -> updating existing temp message');
-              // Update the existing message with new step
-              setMessages(prev => {
-                // Find the streaming message
-                const streamingMessage = prev.find(msg => msg.is_streaming);
-                if (!streamingMessage) return prev;
+                console.log('ai-response-step -> updating existing temp message');
+                // Update the existing message with new step
+                setMessages(prev => {
+                  // Find the most recent streaming message
+                  const streamingCandidates = prev.filter(msg => msg.is_streaming);
+                  const streamingMessage = streamingCandidates[streamingCandidates.length - 1];
+                  if (!streamingMessage) return prev;
 
-                // No need to update the message if the step is NeoBase is analyzing your request..
-                if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
-                  return prev;
-                }
+                  // No need to update the message if the step is NeoBase is analyzing your request..
+                  if (streamingMessage.loading_steps && streamingMessage.loading_steps.length > 0 && response.data === 'NeoBase is analyzing your request..') {
+                    return prev;
+                  }
 
-                // Create updated message with new step
-                const updatedMessage = {
-                  ...streamingMessage,
-                  loading_steps: [
-                    ...(streamingMessage.loading_steps || []).map((step: LoadingStep) => ({ ...step, done: true })),
-                    { text: response.data, done: false }
-                  ]
-                };
+                  // Create updated message with new step
+                  const updatedMessage = {
+                    ...streamingMessage,
+                    loading_steps: [
+                      ...(streamingMessage.loading_steps || []).map((step: LoadingStep) => ({ ...step, done: true })),
+                      { text: response.data, done: false }
+                    ]
+                  };
 
-                // Replace the streaming message in the array
-                return prev.map(msg =>
-                  msg.id === streamingMessage.id ? updatedMessage : msg
-                );
-              });
+                  // Replace the streaming message in the array
+                  return prev.map(msg =>
+                    msg.id === streamingMessage.id ? updatedMessage : msg
+                  );
+                });
             }
             break;
 
           case 'ai-response':
             if (response.data) {
               console.log('ai-response -> response.data', response.data);
+
 
               // Check if this is a response to an edited message
               const isEditedResponse = response.data.user_message_id && 
@@ -1013,10 +1036,12 @@ function AppContent() {
                         id: msg.id, // Keep the original ID
                         content: '', // Reset content to empty for animation
                         action_buttons: response.data.action_buttons, // Update action buttons from response
-                        queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings
+                        queries: response.data.non_tech_mode 
+                          ? response.data.queries || [] // In non-tech mode, set queries directly
+                          : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                         is_loading: false,
                         loading_steps: [],
-                        is_streaming: true,
+                        is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
                         action_at: response.data.action_at,
@@ -1032,7 +1057,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(existingMessage.id, response.data.queries);
+                  await animateQueryTyping(existingMessage.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming
@@ -1058,10 +1083,12 @@ function AppContent() {
                   type: 'assistant' as const,
                   content: '',
                   action_buttons: response.data.action_buttons,
-                  queries: response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [],
+                  queries: response.data.non_tech_mode 
+                    ? response.data.queries || [] // In non-tech mode, set queries directly
+                    : response.data.queries?.map((q: QueryResult) => ({...q, query: ''})) || [], // Initialize queries with empty strings for animation
                   is_loading: false,
                   loading_steps: [], // Clear loading steps for final message
-                  is_streaming: true,
+                  is_streaming: !response.data.non_tech_mode, // Only stream if not in non-tech mode
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
                   action_at: response.data.action_at,
@@ -1080,7 +1107,7 @@ function AppContent() {
                 
                 // Animate queries
                 if (response.data.queries && response.data.queries.length > 0) {
-                  await animateQueryTyping(response.data.id, response.data.queries);
+                  await animateQueryTyping(response.data.id, response.data.queries, response.data.non_tech_mode);
                 }
                 
                 // Set final state - no longer streaming for new messages
@@ -1099,11 +1126,15 @@ function AppContent() {
                   });
                 });
               }
+
+              // Trigger recommendations refresh shimmer/load in ChatWindow
+              setRecoRefreshToken(prev => prev + 1);
             }
             setTemporaryMessage(null);
             break;
 
           case 'ai-response-error':
+
             // Show error message instead of temporary message
             setMessages(prev => {
               const withoutTemp = prev.filter(msg => !msg.is_streaming);
@@ -1119,6 +1150,8 @@ function AppContent() {
               }, ...withoutTemp];
             });
             setTemporaryMessage(null);
+            // Trigger recommendations refresh on error
+            setRecoRefreshToken(prev => prev + 1);
 
             break;
 
@@ -1326,25 +1359,6 @@ function AppContent() {
     }
   };
 
-  const _handleUpdateAutoExecuteQuery = async (chatId: string, autoExecuteQuery: boolean): Promise<void> => {
-    try {
-      const updatedChat = await chatService.updateAutoExecuteQuery(chatId, autoExecuteQuery);
-      
-      // Update the chat in the state
-      setChats(prev => prev.map(chat => 
-        updatedChat.id === chatId ? { ...chat, auto_execute_query: autoExecuteQuery } : chat
-      ));
-      
-      // If this is the selected connection, update it too
-      if (selectedConnection?.id === chatId) {
-        setSelectedConnection(prev => prev ? { ...prev, auto_execute_query: autoExecuteQuery } : prev);
-      }
-      
-    } catch (error: any) {
-      console.error('Failed to update auto execute query setting:', error);
-      toast.error(error.message, errorToast);
-    }
-  };
 
   const handleEditConnectionFromChatWindow = () => {
     setIsEditingConnection(true);
@@ -1474,6 +1488,7 @@ function AppContent() {
             onEditConnectionFromChatWindow={handleEditConnectionFromChatWindow}
             userId={user?.id || ''}
             userName={user?.username || ''}
+            recoVersion={recoRefreshToken}
           />
         ) : (
           <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />

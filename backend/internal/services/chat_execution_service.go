@@ -2583,13 +2583,13 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		recommendations = s.getFallbackRecommendations(connInfo.Config.Type)
 	}
 
-	// Ensure we have exactly 3 recommendations
-	if len(recommendations) > 3 {
-		recommendations = recommendations[:3]
-	} else if len(recommendations) < 3 {
-		// Add fallbacks to reach 3
+	// Ensure we have exactly 4 recommendations
+	if len(recommendations) > 4 {
+		recommendations = recommendations[:4]
+	} else if len(recommendations) < 4 {
+		// Add fallbacks to reach 4
 		fallbacks := s.getFallbackRecommendations(connInfo.Config.Type)
-		for i := len(recommendations); i < 3 && i < len(fallbacks); i++ {
+		for i := len(recommendations); i < 4 && i < len(fallbacks); i++ {
 			recommendations = append(recommendations, fallbacks[i])
 		}
 	}

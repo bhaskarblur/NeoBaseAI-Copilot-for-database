@@ -1093,9 +1093,9 @@ var GeminiMongoDBLLMResponseSchema = &genai.Schema{
 }
 
 // Query Recommendations Prompt and Schema
-const GeminiRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 3 diverse and practical question recommendations that users can ask about their database.
+const GeminiRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 4 diverse and practical question recommendations that users can ask about their database.
 
-Generate exactly 3 different question recommendations that are:
+Generate exactly 4 different question recommendations that are:
 - Diverse (data exploration, analytics, insights, etc.)
 - Practical and commonly useful
 - Natural language questions that users would ask
@@ -1127,7 +1127,7 @@ var GeminiRecommendationsResponseSchema = &genai.Schema{
 	Properties: map[string]*genai.Schema{
 		"recommendations": &genai.Schema{
 			Type:        genai.TypeArray,
-			Description: "An array of exactly 3 query recommendations",
+			Description: "An array of exactly 4 query recommendations",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},
