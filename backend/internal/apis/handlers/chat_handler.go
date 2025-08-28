@@ -47,6 +47,61 @@ func (h *ChatHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Custom validation based on connection type
+	if req.Connection.Type != "spreadsheet" && req.Connection.Type != "google_sheets" {
+		// For database connections, validate required fields
+		if req.Connection.Host == "" {
+			errorMsg := "Host is required for database connections"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+		if req.Connection.Username == "" {
+			errorMsg := "Username is required for database connections"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+		if req.Connection.Database == "" {
+			errorMsg := "Database is required for database connections"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+	} else if req.Connection.Type == "google_sheets" {
+		// For Google Sheets, validate specific fields
+		if req.Connection.GoogleSheetID == nil || *req.Connection.GoogleSheetID == "" {
+			errorMsg := "Google Sheet ID is required"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+		if req.Connection.GoogleAuthToken == nil || *req.Connection.GoogleAuthToken == "" {
+			errorMsg := "Google authentication token is required"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+		if req.Connection.GoogleRefreshToken == nil || *req.Connection.GoogleRefreshToken == "" {
+			errorMsg := "Google refresh token is required"
+			c.JSON(http.StatusBadRequest, dtos.Response{
+				Success: false,
+				Error:   &errorMsg,
+			})
+			return
+		}
+	}
+
 	userID := c.GetString("userID")
 	response, statusCode, err := h.chatService.Create(userID, &req)
 	if err != nil {
@@ -997,6 +1052,33 @@ func (h *ChatHandler) GetQueryRecommendations(c *gin.Context) {
 	c.JSON(http.StatusOK, dtos.Response{
 		Success: true,
 		Data:    recommendations,
+	})
+}
+
+// GetImportMetadata gets import metadata for a chat
+// @Summary Get import metadata
+// @Description Get import metadata for a Google Sheets or spreadsheet connection
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Success 200 {object} dtos.Response
+func (h *ChatHandler) GetImportMetadata(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	metadata, statusCode, err := h.chatService.GetImportMetadata(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    metadata,
 	})
 }
 

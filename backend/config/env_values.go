@@ -71,6 +71,11 @@ type Environment struct {
 	SpreadsheetPostgresPassword   string
 	SpreadsheetPostgresSSLMode    string
 	SpreadsheetDataEncryptionKey  string
+
+	// Google OAuth configs
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 }
 
 var Env Environment
@@ -107,7 +112,7 @@ func LoadEnv() error {
 	Env.MongoDatabaseName = getRequiredEnv("NEOBASE_MONGODB_NAME", "neobase")
 	Env.RedisHost = getRequiredEnv("NEOBASE_REDIS_HOST", "localhost")
 	Env.RedisPort = getRequiredEnv("NEOBASE_REDIS_PORT", "6379")
-	Env.RedisUsername = getRequiredEnv("NEOBASE_REDIS_USERNAME", "neobase")
+	Env.RedisUsername = getEnvWithDefault("NEOBASE_REDIS_USERNAME", "")
 	Env.RedisPassword = getRequiredEnv("NEOBASE_REDIS_PASSWORD", "default")
 
 	// Example DB For Development Environment
@@ -150,6 +155,11 @@ func LoadEnv() error {
 	Env.SpreadsheetPostgresPassword = getRequiredEnv("SPREADSHEET_POSTGRES_PASSWORD", "")
 	Env.SpreadsheetPostgresSSLMode = getEnvWithDefault("SPREADSHEET_POSTGRES_SSL_MODE", "disable")
 	Env.SpreadsheetDataEncryptionKey = getRequiredEnv("SPREADSHEET_DATA_ENCRYPTION_KEY", "spreadsheet_data_key_32bytes")
+
+	// Google OAuth configs
+	Env.GoogleClientID = getEnvWithDefault("GOOGLE_CLIENT_ID", "")
+	Env.GoogleClientSecret = getEnvWithDefault("GOOGLE_CLIENT_SECRET", "")
+	Env.GoogleRedirectURL = getEnvWithDefault("GOOGLE_REDIRECT_URL", "http://localhost:5173/auth/google/callback")
 
 	return validateConfig()
 }

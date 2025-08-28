@@ -25,7 +25,7 @@ export interface FileUpload {
 }
 
 export interface Connection {
-    type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet';
+    type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets';
     host: string;
     port: string;
     username: string;
@@ -48,6 +48,11 @@ export interface Connection {
     // Spreadsheet specific fields
     file_uploads?: FileUpload[];
     schema_name?: string; // Schema name in the CSV PostgreSQL database
+    // Google Sheets specific fields
+    google_sheet_id?: string;
+    google_sheet_url?: string;
+    google_auth_token?: string;
+    google_refresh_token?: string;
 }
 
 export interface Chat {

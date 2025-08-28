@@ -9,6 +9,12 @@ type SpreadsheetUploadResponse struct {
 	ColumnCount int       `json:"column_count"`
 	SizeBytes   int64     `json:"size_bytes"`
 	UploadedAt  time.Time `json:"uploaded_at"`
+	// Error reporting fields
+	TotalRowsProcessed int      `json:"total_rows_processed"`
+	SuccessfulRows     int      `json:"successful_rows"`
+	FailedRows         int      `json:"failed_rows"`
+	Errors             []string `json:"errors,omitempty"`
+	HasErrors          bool     `json:"has_errors"`
 }
 
 // SpreadsheetTableDataResponse represents paginated table data

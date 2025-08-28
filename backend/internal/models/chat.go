@@ -27,6 +27,12 @@ type Connection struct {
 	SSLKeyURL      *string `bson:"ssl_key_url,omitempty" json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `bson:"ssl_root_cert_url,omitempty" json:"ssl_root_cert_url,omitempty"`
 
+	// Google Sheets specific fields
+	GoogleSheetID      *string `bson:"google_sheet_id,omitempty" json:"google_sheet_id,omitempty"`
+	GoogleSheetURL     *string `bson:"google_sheet_url,omitempty" json:"google_sheet_url,omitempty"` // Encrypted, show in JSON for user reference
+	GoogleAuthToken    *string `bson:"google_auth_token,omitempty" json:"-"` // Hide in JSON
+	GoogleRefreshToken *string `bson:"google_refresh_token,omitempty" json:"-"` // Hide in JSON
+
 	Base `bson:",inline"`
 }
 
