@@ -172,7 +172,6 @@ To enable Google Sheets connectivity, you need to set up Google OAuth credential
      - **Add the following scopes in the "Scopes" section**:
        - `https://www.googleapis.com/auth/spreadsheets.readonly` - Required for reading Google Sheets data
        - `https://www.googleapis.com/auth/userinfo.email` - Required for user identification
-       - `https://www.googleapis.com/auth/userinfo.profile` - Required for user profile information
      - Add test users if needed (add your Gmail address for testing)
 
 5. **Configure OAuth Client ID**:
