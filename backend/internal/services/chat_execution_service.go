@@ -137,13 +137,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if !synchronous || allowSSEUpdates {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Fetching relevant data points & structure for the query..",
+			Data:  "Fetching relevant data points & structure for the request..",
 		})
 
 		// Send initial processing message
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Generating an optimized query & results for the request..",
+			Data:  "Running the workflow & fetching the results..",
 		})
 	}
 	if checkCancellation() {
@@ -172,7 +172,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if !synchronous || allowSSEUpdates {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Analyzing the criticality of the query & if roll back is possible..",
+			Data:  "Analyzing the criticality of the request..",
 		})
 	}
 
@@ -2044,7 +2044,7 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			if msgResp.Queries != nil {
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-step",
-					Data:  "Executing the needful query now.",
+					Data:  "Executing the needful operations now.",
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {
