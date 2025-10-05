@@ -29,8 +29,8 @@ export function useGitHubStats() {
       .catch(error => {
         console.error("Error fetching GitHub stats:", error);
         // Set fallback values in case of error
-        setStars(14); // Current star count from search results
-        setForks(4);  // Current fork count from search results
+        setStars(590); // Current star count from search results
+        setForks(48);  // Current fork count from search results
       });
   }
 
