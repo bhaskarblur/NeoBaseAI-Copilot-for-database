@@ -145,7 +145,7 @@ const EnterprisePage = () => {
         </nav>
         
         {/* Fundraising Banner */}
-        <div className="bg-black text-white py-2 pt-1.5 px-6 md:px-8 lg:px-12 border-b-2 border-gray-700">
+        {/* <div className="bg-black text-white py-2 pt-1.5 px-6 md:px-8 lg:px-12 border-b-2 border-gray-700">
           <div className="container mx-auto max-w-7xl">
             <div className="flex items-center justify-center text-center">
               <p className="text-sm md:text-base font-medium leading-relaxed">
@@ -163,7 +163,7 @@ const EnterprisePage = () => {
               </p>
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Main Content */}
         <section className="py-12 sm:py-16 md:py-20 lg:py-28 relative">

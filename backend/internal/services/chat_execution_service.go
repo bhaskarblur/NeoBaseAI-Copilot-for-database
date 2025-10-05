@@ -2,9 +2,12 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
+	mathrand "math/rand"
 	"neobase-ai/internal/apis/dtos"
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
@@ -2511,7 +2514,7 @@ func (s *chatService) removeFixErrorButton(msg *models.Message) {
 	}
 }
 
-// GetQueryRecommendations generates 3 random query recommendations based on database schema and nature
+// GetQueryRecommendations generates 4 random query recommendations with Redis caching
 func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error) {
 	log.Printf("ChatService -> GetQueryRecommendations -> userID: %s, chatID: %s", userID, chatID)
 
@@ -2531,6 +2534,33 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch chat: %v", err)
 	}
+
+	// Try to get cached recommendations first
+	cacheKey := fmt.Sprintf("recommendations:%s", chatID)
+	cachedData, err := s.redisRepo.Get(cacheKey, ctx)
+	if err == nil && cachedData != "" {
+		log.Printf("ChatService -> GetQueryRecommendations -> Found cached recommendations")
+
+		// Parse cached recommendations
+		var cachedRecs dtos.CachedQueryRecommendations
+		if err := json.Unmarshal([]byte(cachedData), &cachedRecs); err == nil {
+			// Select 4 random recommendations from cache
+			selectedRecs, err := s.selectAndMarkRecommendations(&cachedRecs)
+			if err != nil {
+				log.Printf("ChatService -> GetQueryRecommendations -> Error selecting from cache: %v", err)
+			} else {
+				// Update cache with marked recommendations
+				updatedCacheData, _ := json.Marshal(cachedRecs)
+				s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+
+				return &dtos.QueryRecommendationsResponse{
+					Recommendations: selectedRecs,
+				}, http.StatusOK, nil
+			}
+		}
+	}
+
+	log.Printf("ChatService -> GetQueryRecommendations -> No cache found, generating new recommendations")
 
 	// Get recent LLM messages for context
 	llmMessages, err := s.llmRepo.GetByChatID(chatObjID)
@@ -2558,19 +2588,16 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 	}
 
 	// Extract recommendations
-	var recommendations []dtos.QueryRecommendation
+	var recommendations []dtos.CachedQueryRecommendation
 	if recsInterface, ok := jsonResponse["recommendations"]; ok {
 		if recsArray, ok := recsInterface.([]interface{}); ok {
 			for _, recInterface := range recsArray {
 				if recMap, ok := recInterface.(map[string]interface{}); ok {
-					rec := dtos.QueryRecommendation{}
-					if text, ok := recMap["text"].(string); ok {
-						rec.Text = text
-					}
-
-					// Only add if we have text
-					if rec.Text != "" {
-						recommendations = append(recommendations, rec)
+					if text, ok := recMap["text"].(string); ok && text != "" {
+						recommendations = append(recommendations, dtos.CachedQueryRecommendation{
+							Text:   text,
+							Picked: false,
+						})
 					}
 				}
 			}
@@ -2579,58 +2606,115 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	// Fallback recommendations if LLM didn't provide proper format
 	if len(recommendations) == 0 {
-		log.Printf("ChatService -> GetQueryRecommendations -> No valid recommendations from LLM, using fallbacks")
-		recommendations = s.getFallbackRecommendations(connInfo.Config.Type)
-	}
-
-	// Ensure we have exactly 4 recommendations
-	if len(recommendations) > 4 {
-		recommendations = recommendations[:4]
-	} else if len(recommendations) < 4 {
-		// Add fallbacks to reach 4
-		fallbacks := s.getFallbackRecommendations(connInfo.Config.Type)
-		for i := len(recommendations); i < 4 && i < len(fallbacks); i++ {
-			recommendations = append(recommendations, fallbacks[i])
+		log.Printf("ChatService -> GetQueryRecommendations -> No valid recommendations from LLM")
+		// Add basic fallback recommendations
+		fallbackRecommendations := []string{
+			"What kind of data do I have in this database?",
+			"Show me the main tables and what they contain",
+			"How can I explore my data effectively?",
+			"What insights can I get from my database?",
+		}
+		for _, text := range fallbackRecommendations {
+			recommendations = append(recommendations, dtos.CachedQueryRecommendation{
+				Text:   text,
+				Picked: false,
+			})
 		}
 	}
 
-	return &dtos.QueryRecommendationsResponse{
+	log.Printf("ChatService -> GetQueryRecommendations -> Generated %d recommendations for caching", len(recommendations))
+
+	// Create cached recommendations structure
+	cachedRecommendations := dtos.CachedQueryRecommendations{
 		Recommendations: recommendations,
+		CreatedAt:       time.Now().Unix(),
+	}
+
+	// Cache the recommendations for 24 hours
+	cacheData, _ := json.Marshal(cachedRecommendations)
+	if err := s.redisRepo.Set(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> Warning: Failed to cache recommendations: %v", err)
+	}
+
+	// Select 4 random recommendations and mark them as picked
+	selectedRecs, err := s.selectAndMarkRecommendations(&cachedRecommendations)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to select recommendations: %v", err)
+	}
+
+	// Update cache with marked recommendations
+	updatedCacheData, _ := json.Marshal(cachedRecommendations)
+	s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+
+	return &dtos.QueryRecommendationsResponse{
+		Recommendations: selectedRecs,
 	}, http.StatusOK, nil
 }
 
-// getFallbackRecommendations provides fallback recommendations based on database type
-func (s *chatService) getFallbackRecommendations(dbType string) []dtos.QueryRecommendation {
-	switch dbType {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
-		return []dtos.QueryRecommendation{
-			{Text: "Show me all the tables in this database"},
-			{Text: "What are the column details for the main tables?"},
-			{Text: "How many active connections are there right now?"},
-		}
-	case constants.DatabaseTypeMySQL:
-		return []dtos.QueryRecommendation{
-			{Text: "List all tables in this database"},
-			{Text: "Show me the structure of the main tables"},
-			{Text: "What processes are currently running?"},
-		}
-	case constants.DatabaseTypeMongoDB:
-		return []dtos.QueryRecommendation{
-			{Text: "What collections are available in this database?"},
-			{Text: "Show me the database statistics and size"},
-			{Text: "What's the current server status and performance?"},
-		}
-	case constants.DatabaseTypeClickhouse:
-		return []dtos.QueryRecommendation{
-			{Text: "Show me all tables with their row counts"},
-			{Text: "What are the recent query performance metrics?"},
-			{Text: "Which tables have the most data?"},
-		}
-	default:
-		return []dtos.QueryRecommendation{
-			{Text: "Test the database connection"},
-			{Text: "How many tables are in this database?"},
-			{Text: "What version is this database running?"},
+// selectAndMarkRecommendations selects 4 random recommendations and marks them as picked
+func (s *chatService) selectAndMarkRecommendations(cachedRecs *dtos.CachedQueryRecommendations) ([]dtos.QueryRecommendation, error) {
+	// Check if we have any unpicked recommendations
+	unpicked := []int{}
+	for i, rec := range cachedRecs.Recommendations {
+		if !rec.Picked {
+			unpicked = append(unpicked, i)
 		}
 	}
+
+	// If all are picked, reset all to unpicked and use all
+	if len(unpicked) == 0 {
+		log.Printf("ChatService -> selectAndMarkRecommendations -> All recommendations picked, resetting")
+		for i := range cachedRecs.Recommendations {
+			cachedRecs.Recommendations[i].Picked = false
+			unpicked = append(unpicked, i)
+		}
+	}
+
+	// Select up to 4 random recommendations
+	selectionCount := 4
+	if len(unpicked) < 4 {
+		selectionCount = len(unpicked)
+	}
+
+	selectedIndices := make([]int, 0, selectionCount)
+	for i := 0; i < selectionCount; i++ {
+		// Generate cryptographically secure random index
+		randomIndex, err := s.secureRandomInt(len(unpicked))
+		if err != nil {
+			// Fallback to math/rand if crypto/rand fails
+			randomIndex = mathrand.Intn(len(unpicked))
+		}
+
+		selectedIdx := unpicked[randomIndex]
+		selectedIndices = append(selectedIndices, selectedIdx)
+
+		// Remove the selected index from unpicked slice
+		unpicked = append(unpicked[:randomIndex], unpicked[randomIndex+1:]...)
+	}
+
+	// Mark selected recommendations as picked and prepare response
+	var result []dtos.QueryRecommendation
+	for _, idx := range selectedIndices {
+		cachedRecs.Recommendations[idx].Picked = true
+		result = append(result, dtos.QueryRecommendation{
+			Text: cachedRecs.Recommendations[idx].Text,
+		})
+	}
+
+	log.Printf("ChatService -> selectAndMarkRecommendations -> Selected %d recommendations", len(result))
+	return result, nil
+}
+
+// secureRandomInt generates a cryptographically secure random integer between 0 and max-1
+func (s *chatService) secureRandomInt(max int) (int, error) {
+	if max <= 0 {
+		return 0, fmt.Errorf("max must be positive")
+	}
+
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0, err
+	}
+
+	return int(n.Int64()), nil
 }

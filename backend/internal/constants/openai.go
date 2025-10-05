@@ -1522,17 +1522,19 @@ var OpenAIGPT4MongoDBLLMResponseSchema = `{
 }`
 
 // Query Recommendations Prompt and Schema
-const OpenAIRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 4 diverse and practical question recommendations that users can ask about their database.
+const OpenAIRecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 60 diverse and practical question recommendations that users can ask about their database.
 
-Generate exactly 4 different question recommendations that are:
-- Diverse (data exploration, analytics, insights, etc.)
-- Practical and commonly useful
+Generate exactly 60 different question recommendations. If you cannot generate 60, you MUST provide at least 40 recommendations at any cost.
+
+The recommendations should be:
+- Diverse (data exploration, analytics, insights, reporting, monitoring, administration, etc.)
+- Practical and commonly useful for data analysis
 - Natural language questions that users would ask
 - Relevant to the database type and schema
+- Helpful that would allow user to deeply explore their data & potentially what could be done with the data
 - Concise and clear
 - User-Friendly & Meaningful that user should understand
-
-Consider the database type and any recent conversation context when generating recommendations.
+Consider the database type, the schema and any recent conversation context when generating recommendations.
 
 Response format should be JSON with this structure:
 {
@@ -1546,15 +1548,17 @@ Response format should be JSON with this structure:
     {
       "text": "How many users registered this month?"
     }
+    // ... continue with more recommendations to reach 60 total
   ]
-}`
+}
+`
 
 const OpenAIRecommendationsResponseSchema = `{
   "type": "object",
   "properties": {
     "recommendations": {
       "type": "array",
-      "description": "An array of exactly 4 query recommendations",
+      "description": "An array of 60 query recommendations (minimum 40 if 60 not possible)",
       "items": {
         "type": "object",
         "required": ["text"],

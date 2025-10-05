@@ -111,3 +111,14 @@ type QueryRecommendation struct {
 type QueryRecommendationsResponse struct {
 	Recommendations []QueryRecommendation `json:"recommendations"`
 }
+
+// Cached Recommendations DTOs
+type CachedQueryRecommendation struct {
+	Text   string `json:"text"`
+	Picked bool   `json:"picked"`
+}
+
+type CachedQueryRecommendations struct {
+	Recommendations []CachedQueryRecommendation `json:"recommendations"`
+	CreatedAt       int64                       `json:"created_at"`
+}
