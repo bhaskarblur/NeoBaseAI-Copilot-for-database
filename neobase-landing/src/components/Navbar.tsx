@@ -1,14 +1,16 @@
-import { Boxes, Github, Menu, X } from 'lucide-react'
+import { Boxes, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { useGitHubStats } from '../hooks/useGitHubStats'
 
-const Navbar = ({ forks }: { forks: number }) => {
+const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const location = useLocation()
   const isLegalPage = location.pathname === '/privacy' || location.pathname === '/terms'
+  const { stars } = useGitHubStats()
 
 
-  const formatForkCount = (count: number): string => {
+  const formatCount = (count: number): string => {
     if (count >= 1000) {
       return `${(count / 1000).toFixed(1)}k`
     }
@@ -65,21 +67,31 @@ const Navbar = ({ forks }: { forks: number }) => {
                 </>
               )}
               
-              {/* Product Hunt Button */}
-              <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{width: '220px', height: '48px'}} width="220" height="48" /></a>
-              
-              {/* Github Fork Button */}
+              {/* GitHub Stars Button */}
               <a 
                 href="https://github.com/bhaskarblur/neobase-ai-dba" 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="neo-button flex items-center gap-2 py-2 px-4 text-sm bg-black text-white"
+                className="flex items-center gap-2 px-1 py-2 text-sm"
               >
-                <Github className="w-4 h-4" />
-                <span>Fork Us</span>
-                <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                  {formatForkCount(forks || 1)}
+                <img src="/github-logo.png" alt="GitHub" className="w-5 h-5" />
+                <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono font-semibold">
+                  {formatCount(stars || 1)}
                 </span>
+              </a>
+              
+              {/* Product Hunt Button */}
+              <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{width: '220px', height: '48px'}} width="220" height="48" /></a>
+              
+              {/* Try NeoBase Button */}
+              <a
+                href={import.meta.env.VITE_NEOBASE_APP_URL}
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="neo-button flex items-center justify-center gap-2 py-2 px-6 text-base"
+              >
+                <Boxes className="w-4 h-4" />
+                <span>Try NeoBase</span>
               </a>
               
             </div>
@@ -112,21 +124,31 @@ const Navbar = ({ forks }: { forks: number }) => {
                 )}
                 
                 <div className="flex flex-col gap-3 mt-2">
-                  {/* Product Hunt Button */}
-                  <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{ height: '48px'}}  height="48" /></a>
-                  
-                  {/* Github Fork Button */}
+                  {/* GitHub Stars Button */}
                   <a 
                     href="https://github.com/bhaskarblur/neobase-ai-dba" 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="neo-button flex items-center justify-center gap-2 py-2 bg-black text-white"
+                    className="flex items-center justify-center gap-2 py-2 px-4 text-sm"
                   >
-                    <Github className="w-4 h-4" />
-                    <span>Fork Us</span>
-                    <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs font-mono">
-                      {formatForkCount(forks || 1)}
+                    <img src="/github-logo.png" alt="GitHub" className="w-4 h-4" />
+                    <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
+                      {formatCount(stars || 1)}
                     </span>
+                  </a>
+                  
+                  {/* Product Hunt Button */}
+                  <a href="https://www.producthunt.com/posts/neobase-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-neobase&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=936307&theme=light&t=1741073867985" alt="NeoBase - AI&#0032;powered&#0032;database&#0032;assistant | Product Hunt" style={{ height: '48px'}}  height="48" /></a>
+                  
+                  {/* Try NeoBase Button */}
+                  <a 
+                    href={import.meta.env.VITE_NEOBASE_APP_URL}
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="neo-button flex items-center justify-center gap-2 py-2 px-6 text-base"
+                  >
+                    <Boxes className="w-4 h-4" />
+                    <span>Try NeoBase</span>
                   </a>
                 </div>
               </div>
@@ -136,7 +158,7 @@ const Navbar = ({ forks }: { forks: number }) => {
       </nav>
       
       {/* Fundraising Banner */}
-      <div className="bg-black text-white py-2 pt-4 px-6 md:px-8 lg:px-12 fixed top-[73px] left-0 right-0 z-[99] border-b-2 border-gray-700">
+      {/* <div className="bg-black text-white py-2 pt-4 px-6 md:px-8 lg:px-12 fixed top-[73px] left-0 right-0 z-[99] border-b-2 border-gray-700">
         <div className="container mx-auto max-w-7xl">
           <div className="flex items-center justify-center text-center">
             <p className="text-sm md:text-base font-medium leading-relaxed">
@@ -154,7 +176,7 @@ const Navbar = ({ forks }: { forks: number }) => {
             </p>
           </div>
         </div>
-      </div>
+      </div> */}
       
       {/* Spacer to prevent content from being hidden under the fixed navbar and banner */}
       <div className="h-[125px]"></div>

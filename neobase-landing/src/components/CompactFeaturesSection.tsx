@@ -127,7 +127,7 @@ const CompactFeaturesSection: React.FC<{ stars: number }> = ({ stars }) => {
             className="neo-button-secondary flex items-center justify-center gap-2 py-3 sm:py-3 px-5 sm:px-6 text-base sm:text-lg"
           >
             <Github className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>Star us</span>
+            <span>Star Us</span>
             <span className="bg-black/20 px-2 py-0.5 rounded-full text-xs font-mono">
               {formatStarCount(stars || 1)}
             </span>
