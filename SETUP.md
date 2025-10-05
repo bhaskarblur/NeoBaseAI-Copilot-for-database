@@ -47,6 +47,7 @@ NeoBase requires the following services to function properly:
 - ClickHouse
 - MongoDB
 - Spreadsheet (CSV/Excel) - Upload and query CSV/Excel files with AES-GCM encryption
+- Google Sheets - Connect directly to Google Sheets with OAuth authentication
 - Cassandra (Planned)
 - Redis (Planned)
 - Neo4j (Planned)
@@ -117,7 +118,7 @@ You can set up NeoBase in several ways:
    ```
 3. Edit the `.env` file with your configuration (see `.env.example` for details)
 
-   **Important Spreadsheet Configuration:**
+   **Important Spreadsheet & Google Sheets Configuration:**
    - `SPREADSHEET_POSTGRES_HOST` - PostgreSQL host for spreadsheet data storage
    - `SPREADSHEET_POSTGRES_PORT` - PostgreSQL port (default: 5432)
    - `SPREADSHEET_POSTGRES_DATABASE` - Database name for spreadsheet storage
@@ -125,6 +126,9 @@ You can set up NeoBase in several ways:
    - `SPREADSHEET_POSTGRES_PASSWORD` - PostgreSQL password
    - `SPREADSHEET_POSTGRES_SSL_MODE` - SSL mode (disable, require, verify-ca, verify-full)
    - `SPREADSHEET_DATA_ENCRYPTION_KEY` - 32-byte key for AES-GCM encryption of spreadsheet data
+   - `GOOGLE_CLIENT_ID` - Google OAuth client ID for Google Sheets integration
+   - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret for Google Sheets integration  
+   - `GOOGLE_REDIRECT_URL` - Google OAuth redirect URL (e.g., http://localhost:5173/auth/google/callback)
 
 4. Install dependencies:
 
@@ -138,6 +142,74 @@ You can set up NeoBase in several ways:
    ```bash
    go run cmd/main.go
    ```
+
+## Google Sheets Integration Setup
+
+To enable Google Sheets connectivity, you need to set up Google OAuth credentials:
+
+### Creating Google OAuth Credentials
+
+1. **Go to Google Cloud Console**:
+   - Visit [Google Cloud Console](https://console.cloud.google.com/)
+   - Sign in with your Google account
+
+2. **Create or Select a Project**:
+   - Create a new project or select an existing one
+   - Note down your project ID
+
+3. **Enable Required APIs**:
+   - Navigate to "APIs & Services" > "Library"
+   - Enable the following APIs:
+     - **Google Sheets API** - Search and enable "Google Sheets API"
+     - **Google+ API** (optional but recommended) - Search and enable "Google+ API" for better profile information
+
+4. **Create OAuth 2.0 Credentials**:
+   - Go to "APIs & Services" > "Credentials"
+   - Click "Create Credentials" > "OAuth client ID"
+   - If prompted, configure the OAuth consent screen first:
+     - Choose "External" user type
+     - Fill in required fields (App name, User support email, Developer contact)
+     - **Add the following scopes in the "Scopes" section**:
+       - `https://www.googleapis.com/auth/spreadsheets.readonly` - Required for reading Google Sheets data
+       - `https://www.googleapis.com/auth/userinfo.email` - Required for user identification
+     - Add test users if needed (add your Gmail address for testing)
+
+5. **Configure OAuth Client ID**:
+   - Choose "Web application" as the application type
+   - Add authorized redirect URIs:
+     - For local development: `http://localhost:5173/auth/google/callback`
+     - For production: `https://yourdomain.com/auth/google/callback`
+   - Click "Create"
+
+6. **Get Your Credentials**:
+   - Copy the **Client ID** (ends with `.googleusercontent.com`)
+   - Copy the **Client Secret**
+   - Save these securely
+
+### Environment Configuration
+
+Add these variables to your `.env` file:
+
+```bash
+# Google OAuth Configuration for Google Sheets Integration
+GOOGLE_CLIENT_ID=your-client-id.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URL=http://localhost:5173/auth/google/callback
+```
+
+**Important Notes**:
+- Replace `your-client-id` and `your-client-secret` with actual values from Google Cloud Console
+- Update `GOOGLE_REDIRECT_URL` to match your domain in production
+- The redirect URL must exactly match what you configured in Google Cloud Console
+
+### Testing Google Sheets Connection
+
+1. Start NeoBase with the Google OAuth configuration
+2. In the NeoBase UI, create a new connection
+3. Select "Google Sheets" as the connection type
+4. Click "Connect" to initiate OAuth flow
+5. Authorize NeoBase to access your Google Sheets
+6. Enter the Google Sheets URL you want to connect to
 
 ## Docker Compose Setup
 
@@ -223,6 +295,7 @@ For production deployment on a server:
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
    - Add your OpenAI or Gemini API key
+   - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
 
 4. Create the network (first time only):
 
@@ -264,6 +337,7 @@ Just follow these steps:
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
    - Add your OpenAI or Gemini API key
+   - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
 
 1. Switch to the "Domains" tab and add two domains. E.g. to use the same host for backend and client:
 

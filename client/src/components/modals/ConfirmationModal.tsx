@@ -8,6 +8,7 @@ interface ConfirmationModalProps {
   message: string;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
+  zIndex?: string;
 }
 
 export default function ConfirmationModal({
@@ -18,10 +19,11 @@ export default function ConfirmationModal({
   themeColor = 'neo-error',
   icon = <AlertTriangle className={`w-6 h-6 text-${themeColor}`} />,
   buttonText = 'Confirm',
+  zIndex = 'z-[110]',
 }: ConfirmationModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div className={`fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 ${zIndex}`}>
       <div className="bg-white neo-border rounded-lg w-full max-w-md">
         <div className="flex justify-between items-center p-6 border-b-4 border-black">
           <div className="flex items-center gap-3">

@@ -66,6 +66,7 @@ type ChatService interface {
 
 	// Spreadsheet operations
 	StoreSpreadsheetData(userID, chatID, tableName string, columns []string, data [][]string, mergeStrategy string, mergeOptions MergeOptions) (*dtos.SpreadsheetUploadResponse, uint32, error)
+	ProcessAndStoreSpreadsheetUnified(userID, chatID, tableName string, data [][]interface{}, mergeStrategy string, mergeOptions MergeOptions) (*dtos.SpreadsheetUploadResponse, uint32, error)
 	GetSpreadsheetTableData(userID, chatID, tableName string, page, pageSize int) (*dtos.SpreadsheetTableDataResponse, uint32, error)
 	DeleteSpreadsheetTable(userID, chatID, tableName string) (uint32, error)
 	DeleteSpreadsheetRow(userID, chatID, tableName string, rowID string) (uint32, error)
@@ -75,6 +76,7 @@ type ChatService interface {
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
+	GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error)
 }
 
 type chatService struct {
@@ -100,6 +102,7 @@ func isValidDBType(dbType string) bool {
 		constants.DatabaseTypeRedis,
 		constants.DatabaseTypeNeo4j,
 		constants.DatabaseTypeSpreadsheet,
+		constants.DatabaseTypeGoogleSheets,
 	}
 
 	for _, validType := range validTypes {
@@ -215,8 +218,8 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		return nil, http.StatusBadRequest, fmt.Errorf("Unsupported data source type: %s", req.Connection.Type)
 	}
 
-	// Skip connection test for spreadsheet type as it doesn't have traditional database connection
-	if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+	// Skip connection test for spreadsheet and Google Sheets types as they don't have traditional database connection
+	if req.Connection.Type != constants.DatabaseTypeSpreadsheet && req.Connection.Type != constants.DatabaseTypeGoogleSheets {
 		// Test connection without creating a persistent connection
 		err := s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 			Type:           req.Connection.Type,
@@ -248,13 +251,27 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we store placeholder values
-	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+	// For spreadsheet and Google Sheets connections, we store placeholder values
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
-		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_db"
+		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
+			connection.Host = "google-sheets"
+			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleSheetURL = req.Connection.GoogleSheetURL
+			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
+			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
+			// Use the database name from the request or set a default
+			if req.Connection.Database != "" {
+				connection.Database = req.Connection.Database
+			} else {
+				connection.Database = "google_sheets_db"
+			}
+		} else {
+			connection.Host = "internal-spreadsheet"
+			connection.Database = "spreadsheet_db"
+		}
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -339,13 +356,27 @@ func (s *chatService) CreateWithoutConnectionPing(userID string, req *dtos.Creat
 		Base: models.NewBase(),
 	}
 
-	// For spreadsheet connections, we store placeholder values
-	if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+	// For spreadsheet and Google Sheets connections, we store placeholder values
+	if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 		// Set minimal required fields for spreadsheet
 		connection.IsExampleDB = false
 		// Store placeholder values - these will be replaced with real credentials when connecting
-		connection.Host = "internal-spreadsheet"
-		connection.Database = "spreadsheet_db"
+		if req.Connection.Type == constants.DatabaseTypeGoogleSheets {
+			connection.Host = "google-sheets"
+			connection.GoogleSheetID = req.Connection.GoogleSheetID
+			connection.GoogleSheetURL = req.Connection.GoogleSheetURL
+			connection.GoogleAuthToken = req.Connection.GoogleAuthToken
+			connection.GoogleRefreshToken = req.Connection.GoogleRefreshToken
+			// Use the database name from the request or set a default
+			if req.Connection.Database != "" {
+				connection.Database = req.Connection.Database
+			} else {
+				connection.Database = "google_sheets_db"
+			}
+		} else {
+			connection.Host = "internal-spreadsheet"
+			connection.Database = "spreadsheet_db"
+		}
 		// Set placeholder username and password
 		placeholderUsername := "spreadsheet_user"
 		placeholderPassword := "internal"
@@ -430,8 +461,8 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		utils.DecryptConnection(&existingConn)
 
 		// Check if critical connection details have changed
-		// For spreadsheet connections, we never consider credentials as changed since they use internal credentials
-		if req.Connection.Type == constants.DatabaseTypeSpreadsheet {
+		// For spreadsheet and Google Sheets connections, we never consider credentials as changed since they use internal credentials
+		if req.Connection.Type == constants.DatabaseTypeSpreadsheet || req.Connection.Type == constants.DatabaseTypeGoogleSheets {
 			credentialsChanged = false
 		} else {
 			credentialsChanged = existingConn.Database != req.Connection.Database ||
@@ -441,8 +472,8 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 				(req.Connection.Password != nil && existingConn.Password != nil && *existingConn.Password != *req.Connection.Password)
 		}
 
-		// Skip connection test for spreadsheet type as it doesn't have traditional database connection
-		if req.Connection.Type != constants.DatabaseTypeSpreadsheet {
+		// Skip connection test for spreadsheet and Google Sheets types as they don't have traditional database connection
+		if req.Connection.Type != constants.DatabaseTypeSpreadsheet && req.Connection.Type != constants.DatabaseTypeGoogleSheets {
 			// Test connection without creating a persistent connection
 			err = s.dbManager.TestConnection(&dbmanager.ConnectionConfig{
 				Type:           req.Connection.Type,
@@ -599,8 +630,8 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 	}
 
 	go func() {
-		// Delete DB connection
-		if err := s.dbManager.Disconnect(chatID, userID, true); err != nil {
+		// Delete DB connection with connection type for safety validation
+		if err := s.dbManager.DisconnectWithType(chatID, userID, chat.Connection.Type, true); err != nil {
 			log.Printf("failed to delete DB connection: %v", err)
 		}
 	}()
@@ -1650,6 +1681,8 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			SSLCertURL:     connectionCopy.SSLCertURL,
 			SSLKeyURL:      connectionCopy.SSLKeyURL,
 			SSLRootCertURL: connectionCopy.SSLRootCertURL,
+			GoogleSheetID:  connectionCopy.GoogleSheetID,
+			GoogleSheetURL: connectionCopy.GoogleSheetURL,
 		},
 		SelectedCollections: chat.SelectedCollections,
 		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),
@@ -1821,9 +1854,9 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 		}
 
-		// For spreadsheet connections with default database name, update it based on tables
-		if chat.Connection.Type == constants.DatabaseTypeSpreadsheet &&
-			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data") {
+		// For spreadsheet and Google Sheets connections with default database name, update it based on tables
+		if (chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets) &&
+			(chat.Connection.Database == "spreadsheet_db" || chat.Connection.Database == "spreadsheet_data" || chat.Connection.Database == "") {
 			log.Printf("ChatService -> GetAllTables -> Spreadsheet connection has default database name, updating it")
 			if err := s.updateSpreadsheetDatabaseName(chatID); err != nil {
 				log.Printf("ChatService -> GetAllTables -> Failed to update spreadsheet database name: %v", err)
@@ -1840,6 +1873,12 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 		if err != nil {
 			log.Printf("ChatService -> GetAllTables -> Connection not found, attempting to connect: %v", err)
 
+			// Determine schema name for spreadsheet connections
+			schemaName := ""
+			if chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+				schemaName = fmt.Sprintf("conn_%s", chatID)
+			}
+
 			// Connection not found, try to connect with proper config
 			connectErr := s.dbManager.Connect(chatID, userID, "", dbmanager.ConnectionConfig{
 				Type:         chat.Connection.Type,
@@ -1849,6 +1888,7 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 				Password:     chat.Connection.Password,
 				Database:     chat.Connection.Database,
 				AuthDatabase: chat.Connection.AuthDatabase,
+				SchemaName:   schemaName,
 			})
 			if connectErr != nil {
 				log.Printf("ChatService -> GetAllTables -> Failed to connect: %v", connectErr)
@@ -1926,4 +1966,56 @@ func (s *chatService) GetAllTables(ctx context.Context, userID, chatID string) (
 			Tables: tables,
 		}, http.StatusOK, nil
 	}
+}
+
+// GetImportMetadata retrieves import metadata for a chat
+func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error) {
+	// Verify the chat belongs to the user
+	userObjID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid user ID format")
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid chat ID format")
+	}
+
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+		}
+		return nil, http.StatusInternalServerError, err
+	}
+
+	if chat == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
+	}
+	
+	// Verify ownership
+	if chat.UserID != userObjID {
+		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
+	}
+
+	// Get Redis repo from dbManager
+	redisRepo := s.dbManager.GetRedisRepo()
+	if redisRepo == nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("redis not available")
+	}
+
+	// Create metadata store and retrieve metadata
+	metadataStore := dbmanager.NewImportMetadataStore(redisRepo)
+	metadata, err := metadataStore.GetMetadata(chatID)
+	if err != nil {
+		log.Printf("Error retrieving import metadata: %v", err)
+		return nil, http.StatusInternalServerError, err
+	}
+
+	if metadata == nil {
+		// No metadata found, return empty response
+		return nil, http.StatusNotFound, fmt.Errorf("no import metadata found")
+	}
+
+	return metadata, http.StatusOK, nil
 }

@@ -140,13 +140,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if !synchronous || allowSSEUpdates {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Fetching relevant data points & structure for the query..",
+			Data:  "Fetching relevant data points & structure for the request..",
 		})
 
 		// Send initial processing message
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Generating an optimized query & results for the request..",
+			Data:  "Running the workflow & fetching the results..",
 		})
 	}
 	if checkCancellation() {
@@ -175,7 +175,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if !synchronous || allowSSEUpdates {
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-step",
-			Data:  "Analyzing the criticality of the query & if roll back is possible..",
+			Data:  "Analyzing the criticality of the request..",
 		})
 	}
 
@@ -582,8 +582,11 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 	utils.DecryptConnection(&chat.Connection)
 
 	// Log connection details for debugging spreadsheet connections
-	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet {
-		log.Printf("ChatService -> ConnectDB -> Spreadsheet connection after decrypt: Host=%s, Database=%s", chat.Connection.Host, chat.Connection.Database)
+	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+		log.Printf("ChatService -> ConnectDB -> %s connection after decrypt: Host=%s, Database=%s", chat.Connection.Type, chat.Connection.Host, chat.Connection.Database)
+		if chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+			log.Printf("ChatService -> ConnectDB -> Google Sheet ID: %v", chat.Connection.GoogleSheetID)
+		}
 	}
 
 	// Ensure port has a default value if empty
@@ -604,20 +607,30 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		chat.Connection.Port = &defaultPort
 	}
 
+	// Determine schema name for spreadsheet connections
+	schemaName := ""
+	if chat.Connection.Type == constants.DatabaseTypeSpreadsheet || chat.Connection.Type == constants.DatabaseTypeGoogleSheets {
+		schemaName = fmt.Sprintf("conn_%s", chatID)
+	}
+
 	// Connect to database
 	err = s.dbManager.Connect(chatID, userID, streamID, dbmanager.ConnectionConfig{
-		Type:           chat.Connection.Type,
-		Host:           chat.Connection.Host,
-		Port:           chat.Connection.Port,
-		Username:       chat.Connection.Username,
-		Password:       chat.Connection.Password,
-		Database:       chat.Connection.Database,
-		AuthDatabase:   chat.Connection.AuthDatabase, // Added AuthDatabase
-		UseSSL:         chat.Connection.UseSSL,
-		SSLMode:        chat.Connection.SSLMode,
-		SSLCertURL:     chat.Connection.SSLCertURL,
-		SSLKeyURL:      chat.Connection.SSLKeyURL,
-		SSLRootCertURL: chat.Connection.SSLRootCertURL,
+		Type:               chat.Connection.Type,
+		Host:               chat.Connection.Host,
+		Port:               chat.Connection.Port,
+		Username:           chat.Connection.Username,
+		Password:           chat.Connection.Password,
+		Database:           chat.Connection.Database,
+		AuthDatabase:       chat.Connection.AuthDatabase, // Added AuthDatabase
+		UseSSL:             chat.Connection.UseSSL,
+		SSLMode:            chat.Connection.SSLMode,
+		SSLCertURL:         chat.Connection.SSLCertURL,
+		SSLKeyURL:          chat.Connection.SSLKeyURL,
+		SSLRootCertURL:     chat.Connection.SSLRootCertURL,
+		GoogleSheetID:      chat.Connection.GoogleSheetID,
+		GoogleAuthToken:    chat.Connection.GoogleAuthToken,
+		GoogleRefreshToken: chat.Connection.GoogleRefreshToken,
+		SchemaName:         schemaName,
 	})
 
 	if err != nil {
@@ -2034,7 +2047,7 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			if msgResp.Queries != nil {
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-step",
-					Data:  "Executing the needful query now.",
+					Data:  "Executing the needful operations now.",
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {

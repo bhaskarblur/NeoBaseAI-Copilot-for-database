@@ -104,6 +104,9 @@ services:
       - SPREADSHEET_POSTGRES_PASSWORD=${SPREADSHEET_POSTGRES_PASSWORD} # your_secure_password_here
       - SPREADSHEET_POSTGRES_SSL_MODE=${SPREADSHEET_POSTGRES_SSL_MODE} # disable
       - SPREADSHEET_DATA_ENCRYPTION_KEY=${SPREADSHEET_DATA_ENCRYPTION_KEY} # 32 bytes for AES-GCM
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID} # Google OAuth client ID
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET} # Google OAuth client secret
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL} # Google OAuth redirect URL (e.g., http://localhost:5173/auth/google/callback)
     depends_on:
       - neobase-mongodb
       - neobase-redis

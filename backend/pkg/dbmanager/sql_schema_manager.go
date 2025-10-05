@@ -663,8 +663,8 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 			checksums[collectionName] = checksum
 		}
 		return checksums, nil
-	case "spreadsheet":
-		// Spreadsheet needs special handling to get schema with the fetcher
+	case "spreadsheet", constants.DatabaseTypeGoogleSheets:
+		// Spreadsheet and Google Sheets need special handling to get schema with the fetcher
 		checksums := make(map[string]string)
 
 		// Get the spreadsheet fetcher
@@ -1694,6 +1694,13 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 
 	// Register Spreadsheet schema fetcher (uses custom SpreadsheetDriver fetcher)
 	sm.RegisterFetcher("spreadsheet", func(db DBExecutor) SchemaFetcher {
+		return &SpreadsheetDriver{
+			postgresDriver: NewPostgresDriver(),
+		}
+	})
+
+	// Register Google Sheets schema fetcher (uses PostgreSQL driver)
+	sm.RegisterFetcher(constants.DatabaseTypeGoogleSheets, func(db DBExecutor) SchemaFetcher {
 		return &SpreadsheetDriver{
 			postgresDriver: NewPostgresDriver(),
 		}

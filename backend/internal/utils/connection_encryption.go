@@ -83,6 +83,32 @@ func EncryptConnection(conn *models.Connection) error {
 		}
 	}
 
+	// Encrypt Google Sheets URL if present
+	if conn.GoogleSheetURL != nil {
+		if encryptedURL, err := encrypt(*conn.GoogleSheetURL, key); err == nil {
+			*conn.GoogleSheetURL = encryptedURL
+		} else {
+			return fmt.Errorf("failed to encrypt Google Sheets URL: %v", err)
+		}
+	}
+
+	// Encrypt Google auth tokens if present
+	if conn.GoogleAuthToken != nil {
+		if encryptedToken, err := encrypt(*conn.GoogleAuthToken, key); err == nil {
+			*conn.GoogleAuthToken = encryptedToken
+		} else {
+			return fmt.Errorf("failed to encrypt Google auth token: %v", err)
+		}
+	}
+
+	if conn.GoogleRefreshToken != nil {
+		if encryptedToken, err := encrypt(*conn.GoogleRefreshToken, key); err == nil {
+			*conn.GoogleRefreshToken = encryptedToken
+		} else {
+			return fmt.Errorf("failed to encrypt Google refresh token: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -154,6 +180,32 @@ func DecryptConnection(conn *models.Connection) {
 			*conn.SSLRootCertURL = decryptedURL
 		} else {
 			log.Printf("Warning: Failed to decrypt SSL root certificate URL, using as-is: %v", err)
+		}
+	}
+
+	// Decrypt Google Sheets URL if present
+	if conn.GoogleSheetURL != nil {
+		if decryptedURL, err := decrypt(*conn.GoogleSheetURL, key); err == nil {
+			*conn.GoogleSheetURL = decryptedURL
+		} else {
+			log.Printf("Warning: Failed to decrypt Google Sheets URL, using as-is: %v", err)
+		}
+	}
+
+	// Decrypt Google auth tokens if present
+	if conn.GoogleAuthToken != nil {
+		if decryptedToken, err := decrypt(*conn.GoogleAuthToken, key); err == nil {
+			*conn.GoogleAuthToken = decryptedToken
+		} else {
+			log.Printf("Warning: Failed to decrypt Google auth token, using as-is: %v", err)
+		}
+	}
+
+	if conn.GoogleRefreshToken != nil {
+		if decryptedToken, err := decrypt(*conn.GoogleRefreshToken, key); err == nil {
+			*conn.GoogleRefreshToken = decryptedToken
+		} else {
+			log.Printf("Warning: Failed to decrypt Google refresh token, using as-is: %v", err)
 		}
 	}
 }

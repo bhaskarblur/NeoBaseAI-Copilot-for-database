@@ -1,11 +1,11 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra' | 'spreadsheet';
+  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra' | 'spreadsheet' | 'google_sheets';
   size?: number;
   className?: string;
 }
 
 // Import all logos using Vite's import.meta.env.BASE_URL
-const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
+const databaseLogos: Record<Exclude<DatabaseLogoProps['type'], 'spreadsheet' | 'google_sheets'>, string> = {
   postgresql: `${import.meta.env.VITE_FRONTEND_BASE_URL}postgresql-logo.png`,
   yugabytedb: `${import.meta.env.VITE_FRONTEND_BASE_URL}yugabytedb-logo.svg`,
   mysql: `${import.meta.env.VITE_FRONTEND_BASE_URL}mysql-logo.png`,
@@ -17,6 +17,42 @@ const databaseLogos: Record<DatabaseLogoProps['type'], string> = {
 };
 
 export default function DatabaseLogo({ type, size = 24, className = '' }: DatabaseLogoProps) {
+  // Special handling for Google Sheets to show the Google Sheets logo
+  if (type === 'google_sheets') {
+    return (
+      <div
+        className={`relative flex items-center justify-center ${className}`}
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={`${import.meta.env.VITE_FRONTEND_BASE_URL}gsheets-logo.png`}
+          alt="Google Sheets logo"
+          className="w-full h-full object-contain"
+          onError={(e) => {
+            console.error('Google Sheets logo failed to load');
+            // Fallback to a spreadsheet icon if Google Sheets logo fails
+            e.currentTarget.style.display = 'none';
+            const parent = e.currentTarget.parentElement;
+            if (parent) {
+              parent.innerHTML = `<svg
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-full h-full"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" stroke="#34a853" strokeWidth="2"/>
+                <line x1="3" y1="9" x2="21" y2="9" stroke="#34a853" strokeWidth="2"/>
+                <line x1="3" y1="15" x2="21" y2="15" stroke="#34a853" strokeWidth="2"/>
+                <line x1="9" y1="3" x2="9" y2="21" stroke="#34a853" strokeWidth="2"/>
+                <line x1="15" y1="3" x2="15" y2="21" stroke="#34a853" strokeWidth="2"/>
+              </svg>`;
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
   // Special handling for spreadsheet type to show a custom icon
   if (type === 'spreadsheet') {
     return (
