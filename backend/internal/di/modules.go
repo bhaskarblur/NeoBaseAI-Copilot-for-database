@@ -84,7 +84,7 @@ func Initialize() {
 		manager.RegisterDriver(constants.DatabaseTypeClickhouse, dbmanager.NewClickHouseDriver())
 		manager.RegisterDriver(constants.DatabaseTypeMongoDB, dbmanager.NewMongoDBDriver())
 		manager.RegisterDriver(constants.DatabaseTypeSpreadsheet, dbmanager.NewSpreadsheetDriver())
-		
+
 		// Register schema fetchers
 		manager.RegisterFetcher(constants.DatabaseTypePostgreSQL, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
 			return &dbmanager.PostgresDriver{}
@@ -104,7 +104,7 @@ func Initialize() {
 		manager.RegisterFetcher(constants.DatabaseTypeSpreadsheet, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
 			return &dbmanager.PostgresDriver{}
 		})
-		
+
 		return manager, nil
 	}); err != nil {
 		log.Fatalf("Failed to provide DB manager: %v", err)
@@ -260,6 +260,7 @@ func Initialize() {
 		llmRepo repositories.LLMMessageRepository,
 		dbManager *dbmanager.Manager,
 		llmManager *llm.Manager,
+		redisRepo redis.IRedisRepositories,
 	) services.ChatService {
 		// Get default LLM client
 		llmClient, err := llmManager.GetClient(config.Env.DefaultLLMClient)
@@ -267,7 +268,7 @@ func Initialize() {
 			log.Printf("Warning: Failed to get default LLM client: %v", err)
 		}
 
-		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient)
+		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, redisRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)

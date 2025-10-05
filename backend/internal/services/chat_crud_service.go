@@ -12,6 +12,7 @@ import (
 	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
 	"neobase-ai/pkg/llm"
+	"neobase-ai/pkg/redis"
 	"net/http"
 	"sort"
 	"strconv"
@@ -86,6 +87,7 @@ type chatService struct {
 	activeProcesses map[string]context.CancelFunc // key: streamID
 	processesMu     sync.RWMutex
 	crypto          *utils.AESGCMCrypto
+	redisRepo       redis.IRedisRepositories
 }
 
 func isValidDBType(dbType string) bool {
@@ -137,6 +139,7 @@ func NewChatService(
 	llmRepo repositories.LLMMessageRepository,
 	dbManager *dbmanager.Manager,
 	llmClient llm.Client,
+	redisRepo redis.IRedisRepositories,
 ) ChatService {
 	// Initialize crypto instance
 	crypto, err := utils.NewFromConfig()
@@ -153,6 +156,7 @@ func NewChatService(
 		streamChans:     make(map[string]chan dtos.StreamResponse),
 		activeProcesses: make(map[string]context.CancelFunc),
 		crypto:          crypto,
+		redisRepo:       redisRepo,
 	}
 }
 
