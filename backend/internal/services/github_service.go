@@ -29,7 +29,7 @@ type GitHubForkResponse struct {
 
 const (
 	starCountKey     = "github:star_count"
-	starCountTTL     = 1 * time.Hour
+	starCountTTL     = 7 * 24 * time.Hour
 	githubRepoAPIURL = "https://api.github.com/repos/bhaskarblur/neobase-ai-dba"
 	forkCountKey     = "github:fork_count"
 )

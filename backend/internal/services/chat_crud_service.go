@@ -746,6 +746,67 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}
 
 	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.Settings.AutoExecuteQuery)
+
+	// Check if schema is ready before processing LLM response
+	// If schema is not ready, return a system message asking user to refresh schema
+	// Updated IsSchemaReady now checks both in-memory cache AND Redis (works for all DB types)
+	if !s.dbManager.GetSchemaManager().IsSchemaReady(ctx, chatID) {
+		log.Printf("ChatService -> CreateMessage -> Schema not ready for chatID: %s, returning schema refresh message", chatID)
+
+		// Create a system message telling user to refresh schema
+		systemMsg := &models.Message{
+			Base:          models.NewBase(),
+			UserID:        userObjID,
+			ChatID:        chatObjID,
+			UserMessageId: &msg.ID,
+			Content:       "Your Knowledge Base requires to be refreshed for latest knowledge, please refresh it to get accurate insights & analytics and then send a new message.",
+			Type:          string(constants.MessageTypeAssistant),
+			ActionButtons: &[]models.ActionButton{
+				{
+					Label:     "Refresh Knowledge Base",
+					Action:    "refresh_schema",
+					IsPrimary: true,
+				},
+			},
+		}
+
+		// Ensure system message has a created_at that is ALWAYS after user message for correct ordering
+		// Add 2 second offset to guarantee system message appears after user message in sorted results
+		systemMsg.CreatedAt = msg.CreatedAt.Add(2 * time.Second)
+		systemMsg.UpdatedAt = systemMsg.CreatedAt
+
+		if err := s.chatRepo.CreateMessage(systemMsg); err != nil {
+			log.Printf("ChatService -> CreateMessage -> Error saving system message: %v", err)
+			// Still return success to user, but log the error
+		}
+
+		// Send system message via SSE after a 1-second delay to allow frontend to create temporary streaming message first
+		// This prevents race condition where system message arrives before temp message is created
+		go func() {
+			time.Sleep(1 * time.Second)
+			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+				Event: "system-message",
+				Data: map[string]interface{}{
+					"chat_id":        chatID,
+					"message_id":     systemMsg.ID.Hex(),
+					"content":        systemMsg.Content,
+					"type":           systemMsg.Type,
+					"action_buttons": dtos.ToActionButtonDto(systemMsg.ActionButtons),
+					"created_at":     systemMsg.CreatedAt.Format(time.RFC3339),
+				},
+			})
+		}()
+
+		// Return user message response (schema not ready yet)
+		return &dtos.MessageResponse{
+			ID:        msg.ID.Hex(),
+			ChatID:    chatID,
+			Content:   content,
+			Type:      string(constants.MessageTypeUser),
+			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
+		}, http.StatusOK, nil
+	}
+
 	// If auto execute query is true, we need to process LLM response & run query automatically
 	if chat.Settings.AutoExecuteQuery {
 		if err := s.processLLMResponseAndRunQuery(ctx, userID, chatID, msg.ID.Hex(), streamID); err != nil {

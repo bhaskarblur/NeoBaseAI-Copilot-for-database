@@ -48,7 +48,8 @@ export default function ConfirmationModal({
                 await onConfirm();
                 setIsLoading(false);
               }}
-              className={`neo-border bg-${themeColor} text-white px-4 py-2 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1`}
+              disabled={isLoading}
+              className={`neo-border bg-${themeColor} disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1`}
             >
               {isLoading ? (
                 <div className="flex items-center justify-center gap-2">

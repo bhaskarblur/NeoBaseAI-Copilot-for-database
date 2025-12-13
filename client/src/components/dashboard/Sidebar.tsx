@@ -10,6 +10,8 @@ import {
   MoreVertical,
   PanelLeft,
   PanelLeftClose,
+  PanelRight,
+  PanelRightClose,
   Pencil,
   Plus,
   Trash2,
@@ -655,13 +657,13 @@ export default function Sidebar({
 
         <button
           onClick={handleToggleExpand}
-          className="absolute top-1/2 -translate-y-1/2 -right-4 p-2 bg-white hover:bg-neo-gray rounded-lg transition-colors border-2 border-black"
+          className={`absolute top-1/2 -translate-y-1/2 ${!isExpanded ? '-right-6 md:-right-5' : '-right-5'} p-2 bg-white hover:bg-neo-gray rounded-lg transition-colors border-2 border-black`}
           title={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
         >
           {isExpanded ? (
             <PanelLeftClose className="w-5 h-5" />
           ) : (
-            <PanelLeft className="w-5 h-5" />
+            <PanelRightClose className="w-5 h-5" />
           )}
         </button>
       </div>

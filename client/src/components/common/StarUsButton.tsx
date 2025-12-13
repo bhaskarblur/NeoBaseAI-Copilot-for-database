@@ -67,7 +67,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                     rounded-full 
                     text-xs 
                     font-mono
-                ">{formatStarCount(starCount || 0)}</span>
+                ">{formatStarCount(starCount || 60)}</span>
             ) : (
                 <>
                     <span>Star Us</span>
@@ -78,7 +78,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                         rounded-full 
                         text-xs 
                         font-mono
-                    ">{formatStarCount(starCount || 0)}</span>
+                    ">{formatStarCount(starCount || 60)}</span>
                 </>
             )}
         </a>

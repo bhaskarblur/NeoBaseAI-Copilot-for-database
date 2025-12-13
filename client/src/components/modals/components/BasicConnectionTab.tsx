@@ -546,6 +546,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
           placeholder="e.g., db_user, assistant"
           required
         />
+        <p className="text-gray-500 text-sm mt-3">Please be careful about the user credentials you provide with only those permissions that you need, such as read-only, read-write or limited access.</p>
         {errors.username && touched.username && (
           <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
             <AlertCircle className="w-4 h-4" />
@@ -565,7 +566,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
           className="neo-input w-full"
           placeholder="Enter your database password"
         />
-        <p className="text-gray-500 text-xs mt-3">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
+        <p className="text-gray-500 text-sm mt-3">Leave blank if the database has no password, but it's recommended to set a password for the database user</p>
       </div>
 
       {/* Divider line */}

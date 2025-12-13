@@ -23,7 +23,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex flex-col md:flex-row gap-4 md:gap-0 items-start md:items-center justify-between">
           <div>
             <label className="block font-bold mb-1 text-lg">Auto Fetch Results</label>
-            <p className="text-gray-600 text-sm max-w-[480px]">Automatically fetches results of the AI operation from the database upon the AI response. <br />However, the critical operations such as Updating, Inserting, Deleting, etc. still need to be executed manually by the user.</p>
+            <p className="text-gray-600 text-sm max-w-[480px]">Automatically fetches results of the AI operation from the database upon the AI response. However, the critical operations such as Updating, Inserting, Deleting, etc. still need to be executed manually by the user.</p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer">
             <input 
@@ -43,8 +43,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
       <div className="neo-border p-4 rounded-lg">
         <div className="flex flex-col md:flex-row gap-4 md:gap-0 items-start md:items-center justify-between">
           <div>
-            <label className="block font-bold mb-1 text-lg">Share Data With AI</label>
-            <p className="text-gray-600 text-sm max-w-[480px]">Allow NeoBase to share your operation results with AI for better responses. This can be useful for analysing data such as comparsions. <br/>Note: This will take more tokens that are being sent to the AI.</p>
+            <label className="block font-bold mb-1 text-lg">Share Result With AI</label>
+            <p className="text-gray-600 text-sm max-w-[480px]">Allow NeoBase to share your query results with AI for better responses. This can be useful for use-cases such as asking queries from your previous messages results. <br/>Note: This will take more tokens and size that is being sent to the AI.</p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer">
             <input 
@@ -64,7 +64,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex flex-col md:flex-row gap-4 md:gap-0 items-start md:items-center justify-between">
           <div>
             <label className="block font-bold mb-1 text-lg">Non-Technical Mode</label>
-            <p className="text-gray-600 text-sm max-w-[480px]">Enable simplified, non-technical explanations and results. AI will provide easy-to-understand responses, hide complex queries, and show only relevant data fields. <strong>Ideal for business users</strong> who want insights without technical details.<br />Note: This won't change the already sent messages.</p>
+            <p className="text-gray-600 text-sm max-w-[480px]">Enable simplified, non-technical explanations and results. AI will provide easy-to-understand responses, hide complex queries, and show only relevant data fields. <strong>Ideal for business users</strong> who want insights without technical details.<br />Note: This setting will not be applied to the existing messages.</p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer">
             <input 

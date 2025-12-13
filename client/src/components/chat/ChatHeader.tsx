@@ -1,4 +1,4 @@
-import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search } from 'lucide-react';
+import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
@@ -15,6 +15,8 @@ interface ChatHeaderProps {
     onReconnect: () => void;
     setShowRefreshSchema: (show: boolean) => void;
     onToggleSearch: () => void;
+    viewMode?: 'chats' | 'pinned';
+    onViewModeChange?: (mode: 'chats' | 'pinned') => void;
 }
 
 export default function ChatHeader({
@@ -27,6 +29,8 @@ export default function ChatHeader({
     onReconnect,
     setShowRefreshSchema,
     onToggleSearch,
+    viewMode,
+    onViewModeChange,
 }: ChatHeaderProps) {
     const [showDisconnectionTooltip, setShowDisconnectionTooltip] = useState(false);
     const [showDropdown, setShowDropdown] = useState(false);
@@ -161,14 +165,14 @@ export default function ChatHeader({
 
     return (
         <>
-            <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-16 md:mt-0 z-20">
+            <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-0 md:mt-0 z-20">
                 <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
                     <DatabaseLogo type={chat.connection.type as "postgresql" | "mysql" | "mongodb" | "redis" | "clickhouse" | "neo4j"} size={32} className="transition-transform hover:scale-110" />
                     <h2 className="text-lg md:text-2xl font-bold truncate">{chat.connection.is_example_db ? "Sample Database" : chat.connection.database}</h2>
                     {connectionStatus}
                 </div>
                 <div className="flex items-center gap-2">
-                                                            {/* Reconnect button - only show when disconnected */}
+                {/* Reconnect button - only show when disconnected */}
                     {!isConnected && !isConnecting && (
                         <div className="relative group">
                             <button
@@ -254,7 +258,7 @@ export default function ChatHeader({
                             className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
                         >
                             <ListRestart className="w-4 h-4 mr-2 text-black" />
-                            Refresh Knowledge/Data
+                            Refresh Knowledge
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
@@ -273,6 +277,29 @@ export default function ChatHeader({
                             Clear Chat
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
+                        <button 
+                            onClick={() => handleDropdownAction(() => {
+                                if (onViewModeChange) {
+                                    onViewModeChange(viewMode === 'pinned' ? 'chats' : 'pinned');
+                                }
+                            })}
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors md:hidden"
+                        >
+                            {viewMode === 'pinned' ? (
+                                <>
+                                    <PinIcon className="w-4 h-4 mr-2 text-black rotate-45" />
+                                    Hide Pinned
+                                </>
+                            ) : (
+                                <>
+                                    <PinIcon className="w-4 h-4 mr-2 text-black rotate-45" />
+                                    Show Pinned
+                                </>
+                            )}
+                        </button>
+                        {viewMode !== undefined && (
+                            <div className="h-px bg-gray-200 mx-2 md:hidden"></div>
+                        )}
                         {isConnected ? (
                             <button 
                                 onClick={() => handleDropdownAction(handleShowCloseConfirm)}

@@ -2620,11 +2620,36 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		llmMessages = []*models.LLMMessage{}
 	}
 
-	// Use the existing conversation context directly
-	contextMessages := llmMessages
+	// Condition 1: If LLM messages exist (including DB schema messages), use them as context
+	// Condition 2: If no messages exist, schema hasn't been loaded yet, skip generation
+	// Condition 3: Must have at least 1 system message (schema message) to ensure schema is present
+	if len(llmMessages) == 0 {
+		log.Printf("ChatService -> GetQueryRecommendations -> No LLM messages found (schema not ready), skipping recommendation generation")
+		return &dtos.QueryRecommendationsResponse{
+			Recommendations: []dtos.QueryRecommendation{},
+		}, http.StatusOK, nil
+	}
 
-	// Generate recommendations using LLM
-	response, err := s.llmClient.GenerateRecommendations(ctx, contextMessages, connInfo.Config.Type)
+	// Check for at least one system message (schema message)
+	hasSystemMessage := false
+	for _, msg := range llmMessages {
+		if msg.Role == string(constants.MessageTypeSystem) {
+			hasSystemMessage = true
+			break
+		}
+	}
+
+	if !hasSystemMessage {
+		log.Printf("ChatService -> GetQueryRecommendations -> No system message (schema) found in LLM messages, skipping recommendation generation")
+		return &dtos.QueryRecommendationsResponse{
+			Recommendations: []dtos.QueryRecommendation{},
+		}, http.StatusOK, nil
+	}
+
+	log.Printf("ChatService -> GetQueryRecommendations -> Found %d LLM messages, using conversation and schema context", len(llmMessages))
+
+	// Generate recommendations using LLM with conversation context
+	response, err := s.llmClient.GenerateRecommendations(ctx, llmMessages, connInfo.Config.Type)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate recommendations: %v", err)
 	}

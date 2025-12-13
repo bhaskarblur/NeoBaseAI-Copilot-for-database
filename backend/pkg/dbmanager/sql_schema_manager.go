@@ -1,11 +1,8 @@
 package dbmanager
 
 import (
-	"bytes"
-	"compress/zlib"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"neobase-ai/internal/constants"
@@ -22,7 +19,7 @@ import (
 // Add these constants
 const (
 	schemaKeyPrefix = "schema:"
-	schemaTTL       = 7 * 24 * time.Hour // Keep schemas for 7 days
+	schemaTTL       = 30 * 24 * time.Hour // Keep schemas for 30 days
 )
 
 // SchemaInfo represents database schema information
@@ -1644,27 +1641,6 @@ func (sm *SchemaManager) determineRelationType(schema *SchemaInfo, fromTable str
 	return "one_to_many"
 }
 
-// Compress schema for storage
-func (sm *SchemaManager) compressSchema(storage *SchemaStorage) ([]byte, error) {
-	// Marshal to JSON first
-	data, err := json.Marshal(storage)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal schema: %v", err)
-	}
-
-	// Use zlib compression
-	var buf bytes.Buffer
-	w := zlib.NewWriter(&buf)
-	if _, err := w.Write(data); err != nil {
-		return nil, fmt.Errorf("failed to compress data: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close compressor: %v", err)
-	}
-
-	return buf.Bytes(), nil
-}
-
 // Add method to register default fetchers
 func (sm *SchemaManager) registerDefaultFetchers() {
 	// Register PostgreSQL schema fetcher
@@ -2027,6 +2003,50 @@ func (sm *SchemaManager) ClearSchemaCache(chatID string) {
 	delete(sm.schemaCache, chatID)
 	sm.mu.Unlock()
 	log.Printf("SchemaManager -> ClearSchemaCache -> Cleared schema cache for chatID: %s", chatID)
+}
+
+// IsSchemaReady checks if schema is ready for use by checking:
+// 1. In-memory cache first (fastest path)
+// 2. Redis storage as fallback (works for all DB types: SQL, MongoDB, Sheets, CSV)
+func (sm *SchemaManager) IsSchemaReady(ctx context.Context, chatID string) bool {
+	// Check in-memory cache first
+	sm.mu.RLock()
+	cachedSchema, exists := sm.schemaCache[chatID]
+	sm.mu.RUnlock()
+
+	if exists && cachedSchema != nil && len(cachedSchema.Tables) > 0 {
+		return true
+	}
+
+	// Check Redis storage as fallback (unified for SQL, MongoDB, Sheets, CSV)
+	// This retrieves the SchemaStorage which contains both FullSchema and LLMSchema
+	storage, err := sm.storageService.Retrieve(ctx, chatID)
+	if err != nil {
+		// No schema in Redis either
+		return false
+	}
+
+	// Check if storage has valid schema with tables
+	// Works for all DB types since they all store in SchemaStorage format
+	if storage == nil {
+		return false
+	}
+
+	// Check FullSchema first (has complete table info)
+	if storage.FullSchema != nil && len(storage.FullSchema.Tables) > 0 {
+		// Cache it in memory for future access
+		sm.mu.Lock()
+		sm.schemaCache[chatID] = storage.FullSchema
+		sm.mu.Unlock()
+		return true
+	}
+
+	// Check LLMSchema as fallback (simplified schema for LLM)
+	if storage.LLMSchema != nil && len(storage.LLMSchema.Tables) > 0 {
+		return true
+	}
+
+	return false
 }
 
 // GetSchemaWithExamples gets the schema with example records

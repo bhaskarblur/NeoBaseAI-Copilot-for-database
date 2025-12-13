@@ -1491,7 +1491,7 @@ DATABASE_PASSWORD=`; // Mask password
       <ConfirmationModal
         icon={<RefreshCcw className="w-6 h-6 text-black" />}
         themeColor="black"
-        title="Refresh Knowledge/Data"
+        title="Refresh Knowledge Base"
         buttonText="Refresh"
         message="This action will refetch the data from Google Sheets and update the knowledge base. This may take a few minutes depending on the size of the sheet."
         onConfirm={handleRefreshSchema}
