@@ -136,14 +136,14 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 			Connection: dtos.CreateConnectionRequest{
 				Type:     config.Env.ExampleDatabaseType,
 				Host:     config.Env.ExampleDatabaseHost,
-				Port:     utils.ToStringPtr(config.Env.ExampleDatabasePort),
+				Port:     utils.StringPtr(config.Env.ExampleDatabasePort),
 				Database: config.Env.ExampleDatabaseName,
 				Username: config.Env.ExampleDatabaseUsername,
-				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),
+				Password: utils.StringPtr(config.Env.ExampleDatabasePassword),
 			},
 			Settings: dtos.CreateChatSettings{
-				AutoExecuteQuery: utils.ToBoolPtr(true),
-				ShareDataWithAI:  utils.ToBoolPtr(false), // Disable sharing data with AI by default.
+				AutoExecuteQuery: utils.TruePtr(),
+				ShareDataWithAI:  utils.FalsePtr(), // Disable sharing data with AI by default.
 			},
 		})
 		if err != nil {

@@ -195,11 +195,16 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			log.Printf("processLLMResponse -> queryMap: %v", queryMap)
 			if queryMap["exampleResult"] != nil {
 				log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
-				result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
-				resultStr := string(result)
+				// Use pooled buffer instead of allocating new one
+				buf := utils.GetJSONBuffer()
+				encoder := json.NewEncoder(buf)
+				encoder.SetEscapeHTML(false)
+				_ = encoder.Encode(queryMap["exampleResult"].([]interface{}))
+				resultStr := buf.String()
+				utils.PutJSONBuffer(buf)
 				// Encrypt the example result before storage
 				encryptedResult := s.encryptQueryResult(resultStr)
-				exampleResult = utils.ToStringPtr(encryptedResult)
+				exampleResult = utils.StringPtr(encryptedResult)
 				log.Printf("processLLMResponse -> saving exampleResult (encrypted): %v", *exampleResult)
 			} else {
 				exampleResult = nil
@@ -208,7 +213,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 			var rollbackDependentQuery *string
 			if queryMap["rollbackDependentQuery"] != nil {
-				rollbackDependentQuery = utils.ToStringPtr(queryMap["rollbackDependentQuery"].(string))
+				rollbackDependentQuery = utils.StringPtr(queryMap["rollbackDependentQuery"].(string))
 			} else {
 				rollbackDependentQuery = nil
 			}
@@ -239,30 +244,30 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			pagination := &models.Pagination{}
 			if queryMap["pagination"] != nil {
 				if queryMap["pagination"].(map[string]interface{})["paginatedQuery"] != nil {
-					pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
+					pagination.PaginatedQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
 					log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
 				}
 				if queryMap["pagination"].(map[string]interface{})["countQuery"] != nil {
-					pagination.CountQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
+					pagination.CountQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
 					log.Printf("processLLMResponse -> pagination.CountQuery: %v", *pagination.CountQuery)
 				}
 			}
 			var tables *string
 			if queryMap["tables"] != nil {
-				tables = utils.ToStringPtr(queryMap["tables"].(string))
+				tables = utils.StringPtr(queryMap["tables"].(string))
 			}
 
 			if queryMap["collections"] != nil {
-				tables = utils.ToStringPtr(queryMap["collections"].(string))
+				tables = utils.StringPtr(queryMap["collections"].(string))
 			}
 			var queryType *string
 			if queryMap["queryType"] != nil {
-				queryType = utils.ToStringPtr(queryMap["queryType"].(string))
+				queryType = utils.StringPtr(queryMap["queryType"].(string))
 			}
 
 			var rollbackQuery *string
 			if queryMap["rollbackQuery"] != nil {
-				rollbackQuery = utils.ToStringPtr(queryMap["rollbackQuery"].(string))
+				rollbackQuery = utils.StringPtr(queryMap["rollbackQuery"].(string))
 			}
 
 			// Create the query object
@@ -303,11 +308,15 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 				// Store metadata as JSON if we have any
 				if len(metadata) > 0 {
-					metadataJSON, err := json.Marshal(metadata)
-					if err == nil {
-						metadataStr := string(metadataJSON)
-						query.Metadata = &metadataStr
+					// Use pooled buffer for JSON encoding
+					buf := utils.GetJSONBuffer()
+					encoder := json.NewEncoder(buf)
+					encoder.SetEscapeHTML(false)
+					if err := encoder.Encode(metadata); err == nil {
+						metadataStr := buf.String()
+						query.Metadata = utils.StringPtr(metadataStr)
 					}
+					utils.PutJSONBuffer(buf)
 				}
 			}
 
@@ -408,7 +417,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 					ID:            existingMessage.ID.Hex(),
 					ChatID:        existingMessage.ChatID.Hex(),
 					Content:       existingMessage.Content,
-					UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
+					UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
 					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
@@ -423,7 +432,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			ID:            existingMessage.ID.Hex(),
 			ChatID:        existingMessage.ChatID.Hex(),
 			Content:       existingMessage.Content,
-			UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
+			UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
 			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
@@ -480,7 +489,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				ID:            chatResponseMsg.ID.Hex(),
 				ChatID:        chatResponseMsg.ChatID.Hex(),
 				Content:       chatResponseMsg.Content,
-				UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
+				UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
 				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
@@ -494,7 +503,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		ID:            chatResponseMsg.ID.Hex(),
 		ChatID:        chatResponseMsg.ChatID.Hex(),
 		Content:       chatResponseMsg.Content,
-		UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
+		UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
 		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
@@ -809,10 +818,13 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
 
 						// Convert to JSON and back to ensure proper type handling
-						jsonBytes, err := json.Marshal(resultsRaw)
+						buf := utils.GetJSONBuffer()
+						encoder := json.NewEncoder(buf)
+						encoder.SetEscapeHTML(false)
+						err := encoder.Encode(resultsRaw)
 						if err == nil {
 							var resultsArray []map[string]interface{}
-							if err := json.Unmarshal(jsonBytes, &resultsArray); err == nil && len(resultsArray) > 0 {
+							if err := json.Unmarshal(buf.Bytes(), &resultsArray); err == nil && len(resultsArray) > 0 {
 								if countVal, ok := resultsArray[0]["count"]; ok {
 									// Try to convert to int
 									switch v := countVal.(type) {
@@ -838,6 +850,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								}
 							}
 						}
+						utils.PutJSONBuffer(buf) // Return buffer to pool
 					}
 				}
 			} // Close the resultMap check
@@ -900,7 +913,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 							Message: queryErr.Message,
 							Details: queryErr.Details,
 						}
-						(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+						(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 						break
 					}
 				}
@@ -964,7 +977,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"message": queryErr.Message,
 										"details": queryErr.Details,
 									}
-									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								}
 								queries[i] = queryMap
 							} else {
@@ -988,7 +1001,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"details": queryErr.Details,
 									}
 									queriesVal[i] = queryMap
-									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								}
 							} else {
 								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
@@ -1030,12 +1043,15 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
 
 	// Convert Result to JSON string first
-	resultJSON, err := json.Marshal(result.Result)
-	if err != nil {
+	buf := utils.GetJSONBuffer()
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(result.Result); err != nil {
 		log.Printf("ChatService -> ExecuteQuery -> Error marshalling result: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal result: %v", err)
 	}
-	resultJSONStr := string(resultJSON)
+	resultJSON := buf.Bytes()
+	resultJSONStr := buf.String()
 	log.Printf("ChatService -> ExecuteQuery -> resultJSON: %+v", resultJSONStr)
 
 	var formattedResultJSON interface{}
@@ -1053,6 +1069,8 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		}
 	}
 
+	utils.PutJSONBuffer(buf) // Return buffer to pool
+
 	log.Printf("ChatService -> ExecuteQuery -> resultListFormatting: %+v", resultListFormatting)
 	log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
 	if len(resultListFormatting) > 0 {
@@ -1063,13 +1081,16 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			formattedResultJSON = resultListFormatting[:50] // Cap the result to 50 records
 
 			// Cap the result to 50 records
-			cappedResults, err := json.Marshal(resultListFormatting[:50])
-			if err != nil {
+			cappedBuf := utils.GetJSONBuffer()
+			encoder := json.NewEncoder(cappedBuf)
+			encoder.SetEscapeHTML(false)
+			if err := encoder.Encode(resultListFormatting[:50]); err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
 			} else {
-				resultJSONStr = string(cappedResults)
+				resultJSONStr = cappedBuf.String()
 				result.Result = resultListFormatting[:50]
 			}
+			utils.PutJSONBuffer(cappedBuf)
 		}
 	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
 		log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
@@ -1105,7 +1126,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	// Encrypt the execution result before storage
 	encryptedResult := s.encryptQueryResult(resultJSONStr)
 	query.ExecutionResult = &encryptedResult
-	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+	query.ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 	if totalRecordsCount != nil {
 		if query.Pagination == nil {
 			query.Pagination = &models.Pagination{}
@@ -1131,7 +1152,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
-					(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+					(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 					if totalRecordsCount != nil {
 						if (*msg.Queries)[i].Pagination == nil {
 							(*msg.Queries)[i].Pagination = &models.Pagination{}
@@ -1212,7 +1233,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
 									// Get the encrypted result from the message and decrypt it for LLM
@@ -1226,8 +1247,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 									}
 									// Fallback: Convert current result to JSON if encrypted result not found
 									if resultForLLM == "" {
-										resultJSONBytes, _ := json.Marshal(result.Result)
-										resultForLLM = string(resultJSONBytes)
+										buf := utils.GetJSONBuffer()
+										encoder := json.NewEncoder(buf)
+										encoder.SetEscapeHTML(false)
+										_ = encoder.Encode(result.Result)
+										resultForLLM = buf.String()
+										utils.PutJSONBuffer(buf)
 									}
 									queryMap["executionResult"] = map[string]interface{}{
 										"result": resultForLLM,
@@ -1262,7 +1287,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
 									// Get the encrypted result from the message and decrypt it for LLM
@@ -1276,8 +1301,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 									}
 									// Fallback: Convert current result to JSON if encrypted result not found
 									if resultForLLM == "" {
-										resultJSONBytes, _ := json.Marshal(result.Result)
-										resultForLLM = string(resultJSONBytes)
+										buf := utils.GetJSONBuffer()
+										encoder := json.NewEncoder(buf)
+										encoder.SetEscapeHTML(false)
+										_ = encoder.Encode(result.Result)
+										resultForLLM = buf.String()
+										utils.PutJSONBuffer(buf)
 									}
 									queryMap["executionResult"] = map[string]interface{}{
 										"result": resultForLLM,
@@ -1489,8 +1518,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		contextBuilder.WriteString(fmt.Sprintf("\nQuery id: %s\n", query.ID.Hex())) // This will help LLM to understand the context of the query to be rolled back
 		contextBuilder.WriteString(fmt.Sprintf("\nOriginal query: %s\n", query.Query))
 		// Convert Result to JSON string
-		dependentResultJSONBytes, _ := json.Marshal(dependentResult.Result)
-		dependentResultJSONStr := string(dependentResultJSONBytes)
+		buf := utils.GetJSONBuffer()
+		encoder := json.NewEncoder(buf)
+		encoder.SetEscapeHTML(false)
+		_ = encoder.Encode(dependentResult.Result)
+		dependentResultJSONStr := buf.String()
+		utils.PutJSONBuffer(buf)
 		contextBuilder.WriteString(fmt.Sprintf("Dependent query result: %s\n", dependentResultJSONStr))
 		contextBuilder.WriteString("\nPlease generate a rollback query that will undo the effects of the original query.")
 
@@ -1771,7 +1804,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	// We're using same execution time for the rollback as the original query
 	query.IsRolledBack = true
 	query.ExecutionTime = &result.ExecutionTime
-	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+	query.ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 	if result.Error != nil {
 		query.Error = &models.QueryError{
 			Code:    result.Error.Code,
@@ -1790,12 +1823,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				(*msg.Queries)[i].IsExecuted = true
 				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
 				// Convert Result to JSON string
-				resultJSONBytes, _ := json.Marshal(result.Result)
-				resultJSONStr := string(resultJSONBytes)
+				buf := utils.GetJSONBuffer()
+				encoder := json.NewEncoder(buf)
+				encoder.SetEscapeHTML(false)
+				_ = encoder.Encode(result.Result)
+				resultJSONStr := buf.String()
+				utils.PutJSONBuffer(buf)
 				// Encrypt the execution result before storage
 				encryptedResult := s.encryptQueryResult(resultJSONStr)
 				(*msg.Queries)[i].ExecutionResult = &encryptedResult
-				(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+				(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{
 						Code:    result.Error.Code,
@@ -1846,7 +1883,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
 								// Get the encrypted result from the message and decrypt it for LLM
@@ -1860,8 +1897,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 								}
 								// Fallback: Convert current result to JSON if encrypted result not found
 								if resultForLLM == "" {
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultForLLM = string(resultJSONBytes)
+									buf := utils.GetJSONBuffer()
+									encoder := json.NewEncoder(buf)
+									encoder.SetEscapeHTML(false)
+									_ = encoder.Encode(result.Result)
+									resultForLLM = buf.String()
+									utils.PutJSONBuffer(buf)
 								}
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": resultForLLM,
@@ -1896,7 +1937,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
 								// Get the encrypted result from the message and decrypt it for LLM
@@ -1910,8 +1951,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 								}
 								// Fallback: Convert current result to JSON if encrypted result not found
 								if resultForLLM == "" {
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultForLLM = string(resultJSONBytes)
+									buf := utils.GetJSONBuffer()
+									encoder := json.NewEncoder(buf)
+									encoder.SetEscapeHTML(false)
+									_ = encoder.Encode(result.Result)
+									resultForLLM = buf.String()
+									utils.PutJSONBuffer(buf)
 								}
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": resultForLLM,
@@ -2328,8 +2373,13 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	}
 
 	// Convert Result to JSON string
-	resultJSONBytes, _ := json.Marshal(result.Result)
-	resultJSONStr := string(resultJSONBytes)
+	buf := utils.GetJSONBuffer()
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(result.Result)
+	resultJSONStr := buf.String()
+	resultJSONBytes := []byte(resultJSONStr)
+	utils.PutJSONBuffer(buf)
 
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}

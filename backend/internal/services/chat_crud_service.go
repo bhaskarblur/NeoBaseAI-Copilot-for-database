@@ -1413,7 +1413,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 			(*message.Queries)[i].Query = query
 			(*message.Queries)[i].IsEdited = true
 			if (*message.Queries)[i].Pagination != nil && (*message.Queries)[i].Pagination.PaginatedQuery != nil {
-				(*message.Queries)[i].Pagination.PaginatedQuery = utils.ToStringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
+				(*message.Queries)[i].Pagination.PaginatedQuery = utils.StringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
 			}
 		}
 	}
@@ -1450,7 +1450,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					if qMap["pagination"] != nil {
 						if qMap["pagination"].(map[string]interface{})["paginated_query"] != nil {
 							currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
 						}
 					}
 					queriesVal[i] = qMap
@@ -1470,7 +1470,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					qMap["is_executed"] = false
 					if qMap["pagination"] != nil {
 						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
 					}
 					queriesVal[i] = qMap
 					break
@@ -1992,7 +1992,7 @@ func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID stri
 	if chat == nil {
 		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 	}
-	
+
 	// Verify ownership
 	if chat.UserID != userObjID {
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
