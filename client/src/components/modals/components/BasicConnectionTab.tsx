@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, ChevronDown } from 'lucide-react';
+import { AlertCircle, ChevronDown, Copy, Check } from 'lucide-react';
 import { Connection } from '../../../types/chat';
 
 // Define FormErrors interface locally instead of importing it
@@ -41,6 +41,9 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
 }) => {
   // State to track the connection URI value independently
   const [connectionUri, setConnectionUri] = useState<string>('');
+
+  // State to track which address was copied (for showing checkmark)
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
 
   // Custom blur handler that validates the field using the passed validateField function
   const handleFieldBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -386,6 +389,26 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
     }
   }, [formData.host, formData.database, formData.username, formData.port, formData.type, formData.use_ssl, formData.ssl_mode, formData.auth_database]);
 
+  // Get whitelist addresses from environment variable
+  // These are the server addresses of cluster where NeoBase backend is deployed, which establish the database connections
+  const getWhitelistAddresses = (): string[] => {
+    const addresses = import.meta.env.VITE_NEOBASE_WHITELIST_ADDRESSES;
+    if (!addresses) return [];
+    return addresses.split(',').map((addr: string) => addr.trim()).filter((addr: string) => addr);
+  };
+
+  // Copy address to clipboard
+  const copyToClipboard = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopiedAddress(address);
+      // Reset the checkmark after 2 seconds
+      setTimeout(() => setCopiedAddress(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy address:', err);
+    }
+  };
+
   return (
     <>
 
@@ -611,6 +634,9 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
         </div>
       </div>
 
+      {/* Divider line */}
+      <div className="border-t border-gray-200 my-6"></div>
+
       {/* SSL Mode Selector - Only show when SSL is enabled */}
       {formData.use_ssl && (
         <div className="mb-6">
@@ -694,6 +720,37 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
             {errors.ssl_root_cert_url && touched.ssl_root_cert_url && (
               <p className="text-red-500 text-xs mt-1">{errors.ssl_root_cert_url}</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Whitelist Server Addresses Section */}
+      {getWhitelistAddresses().length > 0 && (
+        <div className="mb-6 p-4 border-2 border-blue-200 rounded-lg bg-blue-50">
+          <h4 className="font-bold mb-2 text-lg text-gray-800">Whitelist Server Addresses</h4>
+          <p className="text-gray-600 text-sm mb-4">
+            Below are the NeoBase's server addresses from where your data source calls happen. If you've applied IP restriction to your data source, then add these to your data source/firewall settings to allow NeoBase to connect.
+          </p>
+          
+          <div className="space-y-2">
+            {getWhitelistAddresses().map((address) => (
+              <div key={address} className="flex items-center gap-2 p-3 py-2 bg-white border border-gray-200 rounded-md">
+                <code className="flex-1 text-sm font-mono text-gray-700 break-all">{address}</code>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(address)}
+                  className="flex-shrink-0 p-2 hover:bg-gray-100 rounded transition-colors"
+                  title="Copy address"
+                  aria-label={`Copy ${address}`}
+                >
+                  {copiedAddress === address ? (
+                    <Check className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-gray-500 hover:text-gray-700" />
+                  )}
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
