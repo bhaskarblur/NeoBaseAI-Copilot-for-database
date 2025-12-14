@@ -82,7 +82,7 @@ export default function MessageInput({ isConnected, onSendMessage, isExpanded, c
                             }}
                             placeholder={
                                 isConnected
-                                    ? "Ask what you want.."
+                                    ? "Ask about your data.."
                                     : "You are not connected to your database..."
                             }
                             className="

@@ -1,4 +1,4 @@
-import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon } from 'lucide-react';
+import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
@@ -287,7 +287,7 @@ export default function ChatHeader({
                         >
                             {viewMode === 'pinned' ? (
                                 <>
-                                    <PinIcon className="w-4 h-4 mr-2 text-black rotate-45" />
+                                    <PinOffIcon className="w-4 h-4 mr-2 text-black rotate-45" />
                                     Hide Pinned
                                 </>
                             ) : (

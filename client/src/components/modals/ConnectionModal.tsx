@@ -591,7 +591,7 @@ export default function ConnectionModal({
             }
           }
           
-          setSuccessMessage("Files uploaded successfully. Loading data structure...");
+          setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
           
           // Wait a bit for the backend to process the files
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -706,7 +706,7 @@ export default function ConnectionModal({
                 }
               }
               
-              setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
               
               // Clear the uploaded files from the state
               setFileUploads([]);
@@ -841,7 +841,7 @@ export default function ConnectionModal({
                     }
                   }
                   
-                  setSuccessMessage("Files uploaded successfully. Loading data structure...");
+                  setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
                 } else if (updatedFormData.type === 'google_sheets') {
                   setSuccessMessage("Syncing Google Sheets data...");
                 }
@@ -890,7 +890,7 @@ export default function ConnectionModal({
               
               console.log('Connection created. Now you can select tables to include in your schema.');
               setSuccessMessage(updatedFormData.type === 'spreadsheet' 
-                ? "Files uploaded successfully. Review your data structure."
+                ? "Files uploaded successfully. Review your Knowledge Base Tables."
                 : "Connection created successfully. Select tables to include in your schema.");
             } catch (error: any) {
               console.error('Failed to load tables for new connection:', error);
@@ -1084,7 +1084,7 @@ DATABASE_PASSWORD=`; // Mask password
     
     // For spreadsheet/Google Sheets connections, just close the modal since data is already saved
     if (formData.type === 'spreadsheet' || formData.type === 'google_sheets') {
-      setSuccessMessage("Data structure saved successfully");
+      setSuccessMessage("Knowledge Base saved successfully");
       // Give the success message time to show before closing
       setTimeout(() => {
         onClose(currentChatData);
@@ -1115,7 +1115,7 @@ DATABASE_PASSWORD=`; // Mask password
         await onUpdateSelectedCollections(chatId, formattedSelection);
         
         // Show success message - will auto-dismiss after 3 seconds
-        setSuccessMessage("Schema selection updated successfully");
+        setSuccessMessage("Knowledge Base Tables updated successfully");
         
         // If this is a new connection (no initialData), close the modal after updating schema
         if (!initialData && showingNewlyCreatedSchema) {
@@ -1377,7 +1377,7 @@ DATABASE_PASSWORD=`; // Mask password
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Data Structure' : 'Schema'}</span>
+                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Knowledge Base' : 'Knowledge Base'}</span>
               </div>
             </button>
           )}
@@ -1458,14 +1458,14 @@ DATABASE_PASSWORD=`; // Mask password
                 <span>
                   {!initialData 
                     ? (showingNewlyCreatedSchema && activeTab === 'schema') 
-                      ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Save Structure' : 'Save Schema') 
+                      ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Save Knowledge' : 'Save Knowledge') 
                       : (showingNewlyCreatedSchema && activeTab === 'connection' && formData.type === 'spreadsheet')
                         ? 'Upload Files'
                         : 'Create' 
                     : activeTab === 'settings' 
                       ? 'Update Settings' 
                       : activeTab === 'schema' 
-                        ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Update Structure' : 'Update Schema') 
+                        ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Update Knowledge' : 'Update Knowledge') 
                         : (showingNewlyCreatedSchema && formData.type === 'spreadsheet' && fileUploads.length > 0)
                           ? 'Upload Files'
                           : 'Update Connection'}

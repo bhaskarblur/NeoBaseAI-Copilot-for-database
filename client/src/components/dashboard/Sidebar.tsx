@@ -708,8 +708,8 @@ export default function Sidebar({
         <div 
           className="fixed w-48 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100] connection-dropdown-menu"
           style={{
-            top: `${menuPosition.top}px`,
-            left: `${menuPosition.left}px`,
+            top: `${menuPosition.top + (window.innerWidth < 768 ? 48 : 0)}px`,
+            left: `${menuPosition.left - (window.innerWidth < 768 ? 110 : 0)}px`,
             transform: 'none'
           }}
           onClick={(e) => e.stopPropagation()}

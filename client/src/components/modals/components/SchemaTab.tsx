@@ -50,11 +50,11 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
       {isLoadingTables ? (
         <div className="flex flex-col items-center justify-center py-12">
           <Loader2 className="w-10 h-10 animate-spin text-gray-400 mb-4" />
-          <span className="text-gray-600 font-medium">Loading Schema...</span>
+          <span className="text-gray-600 font-medium">Loading Knowledge Base Tables...</span>
           <p className="text-gray-500 text-sm mt-2 text-center max-w-md">
-            This may take a moment depending on the size of your database schema.
+            This may take a moment depending on the size of your data.
             <br />
-            Large databases with many tables/collections may take longer to load.
+            Large data sources with many tables may take longer to load.
           </p>
         </div>
       ) : (
@@ -70,13 +70,13 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
               <span className="font-bold text-lg">All & Auto Detect</span>
             </label>
             <p className="text-gray-600 text-sm mt-1 ml-7">
-              Select all tables/collections in the database. This option auto detects the added/removed entities in the database.
+              Select all tables in the database. This option auto detects the added/removed entities in the database.
             </p>
           </div>
 
           <div className="mt-4">
             <div className="flex flex-col md:flex-row gap-2 md:gap-0 justify-between items-start md:items-center mt-6 mb-2">
-              <h3 className="font-bold text-lg">Individual Tables/Collections</h3>
+              <h3 className="font-bold text-lg">Knowledge Base Tables</h3>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-600">
                   {selectAllTables ? 'All' : `${selectedTables?.length}/${tables?.length}`} selected
@@ -101,7 +101,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
               </div>
             </div>
             <p className="text-gray-600 text-sm mb-4">
-              Or select specific tables to include in your database schema.
+              Or select specific tables to include in your knowledge base.
             </p>
 
             {/* Search input */}
@@ -129,7 +129,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
             <div className="space-y-2 max-h-[40vh] overflow-y-auto neo-border p-4 rounded-lg">
               {filteredTables.length === 0 ? (
                 <div className="text-center py-4 text-gray-500">
-                  {schemaSearchQuery ? 'No tables/collections match your search' : 'No tables/collections found in database'}
+                  {schemaSearchQuery ? 'No tables match your search' : 'No tables found in database'}
                 </div>
               ) : (
                 filteredTables.map(table => (
@@ -182,7 +182,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
 
           <div className="mt-6">
             <p className="text-gray-500 text-sm text-center">
-              When schema selection is updated, knowledge base will be automatically refreshed in the background which may take time depending on the size of the database.
+              When tables selection is updated, knowledge base will be automatically refreshed in the background which may take 1-2 minutes depending on the size of your data.
             </p>
           </div>
         </div>
