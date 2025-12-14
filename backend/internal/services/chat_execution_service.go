@@ -2238,7 +2238,6 @@ func (s *chatService) processMessage(_ context.Context, userID, chatID, messageI
 // RefreshSchema refreshes the schema of the chat & stores the latest schema in the database
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error) {
 	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
-
 	// Increase the timeout for the initial context to 60 minutes
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
@@ -2247,11 +2246,16 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 	case <-ctx.Done():
 		return http.StatusOK, nil
 	default:
-		// Check if connection exists
+		// Check if connection exists, if not create one
 		_, exists := s.dbManager.GetConnectionInfo(chatID)
 		if !exists {
-			log.Printf("ChatService -> RefreshSchema -> Connection not found for chatID: %s", chatID)
-			return http.StatusNotFound, fmt.Errorf("connection not found")
+			log.Printf("ChatService -> RefreshSchema -> Connection not found for chatID: %s, attempting to create connection", chatID)
+			status, err := s.ConnectDB(ctx, userID, chatID, "") // Stream Id here is fine and can be empty, it won't affect anything in SSE communication
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Failed to create connection: %v", err)
+				return status, err
+			}
+			log.Printf("ChatService -> RefreshSchema -> Connection created successfully for chatID: %s", chatID)
 		}
 
 		// Get chat to get selected collections
@@ -2329,6 +2333,13 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 			}
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+
+			// Clear cached recommendations since schema is being refreshed
+			if err := s.clearRecommendationsCache(context.Background(), chatID); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Warning: Failed to clear recommendations cache: %v", err)
+				// Don't return error as this is not critical to the operation
+			}
+
 			dataChan <- nil // Will be used to Synchronous refresh
 		}()
 
@@ -2792,4 +2803,17 @@ func (s *chatService) secureRandomInt(max int) (int, error) {
 	}
 
 	return int(n.Int64()), nil
+}
+
+// clearRecommendationsCache clears the cached query recommendations for a chat
+func (s *chatService) clearRecommendationsCache(ctx context.Context, chatID string) error {
+	cacheKey := fmt.Sprintf("recommendations:%s", chatID)
+	err := s.redisRepo.Del(cacheKey, ctx)
+	if err != nil {
+		log.Printf("ChatService -> clearRecommendationsCache -> Warning: Failed to clear recommendations cache for chatID %s: %v", chatID, err)
+		// Don't return error as this is not critical to the operation
+		return nil
+	}
+	log.Printf("ChatService -> clearRecommendationsCache -> Successfully cleared recommendations cache for chatID %s", chatID)
+	return nil
 }
