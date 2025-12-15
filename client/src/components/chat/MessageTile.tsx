@@ -991,7 +991,28 @@ export default function MessageTile({
             return <div className="text-gray-500">{displayMessage}</div>;
         }
 
-        const columns = Object.keys(data[0]);
+        // Collect all unique columns from all rows, preserving order from first row
+        const columnSet = new Set<string>();
+        const columnOrder: string[] = [];
+        
+        // First, add columns from the first row in order
+        const firstRowColumns = Object.keys(data[0]);
+        firstRowColumns.forEach(col => {
+            columnSet.add(col);
+            columnOrder.push(col);
+        });
+        
+        // Then, add any columns from subsequent rows that weren't in the first row
+        for (let i = 1; i < data.length; i++) {
+            Object.keys(data[i]).forEach(col => {
+                if (!columnSet.has(col)) {
+                    columnSet.add(col);
+                    columnOrder.push(col);
+                }
+            });
+        }
+        
+        const columns = columnOrder;
         
         // Detect date columns
         const dateColumnList = columns.filter(column => {
