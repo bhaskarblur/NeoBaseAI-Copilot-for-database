@@ -423,7 +423,7 @@ function AppContent() {
             handleConnectionStatusChange(id, true, 'edit-connection');
           } catch (error) {
             console.error('Error during reconnection:', error);
-            toast.error('Failed to reconnect to database. Please try reconnecting manually.', {
+            toast.error('Failed to reconnect to data source. Please try reconnecting manually.', {
               style: {
                 background: '#000',
                 color: '#fff',
@@ -434,7 +434,7 @@ function AppContent() {
           }
         } else if (credentialsChanged) {
           // If credentials changed but no streamId, show a notification
-          toast.error('Connection details updated. Please reconnect to the database.', {
+          toast.error('Connection details updated. Please reconnect to the data source.', {
             style: {
               background: '#000',
               color: '#fff',

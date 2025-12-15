@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Chat, ChatSettings, Connection, TableInfo, FileUpload } from '../../types/chat';
+import { Chat, ChatSettings, Connection, TableInfo, FileUpload, SSHAuthMethod } from '../../types/chat';
 import chatService from '../../services/chatService';
 import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab, GoogleSheetsTab } from './components';
 import ConfirmationModal from './ConfirmationModal';
@@ -100,8 +100,11 @@ export default function ConnectionModal({
     ssh_host: initialData?.connection.ssh_host || '',
     ssh_port: initialData?.connection.ssh_port || '22',
     ssh_username: initialData?.connection.ssh_username || '',
+    ssh_auth_method: initialData?.connection.ssh_auth_method || SSHAuthMethod.PublicKey,
     ssh_private_key: initialData?.connection.ssh_private_key || '',
+    ssh_private_key_url: initialData?.connection.ssh_private_key_url || '',
     ssh_passphrase: initialData?.connection.ssh_passphrase || '',
+    ssh_password: initialData?.connection.ssh_password || '',
     is_example_db: false,
     // Google Sheets specific fields
     google_sheet_id: initialData?.connection.google_sheet_id || '',
@@ -372,8 +375,8 @@ export default function ConnectionModal({
         }
         break;
       case 'ssh_private_key':
-        if (value.ssh_enabled && !value.ssh_private_key?.trim()) {
-          return 'SSH Private Key is required';
+        if (value.ssh_enabled && value.ssh_auth_method === SSHAuthMethod.PublicKey && !value.ssh_private_key?.trim()) {
+          return 'SSH Private Key is required for public key authentication';
         }
         break;
       default:
@@ -487,7 +490,7 @@ export default function ConnectionModal({
         return;
       }
     } else {
-      // Always validate these fields for database connections
+      // Always validate these fields for database connections (both basic and SSH)
       ['host', 'port', 'database', 'username'].forEach(field => {
         const error = validateField(field, updatedFormData);
         if (error) {
@@ -513,13 +516,25 @@ export default function ConnectionModal({
 
     // Validate SSH fields if SSH tab is active
     if (connectionType === 'ssh') {
-      ['ssh_host', 'ssh_port', 'ssh_username', 'ssh_private_key'].forEach(field => {
+      // Always validate these SSH fields
+      ['ssh_host', 'ssh_port', 'ssh_username'].forEach(field => {
         const error = validateField(field, updatedFormData);
         if (error) {
           newErrors[field as keyof FormErrors] = error;
           hasErrors = true;
         }
       });
+      
+      // Validate auth method specific fields
+      if (updatedFormData.ssh_auth_method === SSHAuthMethod.PublicKey) {
+        // For public key auth, validate private key field
+        const error = validateField('ssh_private_key', updatedFormData);
+        if (error) {
+          newErrors.ssh_private_key = error;
+          hasErrors = true;
+        }
+      }
+      // For password auth, no additional validation needed - password is optional and can be set in the tab
     }
 
     setErrors(newErrors);

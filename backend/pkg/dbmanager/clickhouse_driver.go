@@ -31,6 +31,60 @@ func NewClickHouseDriver() DatabaseDriver {
 func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var dsn string
 	var tempFiles []string
+	var sshTunnel *SSHTunnel
+	var connectHost string
+
+	// Establish SSH tunnel if configured
+	if config.SSHEnabled && config.SSHHost != nil && config.SSHPort != nil && config.SSHUsername != nil {
+		log.Printf("ClickHouseDriver -> Connect -> Establishing SSH tunnel for ClickHouse connection")
+
+		// Determine SSH auth method
+		authMethod := SSHAuthMethodPublicKey // Default
+		if config.SSHAuthMethod != nil {
+			authMethod = ToSSHAuthMethod(*config.SSHAuthMethod)
+		}
+
+		var tunnel *SSHTunnel
+		var err error
+
+		if authMethod == SSHAuthMethodPassword && config.SSHPassword != nil {
+			// Use password-based authentication
+			tunnel, err = CreateSSHTunnelWithPassword(*config.SSHHost, *config.SSHPort, *config.SSHUsername, *config.SSHPassword)
+		} else {
+			// Use public key authentication
+			privateKey := ""
+			if config.SSHPrivateKey != nil {
+				privateKey = *config.SSHPrivateKey
+			} else if config.SSHPrivateKeyURL != nil {
+				// Load private key from URL
+				var err error
+				privateKey, err = LoadPrivateKeyFromURL(*config.SSHPrivateKeyURL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load SSH private key from URL: %v", err)
+				}
+			}
+
+			if privateKey == "" {
+				return nil, fmt.Errorf("SSH private key is required for public key authentication")
+			}
+
+			tunnel, err = CreateSSHTunnel(*config.SSHHost, *config.SSHPort, *config.SSHUsername, privateKey, getValue(config.SSHPassphrase))
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH tunnel: %v", err)
+		}
+
+		sshTunnel = tunnel
+		connectHost = "localhost" // When using SSH tunnel, connect through localhost
+		defer func() {
+			if err != nil {
+				sshTunnel.Close()
+			}
+		}()
+	} else {
+		connectHost = config.Host
+	}
 
 	// Base connection parameters
 	protocol := "tcp"
@@ -49,6 +103,9 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 			// Fetch certificates from URLs
 			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
+				if sshTunnel != nil {
+					sshTunnel.Close()
+				}
 				return nil, err
 			}
 
@@ -84,6 +141,9 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 					for _, file := range tempFiles {
 						os.Remove(file)
 					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
+					}
 					return nil, fmt.Errorf("failed to load client certificates: %v", err)
 				}
 				tlsConfig.Certificates = []tls.Certificate{cert}
@@ -98,12 +158,18 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 					for _, file := range tempFiles {
 						os.Remove(file)
 					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
+					}
 					return nil, fmt.Errorf("failed to read CA certificate: %v", err)
 				}
 				if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
 					// Clean up temporary files
 					for _, file := range tempFiles {
 						os.Remove(file)
+					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
 					}
 					return nil, fmt.Errorf("failed to append CA certificate")
 				}
@@ -118,10 +184,10 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 	// Build DSN
 	if config.Password != nil {
 		dsn = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-			protocol, *config.Username, *config.Password, config.Host, *config.Port, config.Database)
+			protocol, *config.Username, *config.Password, connectHost, *config.Port, config.Database)
 	} else {
 		dsn = fmt.Sprintf("%s://%s@%s:%s/%s",
-			protocol, *config.Username, config.Host, *config.Port, config.Database)
+			protocol, *config.Username, connectHost, *config.Port, config.Database)
 	}
 
 	// Add parameters
@@ -146,6 +212,9 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 		// Clean up temporary files
 		for _, file := range tempFiles {
 			os.Remove(file)
+		}
+		if sshTunnel != nil {
+			sshTunnel.Close()
 		}
 		return nil, fmt.Errorf("failed to connect to ClickHouse: %v", err)
 	}
@@ -190,6 +259,15 @@ func (d *ClickHouseDriver) Connect(config ConnectionConfig) (*Connection, error)
 
 // Disconnect closes a ClickHouse database connection
 func (d *ClickHouseDriver) Disconnect(conn *Connection) error {
+	// Close SSH tunnel if present
+	if conn.SSHTunnel != nil {
+		if sshTunnel, ok := conn.SSHTunnel.(*SSHTunnel); ok {
+			if err := sshTunnel.Close(); err != nil {
+				log.Printf("ClickHouseDriver -> Disconnect -> Warning: Failed to close SSH tunnel: %v", err)
+			}
+		}
+	}
+
 	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
@@ -463,4 +541,3 @@ func (d *ClickHouseDriver) FetchExampleRecords(ctx context.Context, db DBExecuto
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
-

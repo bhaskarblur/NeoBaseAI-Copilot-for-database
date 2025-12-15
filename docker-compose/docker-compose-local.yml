@@ -122,6 +122,7 @@ services:
         - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL}
         - VITE_API_URL=${VITE_API_URL}
         - VITE_ENVIRONMENT=${VITE_ENVIRONMENT}
+        - VITE_NEOBASE_WHITELIST_ADDRESSES=${VITE_NEOBASE_WHITELIST_ADDRESSES}
     container_name: neobase-client
     restart: always
     ports:

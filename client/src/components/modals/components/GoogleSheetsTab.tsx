@@ -319,7 +319,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         <div className="flex items-start gap-2">
           <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-blue-800">
-            <p className="font-medium mb-2">How to connect Google Sheets:</p>
+            <p className="font-semibold mb-2 text-base">How to connect Google Sheets:</p>
             <ol className="list-decimal ml-4 space-y-1">
               <li>Click "Authenticate with Google" to sign in to your Google account</li>
               <li><strong>Grant read-only</strong> access to your Google Sheets</li>

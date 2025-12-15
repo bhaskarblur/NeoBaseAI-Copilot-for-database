@@ -25,11 +25,68 @@ func NewPostgresDriver() DatabaseDriver {
 func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var dsn string
 	var tempFiles []string
+	var sshTunnel *SSHTunnel
+
+	// Establish SSH tunnel if configured
+	if config.SSHEnabled && config.SSHHost != nil && config.SSHPort != nil && config.SSHUsername != nil {
+		log.Printf("PostgresDriver -> Connect -> Establishing SSH tunnel for PostgreSQL connection")
+
+		// Determine SSH auth method
+		authMethod := SSHAuthMethodPublicKey // Default
+		if config.SSHAuthMethod != nil {
+			authMethod = ToSSHAuthMethod(*config.SSHAuthMethod)
+		}
+
+		var tunnel *SSHTunnel
+		var err error
+
+		if authMethod == SSHAuthMethodPassword && config.SSHPassword != nil {
+			// Use password-based authentication
+			tunnel, err = CreateSSHTunnelWithPassword(*config.SSHHost, *config.SSHPort, *config.SSHUsername, *config.SSHPassword)
+		} else {
+			// Use public key authentication
+			privateKey := ""
+			if config.SSHPrivateKey != nil {
+				privateKey = *config.SSHPrivateKey
+			} else if config.SSHPrivateKeyURL != nil {
+				// Load private key from URL
+				var err error
+				privateKey, err = LoadPrivateKeyFromURL(*config.SSHPrivateKeyURL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load SSH private key from URL: %v", err)
+				}
+			}
+
+			if privateKey == "" {
+				return nil, fmt.Errorf("SSH private key is required for public key authentication")
+			}
+
+			tunnel, err = CreateSSHTunnel(*config.SSHHost, *config.SSHPort, *config.SSHUsername, privateKey, getValue(config.SSHPassphrase))
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH tunnel: %v", err)
+		}
+
+		sshTunnel = tunnel
+		defer func() {
+			if err != nil {
+				sshTunnel.Close()
+			}
+		}()
+	}
+
+	// Determine the host to connect to
+	connectHost := config.Host
+	if sshTunnel != nil {
+		// When using SSH tunnel, connect through localhost
+		connectHost = "localhost"
+	}
 
 	// Base connection parameters
 	baseParams := fmt.Sprintf(
 		"host=%s port=%s user=%s dbname=%s",
-		config.Host,
+		connectHost,
 		*config.Port, // Dereference the port pointer
 		*config.Username,
 		config.Database,
@@ -134,6 +191,7 @@ func (d *PostgresDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		Subscribers: make(map[string]bool),
 		SubLock:     sync.RWMutex{},
 		TempFiles:   tempFiles,
+		SSHTunnel:   sshTunnel,
 	}
 
 	return conn, nil
@@ -149,6 +207,15 @@ func (d *PostgresDriver) Disconnect(conn *Connection) error {
 	// Close the connection
 	if err := sqlDB.Close(); err != nil {
 		return fmt.Errorf("failed to close connection: %v", err)
+	}
+
+	// Close SSH tunnel if present
+	if conn.SSHTunnel != nil {
+		if sshTunnel, ok := conn.SSHTunnel.(*SSHTunnel); ok {
+			if err := sshTunnel.Close(); err != nil {
+				log.Printf("PostgresDriver -> Disconnect -> Warning: Failed to close SSH tunnel: %v", err)
+			}
+		}
 	}
 
 	// Clean up temporary certificate files
@@ -1129,11 +1196,18 @@ func (d *PostgresDriver) FetchExampleRecords(ctx context.Context, db DBExecutor,
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch example records for table %s: %v", table, err)
 	}
-
 	// If no records found, return empty slice
 	if len(records) == 0 {
 		return []map[string]interface{}{}, nil
 	}
 
 	return records, nil
+}
+
+// Helper function to get value from pointer or empty string
+func getValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

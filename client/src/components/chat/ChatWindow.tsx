@@ -498,9 +498,9 @@ export default function ChatWindow({
       console.log('connectionStatus', connectionStatus);
       onConnectionStatusChange?.(chat.id, true, 'chat-window-reconnect');
     } catch (error) {
-      console.error('Failed to reconnect to database:', error);
+      console.error('Failed to reconnect to data source:', error);
       onConnectionStatusChange?.(chat.id, false, 'chat-window-reconnect');
-      toast.error('Failed to reconnect to database:' + error, {
+      toast.error('Failed to reconnect to data source:' + error, {
         style: {
           background: '#ff4444',
           color: '#fff',
@@ -539,7 +539,7 @@ export default function ChatWindow({
       handleCloseConfirm();
     } catch (error) {
       console.error('Failed to disconnect:', error);
-      toast.error('Failed to disconnect from database');
+      handleCloseConfirm();
     }
   }, [onCloseConnection, handleCloseConfirm]);
 

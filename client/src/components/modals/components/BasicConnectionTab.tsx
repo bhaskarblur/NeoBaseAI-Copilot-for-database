@@ -634,8 +634,6 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
         </div>
       </div>
 
-      {/* Divider line */}
-      <div className="border-t border-gray-200 my-6"></div>
 
       {/* SSL Mode Selector - Only show when SSL is enabled */}
       {formData.use_ssl && (
@@ -657,7 +655,7 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
               <ChevronDown className="w-5 h-5 text-gray-400" />
             </div>
           </div>
-          <p className="text-gray-500 text-xs mt-2">
+          <p className="text-gray-500 text-sm mt-3">
             {formData.ssl_mode === 'disable' && 'SSL will not be used.'}
             {formData.ssl_mode === 'require' && 'Connection must be encrypted, but certificates are not verified.'}
             {formData.ssl_mode === 'verify-ca' && 'Connection must be encrypted and the server certificate must be verified.'}
@@ -723,6 +721,9 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* Divider line */}
+      <div className="border-t border-gray-200 my-6"></div>
 
       {/* Whitelist Server Addresses Section */}
       {getWhitelistAddresses().length > 0 && (

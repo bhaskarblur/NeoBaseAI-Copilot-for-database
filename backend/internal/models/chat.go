@@ -27,11 +27,22 @@ type Connection struct {
 	SSLKeyURL      *string `bson:"ssl_key_url,omitempty" json:"ssl_key_url,omitempty"`
 	SSLRootCertURL *string `bson:"ssl_root_cert_url,omitempty" json:"ssl_root_cert_url,omitempty"`
 
+	// SSH Tunnel Configuration
+	SSHEnabled       bool    `bson:"ssh_enabled,omitempty" json:"ssh_enabled,omitempty"`
+	SSHHost          *string `bson:"ssh_host,omitempty" json:"ssh_host,omitempty"`
+	SSHPort          *string `bson:"ssh_port,omitempty" json:"ssh_port,omitempty"`
+	SSHUsername      *string `bson:"ssh_username,omitempty" json:"ssh_username,omitempty"`
+	SSHAuthMethod    *string `bson:"ssh_auth_method,omitempty" json:"ssh_auth_method,omitempty"`         // "publickey" or "password"
+	SSHPrivateKey    *string `bson:"ssh_private_key,omitempty" json:"-"`                                 // Hide in JSON
+	SSHPrivateKeyURL *string `bson:"ssh_private_key_url,omitempty" json:"ssh_private_key_url,omitempty"` // URL to fetch from
+	SSHPassphrase    *string `bson:"ssh_passphrase,omitempty" json:"-"`                                  // Hide in JSON
+	SSHPassword      *string `bson:"ssh_password,omitempty" json:"-"`                                    // Hide in JSON
+
 	// Google Sheets specific fields
 	GoogleSheetID      *string `bson:"google_sheet_id,omitempty" json:"google_sheet_id,omitempty"`
 	GoogleSheetURL     *string `bson:"google_sheet_url,omitempty" json:"google_sheet_url,omitempty"` // Encrypted, show in JSON for user reference
-	GoogleAuthToken    *string `bson:"google_auth_token,omitempty" json:"-"` // Hide in JSON
-	GoogleRefreshToken *string `bson:"google_refresh_token,omitempty" json:"-"` // Hide in JSON
+	GoogleAuthToken    *string `bson:"google_auth_token,omitempty" json:"-"`                         // Hide in JSON
+	GoogleRefreshToken *string `bson:"google_refresh_token,omitempty" json:"-"`                      // Hide in JSON
 
 	Base `bson:",inline"`
 }

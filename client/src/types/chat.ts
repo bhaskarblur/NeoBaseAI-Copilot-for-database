@@ -1,6 +1,12 @@
 // Create a new file for chat types
 export type SSLMode = 'disable' | 'require' | 'verify-ca' | 'verify-full';
 
+// SSH Authentication Method Enum
+export enum SSHAuthMethod {
+    PublicKey = 'publickey',
+    Password = 'password',
+}
+
 export interface FileUpload {
     id: string;
     filename: string;
@@ -43,8 +49,11 @@ export interface Connection {
     ssh_host?: string;
     ssh_port?: string;
     ssh_username?: string;
+    ssh_auth_method?: SSHAuthMethod; // Use enum for type safety
     ssh_private_key?: string;
+    ssh_private_key_url?: string; // URL to fetch private key from
     ssh_passphrase?: string;
+    ssh_password?: string; // For password-based SSH auth
     // Spreadsheet specific fields
     file_uploads?: FileUpload[];
     schema_name?: string; // Schema name in the CSV PostgreSQL database
