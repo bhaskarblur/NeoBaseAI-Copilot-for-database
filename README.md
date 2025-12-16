@@ -1,5 +1,7 @@
 # NeoBase - AI Copilot for Database
-<img width="1707" alt="Screenshot 2025-02-10 at 7 12 19 PM" src="https://github.com/user-attachments/assets/50c36c8b-52f4-49c8-8b2b-d7b98279aa52" />
+<!-- <img width="1707" alt="Screenshot 2025-02-10 at 7 12 19 PM" src="https://github.com/user-attachments/assets/50c36c8b-52f4-49c8-8b2b-d7b98279aa52" /> -->
+
+<img width="1850" height="971" alt="neobase-banner" src="https://github.com/user-attachments/assets/1c88e3d2-6ae8-4398-a816-c5bf7224d08a" />
 
 
 **NeoBase** is an AI-powered database assistant that helps you manage, query, and optimize your databases effortlessly. With a sleek Neo Brutalism design and real-time chat functionality, NeoBase makes database visualization intuitive and efficient.
