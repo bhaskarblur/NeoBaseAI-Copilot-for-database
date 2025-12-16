@@ -8,8 +8,11 @@
 **NeoBase** is an AI database copilot that allows you to chat with your data and visualize, analyze it quickly and easily. With a sleek Neo Brutalism design and real-time conversation, NeoBase makes database visualization intuitive and efficient.
 
 ## Screenshots
-<img width="1708" alt="Screenshot 2025-03-14 at 1 08 09 PM" src="https://github.com/user-attachments/assets/413a2a91-98a3-4bda-b12f-46fb8c826f4a" />
-<img width="1697" alt="Screenshot 2025-04-26 at 3 44 23 PM" src="https://github.com/user-attachments/assets/42828bb6-7725-4e5c-831a-8e4dc3990b19" />
+
+<!-- <img width="1708" alt="Screenshot 2025-03-14 at 1 08 09 PM" src="https://github.com/user-attachments/assets/413a2a91-98a3-4bda-b12f-46fb8c826f4a" /> -->
+<img width="1709" height="901" alt="Screenshot 2025-12-17 at 12 42 17 AM" src="https://github.com/user-attachments/assets/b0d85b73-cdf4-4259-ad15-1b2a7d966ea0" />
+<!-- <img width="1697" alt="Screenshot 2025-04-26 at 3 44 23 PM" src="https://github.com/user-attachments/assets/42828bb6-7725-4e5c-831a-8e4dc3990b19" /> -->
+<img width="1709" height="900" alt="Screenshot 2025-12-17 at 12 44 37 AM" src="https://github.com/user-attachments/assets/732e96e9-7e30-433d-8ecd-5dd70474ce76" />
 
 
 ## Features
