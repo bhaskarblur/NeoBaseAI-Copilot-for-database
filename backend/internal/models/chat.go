@@ -5,9 +5,10 @@ import (
 )
 
 type ChatSettings struct {
-	AutoExecuteQuery bool `bson:"auto_execute_query" json:"auto_execute_query,omitempty"` // default is false, Execute query automatically when LLM response is received
-	ShareDataWithAI  bool `bson:"share_data_with_ai" json:"share_data_with_ai,omitempty"` // default is false, Don't share data with AI
-	NonTechMode      bool `bson:"non_tech_mode" json:"non_tech_mode,omitempty"`           // default is false, Enable non-technical mode for simplified responses
+	AutoExecuteQuery bool   `bson:"auto_execute_query" json:"auto_execute_query,omitempty"` // default is false, Execute query automatically when LLM response is received
+	ShareDataWithAI  bool   `bson:"share_data_with_ai" json:"share_data_with_ai,omitempty"` // default is false, Don't share data with AI
+	NonTechMode      bool   `bson:"non_tech_mode" json:"non_tech_mode,omitempty"`           // default is false, Enable non-technical mode for simplified responses
+	SelectedLLMModel string `bson:"selected_llm_model" json:"selected_llm_model,omitempty"` // LLM model selected for this chat (e.g., "gpt-4o", "gemini-2.0-flash")
 }
 
 type Connection struct {
@@ -52,6 +53,7 @@ type Chat struct {
 	Connection          Connection         `bson:"connection" json:"connection"`
 	SelectedCollections string             `bson:"selected_collections" json:"selected_collections"` // "ALL" or comma-separated table names
 	Settings            ChatSettings       `bson:"settings" json:"settings"`
+	PreferredLLMModel   *string            `bson:"preferred_llm_model" json:"preferred_llm_model"` // User's preferred LLM model for this chat
 	Base                `bson:",inline"`
 }
 

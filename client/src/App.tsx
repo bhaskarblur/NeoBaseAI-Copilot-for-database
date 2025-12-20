@@ -497,7 +497,7 @@ function AppContent() {
       return;
     }
     const currentConnection = selectedConnection;
-    const connection = chats.find(c => c.id === id);
+    let connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
       
@@ -506,6 +506,15 @@ function AppContent() {
       // Clear messages immediately when switching chats
       if (currentConnection?.id !== connection.id) {
         setMessages([]);
+      }
+      
+      // Fetch full chat details to include preferred_llm_model
+      try {
+        connection = await chatService.getChat(id);
+        console.log('Fetched full chat details with preferred_llm_model:', connection.preferred_llm_model);
+      } catch (error) {
+        console.error('Failed to fetch full chat details, using cached version:', error);
+        // Fall back to cached chat from chats array
       }
       
       // Set the connection immediately for smooth transition
@@ -875,12 +884,13 @@ function AppContent() {
     console.log('new stream id', streamId);
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, llmModel?: string) => {
     if (!selectedConnection?.id || !streamId || isMessageSending) return;
 
     try {
       setIsMessageSending(true);
       console.log('handleSendMessage -> content', content);
+      console.log('handleSendMessage -> llmModel', llmModel);
       console.log('handleSendMessage -> streamId', streamId);
 
       // Check if the eventSource is open
@@ -896,7 +906,7 @@ function AppContent() {
 
       // Wait for 100 ms for the eventSource to be open
       await new Promise(resolve => setTimeout(resolve, 100));
-      const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
+      const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content, llmModel);
 
       // Update the chat updated_at field of the selected connection
       if (selectedConnection) {
@@ -1129,7 +1139,9 @@ function AppContent() {
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
                         action_at: response.data.action_at,
-                        non_tech_mode: response.data.non_tech_mode
+                        non_tech_mode: response.data.non_tech_mode,
+                        llm_model: response.data.llm_model, // Store the LLM model ID
+                        llm_model_name: response.data.llm_model_name // Store the LLM model display name
                       };
                     }
                     return msg;
@@ -1176,7 +1188,9 @@ function AppContent() {
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
                   action_at: response.data.action_at,
-                  non_tech_mode: response.data.non_tech_mode
+                  non_tech_mode: response.data.non_tech_mode,
+                  llm_model: response.data.llm_model, // Store the LLM model ID
+                  llm_model_name: response.data.llm_model_name // Store the LLM model display name
                 };
 
                 // Add the new message to the array
@@ -1558,7 +1572,7 @@ function AppContent() {
   return (
     <div className="flex flex-col md:flex-row bg-[#FFDB58]/10 min-h-screen">
       {/* Mobile header with StarUsButton */}
-      <div className={`${!isSidebarExpanded ? 'hidden' : 'fixed'} md:fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-between px-4`}>
+      <div className={`${!isSidebarExpanded && selectedConnection ? 'hidden' : 'fixed'} md:fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-between px-4`}>
         <div className="flex items-center gap-2">
           <Boxes className="w-8 h-8" />
           <h1 className="text-2xl font-bold">NeoBase</h1>

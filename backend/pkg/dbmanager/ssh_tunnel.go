@@ -202,6 +202,9 @@ func LoadPrivateKeyFromURL(keyURL string) (string, error) {
 
 // Close closes the SSH tunnel
 func (t *SSHTunnel) Close() error {
+	if t == nil {
+		return nil // Safely handle nil tunnel
+	}
 	if t.ServerConn != nil {
 		log.Printf("SSHTunnel -> Close -> Closing SSH connection to %s:%s", t.SSHHost, t.SSHPort)
 		return t.ServerConn.Close()

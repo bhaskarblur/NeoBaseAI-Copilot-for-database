@@ -161,14 +161,15 @@ const chatService = {
             throw new Error(error.response?.data?.error || 'Failed to get messages');
         }
     },
-    async sendMessage(chatId: string, messageId: string, streamId: string, content: string): Promise<SendMessageResponse> {
+    async sendMessage(chatId: string, messageId: string, streamId: string, content: string, llmModel?: string): Promise<SendMessageResponse> {
         try {
             const response = await axios.post<SendMessageResponse>(
                 `${API_URL}/chats/${chatId}/messages`,
                 {
                     message_id: messageId,
                     stream_id: streamId,
-                    content: content
+                    content: content,
+                    llm_model: llmModel
                 },
                 {
                     withCredentials: true,

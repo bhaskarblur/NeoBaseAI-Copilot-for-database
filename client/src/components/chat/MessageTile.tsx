@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Pin, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, Cpu, History, Loader, Pencil, Pin, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -53,7 +53,7 @@ interface MessageTileProps {
     isSearchResult?: boolean;
     isCurrentSearchResult?: boolean;
     searchResultRefs?: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
-    buttonCallback?: (action: string) => void;
+    buttonCallback?: (action: string, label?: string) => void;
     userId?: string;
     userName?: string;
     onPinMessage?: (messageId: string, isPinned: boolean) => Promise<void>;
@@ -2253,10 +2253,12 @@ export default function MessageTile({
                     <div className="
             absolute 
             left-0 
+            right-0
             -bottom-9
             md:-bottom-10 
             flex 
             gap-1
+            items-center
             z-[5]
           ">
                         <button
@@ -2301,6 +2303,8 @@ export default function MessageTile({
                         >
                             <Pin className={`w-4 h-4 rotate-45 ${message.is_pinned ? 'text-black fill-black' : 'text-gray-800'}`} />
                         </button>
+                        
+                        {/* Copy and Pin icons only - model name is shown in message bubble */}
                     </div>
                 )}
                 <div className={`
@@ -2385,16 +2389,20 @@ export default function MessageTile({
                              (
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                  <div className='flex flex-col gap-1'>
-                                    {message.type === 'user' ? (
-                                        <p className='text-lg whitespace-pre-wrap break-words'>
-                                            {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
-                                        </p>) :
-                                    (   <MarkdownRenderer 
-                                            markdown={removeDuplicateContent(message.content)}
-                                            searchQuery={searchQuery}
-                                        />
-                                    )
-                                    }
+                                    <div className="flex items-flex-start justify-between gap-3">
+                                        <div className="flex-1">
+                                            {message.type === 'user' ? (
+                                                <p className='text-lg whitespace-pre-wrap break-words'>
+                                                    {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
+                                                </p>) :
+                                            (   <MarkdownRenderer 
+                                                    markdown={removeDuplicateContent(message.content)}
+                                                    searchQuery={searchQuery}
+                                                />
+                                            )
+                                            }
+                                        </div>
+                                    </div>
                                     {message.is_edited && message.type === 'user' && (
                                         <span className="text-xs text-gray-600 italic">
                                             (edited)
@@ -2426,7 +2434,7 @@ export default function MessageTile({
                                                     key={button.id}
                                                     onClick={() => {
                                                         if (buttonCallback) {
-                                                            buttonCallback(button.action);
+                                                            buttonCallback(button.action, button.label);
                                                         } else {
                                                             console.log(`Action button clicked: ${button.action}`);
                                                         }
@@ -2443,7 +2451,7 @@ export default function MessageTile({
                                         <div className="mt-4 group/tooltip">
                                             <div className="text-sm text-gray-700 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-1">
                                                 <span className="inline-flex items-center w-full sm:w-auto">
-                                                    <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                    <svg className="w-4 h-4 mr-1 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                     </svg>
                                                     This response was generated
@@ -2484,7 +2492,14 @@ export default function MessageTile({
                                             </div>
                                         </div>
                                     )}
-                        
+                                    {message.type === 'assistant' && message.llm_model_name && (
+                                        <div className="flex flex-row gap-1.5 mt-2 items-center">
+                                        <Cpu className='w-4 h-4 text-gray-700'/>
+                                            <span className="text-sm text-gray-700 whitespace-nowrap flex-shrink-0">
+                                                {message.llm_model_name}
+                                            </span>
+                                        </div>
+                                        )}
                                 </div>
                             )}
                         </div>

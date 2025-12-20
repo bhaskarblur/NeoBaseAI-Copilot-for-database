@@ -21,6 +21,8 @@ export interface BackendMessage {
     non_tech_mode?: boolean;
     is_pinned?: boolean;
     pinned_at?: string;
+    llm_model?: string;
+    llm_model_name?: string; // Human-readable display name for the LLM model
     action_buttons?: ActionButton[];
     queries?: {
         id: string;
@@ -70,7 +72,9 @@ export const transformBackendMessage = (msg: BackendMessage): Message => {
         action_buttons: msg.action_buttons || [],
         non_tech_mode: msg.non_tech_mode,
         is_pinned: msg.is_pinned,
-        pinned_at: msg.pinned_at
+        pinned_at: msg.pinned_at,
+        llm_model: msg.llm_model,
+        llm_model_name: msg.llm_model_name
     };
 };
 

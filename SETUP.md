@@ -54,8 +54,24 @@ NeoBase requires the following services to function properly:
 
 ### Supported LLM Clients
 
-- OpenAI (Any chat completion model)
-- Google Gemini (Any chat completion model)
+- OpenAI (15 models) - GPT-5.2, O3, GPT-4o, GPT-4.1, and legacy models
+- Google Gemini (7 models) - Gemini 3 Pro, Gemini 2.5 Flash, Gemini 2.0, and more
+
+#### Dynamic Model Selection
+
+NeoBase supports **dynamic LLM model selection** - you can choose a different AI model for each message without restarting the application. The system automatically:
+- Filters available models based on configured API keys
+- Displays model capabilities (token limits, descriptions)
+- Allows per-message model selection via dropdown
+- Persists model choice in chat history
+- Routes each model to its correct provider
+
+**Environment Variables:**
+- `OPENAI_API_KEY` - Required for OpenAI models (enables all 15 OpenAI models)
+- `GEMINI_API_KEY` - Required for Gemini models (enables all 7 Gemini models)
+- `DEFAULT_LLM_MODEL` - Default model ID (optional, if not set, first available model is used)
+
+At least one API key is required. Models are automatically available once their provider's API key is configured.
 - Anthropic Claude (Planned)
 - Ollama (Planned)
 
@@ -117,6 +133,12 @@ You can set up NeoBase in several ways:
    cp .env.example .env
    ```
 3. Edit the `.env` file with your configuration (see `.env.example` for details)
+
+   **Important LLM Configuration:**
+   - `OPENAI_API_KEY` - Your OpenAI API key (enables 15 models)
+   - `GEMINI_API_KEY` - Your Google Gemini API key (enables 7 models)
+   - `DEFAULT_LLM_MODEL` - Default model ID (optional, automatically selects based on available keys)
+   - At least one API key is required for the application to function
 
    **Important Spreadsheet & Google Sheets Configuration:**
    - `SPREADSHEET_POSTGRES_HOST` - PostgreSQL host for spreadsheet data storage
@@ -294,7 +316,10 @@ For production deployment on a server:
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
-   - Add your OpenAI or Gemini API key
+   - **Add at least one LLM API key:**
+     - `OPENAI_API_KEY` - For OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+     - `GEMINI_API_KEY` - For Google Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+   - Optionally set `DEFAULT_LLM_MODEL` to your preferred default model ID
    - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
 
 4. Create the network (first time only):
@@ -336,7 +361,10 @@ Just follow these steps:
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
-   - Add your OpenAI or Gemini API key
+   - **Add at least one LLM API key:**
+     - `OPENAI_API_KEY` - For OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+     - `GEMINI_API_KEY` - For Google Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+   - Optionally set `DEFAULT_LLM_MODEL` to your preferred default model ID
    - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
 
 1. Switch to the "Domains" tab and add two domains. E.g. to use the same host for backend and client:

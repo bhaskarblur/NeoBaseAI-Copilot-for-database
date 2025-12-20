@@ -44,10 +44,17 @@ func NewGeminiClient(config Config) (*GeminiClient, error) {
 	}, nil
 }
 
-func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error) {
+func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool, modelID ...string) (string, error) {
 	// Check if the context is cancelled
 	if ctx.Err() != nil {
 		return "", ctx.Err()
+	}
+
+	// Use provided model if specified, otherwise use the client's default model
+	model := c.model
+	if len(modelID) > 0 && modelID[0] != "" {
+		model = modelID[0]
+		log.Printf("Gemini GenerateResponse -> Using selected model: %s", model)
 	}
 
 	// Convert messages into parts for the Gemini API.
@@ -131,15 +138,26 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	// }
 	// Build the request with a single content bundle.
 	// Call Gemini's content generation API.
-	model := c.client.GenerativeModel(c.model)
-	model.MaxOutputTokens = utils.ToInt32Ptr(int32(c.maxCompletionTokens))
-	model.SetTemperature(float32(c.temperature))
-	model.ResponseMIMEType = "application/json"
-	model.SystemInstruction = &genai.Content{
+
+	// Get the API version for the model (default to v1beta if not specified)
+	apiVersion := "v1beta"
+	if llmModel := constants.GetLLMModel(model); llmModel != nil && llmModel.APIVersion != "" {
+		apiVersion = llmModel.APIVersion
+	}
+
+	// Construct the model name with API version (e.g., "models/gemini-3-pro" for v1beta or v1alpha)
+	modelName := fmt.Sprintf("models/%s", model)
+	log.Printf("Gemini GenerateResponse -> Using model: %s with API version: %s", modelName, apiVersion)
+
+	geminiModel := c.client.GenerativeModel(modelName)
+	geminiModel.MaxOutputTokens = utils.ToInt32Ptr(int32(c.maxCompletionTokens))
+	geminiModel.SetTemperature(float32(c.temperature))
+	geminiModel.ResponseMIMEType = "application/json"
+	geminiModel.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(systemPrompt)},
 	}
-	model.ResponseSchema = responseSchema
-	model.SafetySettings = []*genai.SafetySetting{
+	geminiModel.ResponseSchema = responseSchema
+	geminiModel.SafetySettings = []*genai.SafetySetting{
 		{
 			Category:  genai.HarmCategoryHarassment,
 			Threshold: genai.HarmBlockNone,
@@ -151,7 +169,7 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 	}
 
 	// Start chat session
-	session := model.StartChat()
+	session := geminiModel.StartChat()
 	session.History = geminiMessages
 
 	// Check if the context is cancelled
@@ -318,4 +336,14 @@ func (c *GeminiClient) GetModelInfo() ModelInfo {
 		Provider:            "gemini",
 		MaxCompletionTokens: c.maxCompletionTokens,
 	}
+}
+
+// SetModel updates the model used by the client
+func (c *GeminiClient) SetModel(modelID string) error {
+	if modelID == "" {
+		return fmt.Errorf("model ID cannot be empty")
+	}
+	c.model = modelID
+	log.Printf("Gemini client model updated to: %s", modelID)
+	return nil
 }

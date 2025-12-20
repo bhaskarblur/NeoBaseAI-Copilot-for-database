@@ -159,15 +159,26 @@ func Initialize() {
 	if err := DiContainer.Provide(func() *llm.Manager {
 		manager := llm.NewManager()
 
-		switch config.Env.DefaultLLMClient {
-		case constants.OpenAI:
-			// Register default OpenAI client
+		// Register OpenAI client if API key is available
+		if config.Env.OpenAIAPIKey != "" {
+			// Get default OpenAI model from supported models
+			defaultOpenAIModel := constants.GetDefaultModelForProvider(constants.OpenAI)
+			if defaultOpenAIModel == nil {
+				log.Printf("Warning: No default OpenAI model found")
+				defaultOpenAIModel = &constants.LLMModel{
+					ID:                  "gpt-4o",
+					Provider:            constants.OpenAI,
+					MaxCompletionTokens: 30000,
+					Temperature:         1,
+				}
+			}
+
 			err := manager.RegisterClient(constants.OpenAI, llm.Config{
 				Provider:            constants.OpenAI,
-				Model:               config.Env.OpenAIModel,
+				Model:               defaultOpenAIModel.ID,
 				APIKey:              config.Env.OpenAIAPIKey,
-				MaxCompletionTokens: config.Env.OpenAIMaxCompletionTokens,
-				Temperature:         config.Env.OpenAITemperature,
+				MaxCompletionTokens: defaultOpenAIModel.MaxCompletionTokens,
+				Temperature:         defaultOpenAIModel.Temperature,
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
@@ -204,14 +215,28 @@ func Initialize() {
 			if err != nil {
 				log.Printf("Warning: Failed to register OpenAI client: %v", err)
 			}
-		case constants.Gemini:
-			// Register default Gemini client
+		}
+
+		// Register Gemini client if API key is available
+		if config.Env.GeminiAPIKey != "" {
+			// Get default Gemini model from supported models
+			defaultGeminiModel := constants.GetDefaultModelForProvider(constants.Gemini)
+			if defaultGeminiModel == nil {
+				log.Printf("Warning: No default Gemini model found")
+				defaultGeminiModel = &constants.LLMModel{
+					ID:                  "gemini-2.5-flash",
+					Provider:            constants.Gemini,
+					MaxCompletionTokens: 100000,
+					Temperature:         1,
+				}
+			}
+
 			err := manager.RegisterClient(constants.Gemini, llm.Config{
 				Provider:            constants.Gemini,
-				Model:               config.Env.GeminiModel,
+				Model:               defaultGeminiModel.ID,
 				APIKey:              config.Env.GeminiAPIKey,
-				MaxCompletionTokens: config.Env.GeminiMaxCompletionTokens,
-				Temperature:         config.Env.GeminiTemperature,
+				MaxCompletionTokens: defaultGeminiModel.MaxCompletionTokens,
+				Temperature:         defaultGeminiModel.Temperature,
 				DBConfigs: []llm.LLMDBConfig{
 					{
 						DBType:       constants.DatabaseTypePostgreSQL,
@@ -249,6 +274,7 @@ func Initialize() {
 				log.Printf("Warning: Failed to register Gemini client: %v", err)
 			}
 		}
+
 		return manager
 	}); err != nil {
 		log.Fatalf("Failed to provide LLM manager: %v", err)
@@ -262,13 +288,32 @@ func Initialize() {
 		llmManager *llm.Manager,
 		redisRepo redis.IRedisRepositories,
 	) services.ChatService {
-		// Get default LLM client
-		llmClient, err := llmManager.GetClient(config.Env.DefaultLLMClient)
-		if err != nil {
-			log.Printf("Warning: Failed to get default LLM client: %v", err)
+		// Get a default LLM client - try in order of preference
+		var llmClient llm.Client
+		var err error
+
+		// Try OpenAI first
+		if config.Env.OpenAIAPIKey != "" {
+			llmClient, err = llmManager.GetClient(constants.OpenAI)
+			if err == nil {
+				log.Printf("Using OpenAI as default LLM client")
+			}
 		}
 
-		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, redisRepo)
+		// If OpenAI not available, try Gemini
+		if llmClient == nil && config.Env.GeminiAPIKey != "" {
+			llmClient, err = llmManager.GetClient(constants.Gemini)
+			if err == nil {
+				log.Printf("Using Gemini as default LLM client")
+			}
+		}
+
+		// If still no client, warn but continue (chat will fail gracefully)
+		if llmClient == nil {
+			log.Printf("Warning: No LLM client available. Please configure OPENAI_API_KEY or GEMINI_API_KEY")
+		}
+
+		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, llmManager, redisRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)

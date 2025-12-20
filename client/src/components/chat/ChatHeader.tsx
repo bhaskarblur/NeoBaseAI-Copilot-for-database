@@ -255,7 +255,7 @@ export default function ChatHeader({
                     <div className="py-1">
                         <button 
                             onClick={() => handleDropdownAction(handleShowRefreshSchema)}
-                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
                         >
                             <ListRestart className="w-4 h-4 mr-2 text-black" />
                             Refresh Knowledge
@@ -263,7 +263,7 @@ export default function ChatHeader({
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
                             onClick={() => handleDropdownAction(handleEditConnection)}
-                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
                         >
                             <Pencil className="w-4 h-4 mr-2 text-black" />
                             Edit Connection

@@ -65,6 +65,7 @@ type UpdateChatRequest struct {
 	Connection          *CreateConnectionRequest `json:"connection"`
 	SelectedCollections *string                  `json:"selected_collections"` // "ALL" or comma-separated table names
 	Settings            *CreateChatSettings      `json:"settings"`
+	PreferredLLMModel   *string                  `json:"preferred_llm_model"` // User's preferred LLM model for this chat
 }
 
 type ChatResponse struct {
@@ -75,6 +76,7 @@ type ChatResponse struct {
 	CreatedAt           string               `json:"created_at"`
 	UpdatedAt           string               `json:"updated_at"`
 	Settings            ChatSettingsResponse `json:"settings"`
+	PreferredLLMModel   *string              `json:"preferred_llm_model"`
 }
 
 type ChatListResponse struct {

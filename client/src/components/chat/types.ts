@@ -50,6 +50,8 @@ export interface Message {
     non_tech_mode?: boolean;
     is_pinned?: boolean;
     pinned_at?: string;
+    llm_model?: string; // LLM model ID used to generate this message (e.g., "gpt-4o", "gemini-2.0-flash")
+    llm_model_name?: string; // Human-readable display name for the LLM model (e.g., "GPT-4 Omni", "Gemini 2.0 Flash")
 }
 
 export interface LoadingStep {

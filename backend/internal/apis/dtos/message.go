@@ -9,6 +9,7 @@ import (
 type CreateMessageRequest struct {
 	StreamID string `json:"stream_id" binding:"required"`
 	Content  string `json:"content" binding:"required"`
+	LLMModel string `json:"llm_model,omitempty"` // Selected LLM model ID (e.g., "gpt-4o", "gemini-2.0-flash")
 }
 
 type MessageResponse struct {
@@ -19,9 +20,11 @@ type MessageResponse struct {
 	Content       string          `json:"content"`
 	Queries       *[]Query        `json:"queries,omitempty"`
 	ActionButtons *[]ActionButton `json:"action_buttons,omitempty"` // UI action buttons suggested by the LLM
+	LLMModel      *string         `json:"llm_model,omitempty"`      // LLM model ID used to generate this message (nullable for backward compatibility)
+	LLMModelName  *string         `json:"llm_model_name,omitempty"` // Display name for the LLM model (e.g., "GPT-4 Omni", "Gemini 2.0 Flash")
 	IsEdited      bool            `json:"is_edited"`
-	NonTechMode   bool            `json:"non_tech_mode"` // Whether this message was generated in non-tech mode
-	IsPinned      bool            `json:"is_pinned"`     // Whether this message is pinned
+	NonTechMode   bool            `json:"non_tech_mode"`       // Whether this message was generated in non-tech mode
+	IsPinned      bool            `json:"is_pinned"`           // Whether this message is pinned
 	PinnedAt      *string         `json:"pinned_at,omitempty"` // When the message was pinned
 	CreatedAt     string          `json:"created_at"`
 	UpdatedAt     string          `json:"updated_at"`

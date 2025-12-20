@@ -19,6 +19,8 @@ type Message struct {
 	NonTechMode   bool                `bson:"non_tech_mode" json:"non_tech_mode"`                       // Whether this message was generated in non-tech mode
 	IsPinned      bool                `bson:"is_pinned" json:"is_pinned"`                               // Whether this message is pinned
 	PinnedAt      *time.Time          `bson:"pinned_at,omitempty" json:"pinned_at,omitempty"`           // When the message was pinned
+	LLMModel      *string             `bson:"llm_model,omitempty" json:"llm_model,omitempty"`           // LLM model used to generate this message (e.g., "gpt-4o", "gemini-2.0-flash") - nullable for backward compatibility
+	LLMModelName  *string             `bson:"llm_model_name,omitempty" json:"llm_model_name,omitempty"` // Human-readable display name for the LLM model (e.g., "GPT-4 Omni", "Gemini 2.0 Flash")
 	Base          `bson:",inline"`
 }
 
@@ -51,6 +53,7 @@ type Query struct {
 	IsEdited               bool               `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
 	Metadata               *string            `bson:"metadata,omitempty" json:"metadata,omitempty"`                 // JSON string for database-specific metadata (e.g., ClickHouse engine type)
 	ActionAt               *string            `bson:"action_at,omitempty" json:"action_at,omitempty"`               // The timestamp when the action was taken
+	LLMModel               string             `bson:"llm_model" json:"llm_model"`                                   // LLM model used to generate this query
 }
 
 type QueryError struct {

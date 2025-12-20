@@ -39,10 +39,17 @@ func NewOpenAIClient(config Config) (*OpenAIClient, error) {
 	}, nil
 }
 
-func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool) (string, error) {
+func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.LLMMessage, dbType string, nonTechMode bool, modelID ...string) (string, error) {
 	// Check if the context is cancelled
 	if ctx.Err() != nil {
 		return "", ctx.Err()
+	}
+
+	// Use provided model if specified, otherwise use the client's default model
+	model := c.model
+	if len(modelID) > 0 && modelID[0] != "" {
+		model = modelID[0]
+		log.Printf("OpenAI GenerateResponse -> Using selected model: %s", model)
 	}
 
 	// Convert messages to OpenAI format
@@ -113,7 +120,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, messages []*models.
 
 	// Create completion request with JSON schema
 	req := openai.ChatCompletionRequest{
-		Model:               c.model,
+		Model:               model,
 		Messages:            openAIMessages,
 		MaxCompletionTokens: c.maxCompletionTokens,
 		Temperature:         float32(c.temperature),
@@ -241,4 +248,14 @@ func (c *OpenAIClient) GetModelInfo() ModelInfo {
 		Provider:            "openai",
 		MaxCompletionTokens: c.maxCompletionTokens,
 	}
+}
+
+// SetModel updates the model used by the client
+func (c *OpenAIClient) SetModel(modelID string) error {
+	if modelID == "" {
+		return fmt.Errorf("model ID cannot be empty")
+	}
+	c.model = modelID
+	log.Printf("OpenAI client model updated to: %s", modelID)
+	return nil
 }

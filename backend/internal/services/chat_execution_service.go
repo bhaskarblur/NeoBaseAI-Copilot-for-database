@@ -83,6 +83,52 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	log.Printf("ChatService -> Execute -> Chat settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
 		chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
 
+	// Get the user message to retrieve the selected LLM model
+	userMessage, err := s.chatRepo.FindMessageByID(userMessageObjID)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return nil, fmt.Errorf("failed to fetch user message: %v", err)
+	}
+
+	var selectedLLMModel string
+
+	// For edited messages, use the chat's preferred model or default model
+	// For new messages, use the model from the user message (if set)
+	if userMessage != nil && userMessage.IsEdited {
+		// Edited message: use chat's preferred model or default
+		if chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+			selectedLLMModel = *chat.PreferredLLMModel
+			log.Printf("processLLMResponse -> Using chat's preferred model for edited message: %s", selectedLLMModel)
+		} else {
+			// Fallback to default model for the provider
+			// Determine provider based on last model or first available
+			defaultOpenAI := constants.GetDefaultModelForProvider(constants.OpenAI)
+			if defaultOpenAI != nil {
+				selectedLLMModel = defaultOpenAI.ID
+				log.Printf("processLLMResponse -> Using default OpenAI model for edited message: %s", selectedLLMModel)
+			}
+		}
+		// Update the user message with the new model
+		if userMessage.LLMModel == nil || *userMessage.LLMModel != selectedLLMModel {
+			userMessage.LLMModel = &selectedLLMModel
+			userMessageID := userMessage.ID
+			if err := s.chatRepo.UpdateMessage(userMessageID, userMessage); err != nil {
+				log.Printf("Warning: Failed to update user message with new model: %v", err)
+			}
+		}
+	} else if userMessage != nil && userMessage.LLMModel != nil && *userMessage.LLMModel != "" {
+		// New message: use the model from the user message
+		selectedLLMModel = *userMessage.LLMModel
+		log.Printf("processLLMResponse -> Selected LLM Model from user message: %s", selectedLLMModel)
+	} else {
+		// Fallback to default model
+		defaultOpenAI := constants.GetDefaultModelForProvider(constants.OpenAI)
+		if defaultOpenAI != nil {
+			selectedLLMModel = defaultOpenAI.ID
+			log.Printf("processLLMResponse -> Using default model: %s", selectedLLMModel)
+		}
+	}
+
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
@@ -153,8 +199,23 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		return nil, fmt.Errorf("operation cancelled")
 	}
 
+	// Get the correct LLM client based on the selected model's provider
+	llmClient := s.llmClient
+	if s.llmManager != nil && selectedLLMModel != "" {
+		selectedModel := constants.GetLLMModel(selectedLLMModel)
+		if selectedModel != nil {
+			providerClient, err := s.llmManager.GetClient(selectedModel.Provider)
+			if err != nil {
+				log.Printf("Warning: Failed to get LLM client for provider '%s': %v, will use default client", selectedModel.Provider, err)
+			} else {
+				llmClient = providerClient
+				log.Printf("processLLMResponse -> Using LLM client for provider: %s", selectedModel.Provider)
+			}
+		}
+	}
+
 	// Generate LLM response
-	response, err := s.llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode)
+	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
 	if err != nil {
 		if !synchronous || allowSSEUpdates {
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -385,6 +446,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		existingMessage.Queries = queriesPtr // Now correctly typed as *[]models.Query
 		existingMessage.ActionButtons = actionButtonsPtr
 		existingMessage.IsEdited = true
+		if selectedLLMModel != "" {
+			existingMessage.LLMModel = &selectedLLMModel // Update with the LLM model used
+		}
 
 		// Update the message in the database
 		if err := s.chatRepo.UpdateMessage(existingMessage.ID, existingMessage); err != nil {
@@ -411,6 +475,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 		if !synchronous {
 			// Send final response
+			var llmModelName *string
+			if existingMessage.LLMModel != nil {
+				displayName := s.getModelDisplayName(*existingMessage.LLMModel)
+				llmModelName = &displayName
+			}
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response",
 				Data: &dtos.MessageResponse{
@@ -421,6 +490,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
+					LLMModel:      existingMessage.LLMModel,
+					LLMModelName:  llmModelName,
 					CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 					UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
 					IsEdited:      existingMessage.IsEdited,
@@ -436,6 +507,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
+			LLMModel:      existingMessage.LLMModel,
+			LLMModelName:  existingMessage.LLMModelName,
 			NonTechMode:   existingMessage.NonTechMode,
 			CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
@@ -458,6 +531,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		IsEdited:      false,
 		UserMessageId: &userMessageObjID,         // Set the user message ID that this AI message is responding to
 		NonTechMode:   chat.Settings.NonTechMode, // Store the non-tech mode setting with the message
+	}
+	if selectedLLMModel != "" {
+		chatResponseMsg.LLMModel = &selectedLLMModel // Store which LLM model was used to generate this message
 	}
 
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
@@ -483,6 +559,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	if !synchronous {
 		// Send final response
+		var llmModelName *string
+		if chatResponseMsg.LLMModel != nil {
+			displayName := s.getModelDisplayName(*chatResponseMsg.LLMModel)
+			llmModelName = &displayName
+		}
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response",
 			Data: &dtos.MessageResponse{
@@ -493,11 +574,18 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
+				LLMModel:      chatResponseMsg.LLMModel,
+				LLMModelName:  llmModelName,
 				NonTechMode:   chatResponseMsg.NonTechMode,
 				CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
 			},
 		})
+	}
+	var llmModelName *string
+	if chatResponseMsg.LLMModel != nil {
+		displayName := s.getModelDisplayName(*chatResponseMsg.LLMModel)
+		llmModelName = &displayName
 	}
 	return &dtos.MessageResponse{
 		ID:            chatResponseMsg.ID.Hex(),
@@ -507,6 +595,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
+		LLMModel:      chatResponseMsg.LLMModel,
+		LLMModelName:  llmModelName,
 		NonTechMode:   chatResponseMsg.NonTechMode,
 		CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
@@ -1544,6 +1634,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			llmMessages,               // Pass the LLM messages array
 			conn.Config.Type,          // Pass the database type
 			chat.Settings.NonTechMode, // Pass the non-tech mode setting
+			query.LLMModel,            // Pass the selected LLM model
 		)
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate rollback query: %v", err)

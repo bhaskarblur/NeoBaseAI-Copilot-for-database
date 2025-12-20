@@ -43,8 +43,11 @@
 - Neo4j DB (Priority 3)
 
 ## Supported LLM Clients
-- OpenAI (Any chat completion model)
-- Google Gemini (Any chat completion model)
+- **OpenAI** - 15 models including GPT-5.2, O3, GPT-4o, and more
+- **Google Gemini** - 7 models including Gemini 3 Pro, Gemini 2.5 Flash, and more
+
+### Dynamic Model Selection
+Select different AI models for each message without restarting. Choose from 22+ pre-configured models with automatic API key filtering.
 
 ## Planned to be supported LLM Clients
 - Anthropic (Claude 3.5 Sonnet)

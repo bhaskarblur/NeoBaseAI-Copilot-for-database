@@ -39,7 +39,7 @@ type ChatService interface {
 	Delete(userID, chatID string) (uint32, error)
 	GetByID(userID, chatID string) (*dtos.ChatResponse, uint32, error)
 	List(userID string, page, pageSize int) (*dtos.ChatListResponse, uint32, error)
-	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error)
+	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string, llmModel string) (*dtos.MessageResponse, uint16, error)
 	UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
 	Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error)
@@ -84,6 +84,7 @@ type chatService struct {
 	llmRepo         repositories.LLMMessageRepository
 	dbManager       *dbmanager.Manager
 	llmClient       llm.Client
+	llmManager      *llm.Manager // Added to support multiple LLM providers
 	streamChans     map[string]chan dtos.StreamResponse
 	streamHandler   StreamHandler
 	activeProcesses map[string]context.CancelFunc // key: streamID
@@ -142,6 +143,7 @@ func NewChatService(
 	llmRepo repositories.LLMMessageRepository,
 	dbManager *dbmanager.Manager,
 	llmClient llm.Client,
+	llmManager *llm.Manager,
 	redisRepo redis.IRedisRepositories,
 ) ChatService {
 	// Initialize crypto instance
@@ -156,6 +158,7 @@ func NewChatService(
 		llmRepo:         llmRepo,
 		dbManager:       dbManager,
 		llmClient:       llmClient,
+		llmManager:      llmManager,
 		streamChans:     make(map[string]chan dtos.StreamResponse),
 		activeProcesses: make(map[string]context.CancelFunc),
 		crypto:          crypto,
@@ -565,6 +568,12 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		}
 	}
 
+	// Update preferred LLM model if provided
+	if req.PreferredLLMModel != nil {
+		log.Printf("ChatService -> Update -> PreferredLLMModel: %s", *req.PreferredLLMModel)
+		chat.PreferredLLMModel = req.PreferredLLMModel
+	}
+
 	// Update the chat
 	if err := s.chatRepo.Update(chatObjID, chat); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update chat: %v", err)
@@ -692,7 +701,7 @@ func (s *chatService) List(userID string, page, pageSize int) (*dtos.ChatListRes
 }
 
 // Create a new message
-func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error) {
+func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string, llmModel string) (*dtos.MessageResponse, uint16, error) {
 	// Validate chat exists and user has access
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
@@ -707,6 +716,11 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 	}
 
+	// Validate and use selected LLM model if provided
+	if llmModel != "" && !constants.IsValidModel(llmModel) {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid LLM model: %s", llmModel)
+	}
+
 	// Create and save the user message first
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
@@ -719,6 +733,9 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		ChatID:  chatObjID,
 		Content: content,
 		Type:    string(constants.MessageTypeUser),
+	}
+	if llmModel != "" {
+		msg.LLMModel = &llmModel // Store the selected LLM model with the user message
 	}
 
 	if err := s.chatRepo.CreateMessage(msg); err != nil {
@@ -1717,8 +1734,8 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 	// Decrypt connection details for the response
 	utils.DecryptConnection(&connectionCopy)
 
-	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v",
-		chat.ID.Hex(), chat.Settings.NonTechMode)
+	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v, PreferredLLMModel=%v",
+		chat.ID.Hex(), chat.Settings.NonTechMode, chat.PreferredLLMModel)
 
 	// Handle username for spreadsheet connections which might not have it
 	var username string
@@ -1753,6 +1770,7 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 			ShareDataWithAI:  chat.Settings.ShareDataWithAI,
 			NonTechMode:      chat.Settings.NonTechMode,
 		},
+		PreferredLLMModel: chat.PreferredLLMModel,
 	}
 }
 
@@ -1772,6 +1790,13 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult)
 	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
 
+	// Get the display name for the LLM model if available
+	var llmModelName *string
+	if msg.LLMModel != nil {
+		displayName := s.getModelDisplayName(*msg.LLMModel)
+		llmModelName = &displayName
+	}
+
 	return &dtos.MessageResponse{
 		ID:            msg.ID.Hex(),
 		ChatID:        msg.ChatID.Hex(),
@@ -1784,6 +1809,8 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		NonTechMode:   msg.NonTechMode,
 		IsPinned:      msg.IsPinned,
 		PinnedAt:      pinnedAt,
+		LLMModel:      msg.LLMModel,
+		LLMModelName:  llmModelName,
 		CreatedAt:     msg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     msg.UpdatedAt.Format(time.RFC3339),
 	}
@@ -2079,4 +2106,25 @@ func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID stri
 	}
 
 	return metadata, http.StatusOK, nil
+}
+
+// getModelDisplayName returns the human-readable display name for a model ID
+// by looking it up in the SupportedLLMModels constant
+func (s *chatService) getModelDisplayName(modelID string) string {
+	// Search for the model in the supported models list
+	for _, model := range constants.SupportedLLMModels {
+		if model.ID == modelID {
+			return model.DisplayName
+		}
+	}
+
+	// Fallback: convert kebab-case to Title Case if model not found
+	// e.g., "gpt-4o" -> "Gpt 4o"
+	words := strings.Split(modelID, "-")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(string(word[0])) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }

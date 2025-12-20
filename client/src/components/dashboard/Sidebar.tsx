@@ -723,7 +723,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
             >
               <Link className="w-4 h-4 mr-2 text-black" />
               Copy Link
@@ -738,7 +738,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
             >
               <Pencil className="w-4 h-4 mr-2 text-black" />
               Edit Connection

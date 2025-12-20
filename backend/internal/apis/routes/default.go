@@ -35,4 +35,5 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	SetupWaitlistRoutes(router)
 	SetupUploadRoutes(router)
 	SetupGoogleOAuthRoutes(router)
+	SetupLLMModelsRoutes(router)
 }
