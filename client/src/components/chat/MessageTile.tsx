@@ -108,8 +108,6 @@ export default function MessageTile({
     userId,
     userName,
     searchQuery,
-    isSearchResult,
-    isCurrentSearchResult,
     searchResultRefs,
     onPinMessage,
 }: MessageTileProps) {
