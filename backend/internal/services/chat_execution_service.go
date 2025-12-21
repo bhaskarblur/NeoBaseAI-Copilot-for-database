@@ -100,12 +100,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			selectedLLMModel = *chat.PreferredLLMModel
 			log.Printf("processLLMResponse -> Using chat's preferred model for edited message: %s", selectedLLMModel)
 		} else {
-			// Fallback to default model for the provider
-			// Determine provider based on last model or first available
-			defaultOpenAI := constants.GetDefaultModelForProvider(constants.OpenAI)
-			if defaultOpenAI != nil {
-				selectedLLMModel = defaultOpenAI.ID
-				log.Printf("processLLMResponse -> Using default OpenAI model for edited message: %s", selectedLLMModel)
+			// Fallback to first available model from any provider
+			defaultModel := constants.GetFirstAvailableModel()
+			if defaultModel != nil {
+				selectedLLMModel = defaultModel.ID
+				log.Printf("processLLMResponse -> Using first available model for edited message: %s (%s)", selectedLLMModel, defaultModel.Provider)
 			}
 		}
 		// Update the user message with the new model
@@ -121,11 +120,11 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		selectedLLMModel = *userMessage.LLMModel
 		log.Printf("processLLMResponse -> Selected LLM Model from user message: %s", selectedLLMModel)
 	} else {
-		// Fallback to default model
-		defaultOpenAI := constants.GetDefaultModelForProvider(constants.OpenAI)
-		if defaultOpenAI != nil {
-			selectedLLMModel = defaultOpenAI.ID
-			log.Printf("processLLMResponse -> Using default model: %s", selectedLLMModel)
+		// Fallback to first available model from any provider
+		defaultModel := constants.GetFirstAvailableModel()
+		if defaultModel != nil {
+			selectedLLMModel = defaultModel.ID
+			log.Printf("processLLMResponse -> Using first available model: %s (%s)", selectedLLMModel, defaultModel.Provider)
 		}
 	}
 
@@ -136,10 +135,20 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		// Let's create a new connection
 		_, err := s.ConnectDB(ctx, userID, chatID, streamID)
 		if err != nil {
+			// Get model display name for error response
+			var llmModelName *string
+			if selectedLLMModel != "" {
+				displayName := s.getModelDisplayName(selectedLLMModel)
+				llmModelName = &displayName
+			}
 			// Send a error event to the client
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  "Error: " + err.Error(),
+				Data: map[string]interface{}{
+					"error":          "Error: " + err.Error(),
+					"llm_model":      selectedLLMModel,
+					"llm_model_name": llmModelName,
+				},
 			})
 			return nil, err
 		}
@@ -218,9 +227,19 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
 	if err != nil {
 		if !synchronous || allowSSEUpdates {
+			// Get model display name for error response
+			var llmModelName *string
+			if selectedLLMModel != "" {
+				displayName := s.getModelDisplayName(selectedLLMModel)
+				llmModelName = &displayName
+			}
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  map[string]string{"error": "Error: " + err.Error()},
+				Data: map[string]interface{}{
+					"error":          "Error: " + err.Error(),
+					"llm_model":      selectedLLMModel,
+					"llm_model_name": llmModelName,
+				},
 			})
 		}
 		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
@@ -242,9 +261,19 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	var jsonResponse map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		// Get model display name for error response
+		var llmModelName *string
+		if selectedLLMModel != "" {
+			displayName := s.getModelDisplayName(selectedLLMModel)
+			llmModelName = &displayName
+		}
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-error",
-			Data:  map[string]string{"error": "Error: " + err.Error()},
+			Data: map[string]interface{}{
+				"error":          "Error: " + err.Error(),
+				"llm_model":      selectedLLMModel,
+				"llm_model_name": llmModelName,
+			},
 		})
 	}
 
@@ -2155,9 +2184,23 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("ProcessLLMResponseAndRunQuery -> recovered from panic: %v", r)
+				// Get LLM model info from the user message
+				var llmModel *string
+				var llmModelName *string
+				if userMsgObjID, err := primitive.ObjectIDFromHex(messageID); err == nil {
+					if userMsg, err := s.chatRepo.FindMessageByID(userMsgObjID); err == nil && userMsg != nil && userMsg.LLMModel != nil {
+						llmModel = userMsg.LLMModel
+						displayName := s.getModelDisplayName(*userMsg.LLMModel)
+						llmModelName = &displayName
+					}
+				}
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-error",
-					Data:  "Error: Failed to complete the request, seems like the database connection issue, try reconnecting the database.",
+					Data: map[string]interface{}{
+						"error":          "Error: Failed to complete the request, seems like the database connection issue, try reconnecting the database.",
+						"llm_model":      llmModel,
+						"llm_model_name": llmModelName,
+					},
 				})
 			}
 			log.Printf("ProcessLLMResponseAndRunQuery -> activeProcesses: %v", s.activeProcesses)
@@ -2315,9 +2358,24 @@ func (s *chatService) processMessage(_ context.Context, userID, chatID, messageI
 					}
 				}()
 
+				// Get LLM model info from the user message
+				var llmModel *string
+				var llmModelName *string
+				if userMsgObjID, msgErr := primitive.ObjectIDFromHex(messageID); msgErr == nil {
+					if userMsg, msgErr := s.chatRepo.FindMessageByID(userMsgObjID); msgErr == nil && userMsg != nil && userMsg.LLMModel != nil {
+						llmModel = userMsg.LLMModel
+						displayName := s.getModelDisplayName(*userMsg.LLMModel)
+						llmModelName = &displayName
+					}
+				}
+
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-error",
-					Data:  "Error: " + err.Error(),
+					Data: map[string]interface{}{
+						"error":          "Error: " + err.Error(),
+						"llm_model":      llmModel,
+						"llm_model_name": llmModelName,
+					},
 				})
 			}
 		}
@@ -2750,8 +2808,55 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	log.Printf("ChatService -> GetQueryRecommendations -> Found %d LLM messages, using conversation and schema context", len(llmMessages))
 
-	// Generate recommendations using LLM with conversation context
-	response, err := s.llmClient.GenerateRecommendations(ctx, llmMessages, connInfo.Config.Type)
+	// Determine which LLM model to use for recommendations
+	// Priority: 1) Chat's preferred model, 2) Last user message's model, 3) Default model
+	selectedLLMModel := ""
+
+	// Check chat's preferred model first
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err == nil && chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+		selectedLLMModel = *chat.PreferredLLMModel
+		log.Printf("ChatService -> GetQueryRecommendations -> Using chat's preferred model: %s", selectedLLMModel)
+	} else {
+		// Fallback to the last user message's model
+		chatMessages, _, err := s.chatRepo.FindLatestMessageByChat(chatObjID, 1, 1) // Get only the last message
+		if err == nil && len(chatMessages) > 0 {
+			lastMsg := chatMessages[0]
+			if lastMsg.Type == string(constants.MessageTypeUser) &&
+				lastMsg.LLMModel != nil && *lastMsg.LLMModel != "" {
+				selectedLLMModel = *lastMsg.LLMModel
+				log.Printf("ChatService -> GetQueryRecommendations -> Using last user message's model: %s", selectedLLMModel)
+			}
+		}
+	}
+
+	// If still no model selected, use first available model from any provider
+	if selectedLLMModel == "" {
+		defaultModel := constants.GetFirstAvailableModel()
+		if defaultModel != nil {
+			selectedLLMModel = defaultModel.ID
+			log.Printf("ChatService -> GetQueryRecommendations -> Using first available model: %s (%s)", selectedLLMModel, defaultModel.Provider)
+		}
+	}
+
+	// Get the correct LLM client based on the selected model's provider
+	llmClient := s.llmClient
+	if s.llmManager != nil && selectedLLMModel != "" {
+		selectedModel := constants.GetLLMModel(selectedLLMModel)
+		if selectedModel != nil {
+			providerClient, err := s.llmManager.GetClient(selectedModel.Provider)
+			if err != nil {
+				log.Printf("Warning: Failed to get LLM client for provider '%s': %v, using default client", selectedModel.Provider, err)
+			} else {
+				llmClient = providerClient
+				log.Printf("ChatService -> GetQueryRecommendations -> Using LLM client for provider: %s (model: %s)",
+					selectedModel.Provider, selectedModel.DisplayName)
+			}
+		}
+	}
+
+	// Generate recommendations using the selected LLM client and model
+	response, err := llmClient.GenerateRecommendations(ctx, llmMessages, connInfo.Config.Type)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate recommendations: %v", err)
 	}

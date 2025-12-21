@@ -20,7 +20,7 @@ func NewLLMModelsHandler() *LLMModelsHandler {
 // Filters models based on which API keys are configured
 func (h *LLMModelsHandler) GetSupportedModels(c *gin.Context) {
 	// Get available models based on configured API keys
-	models := constants.GetAvailableModelsByAPIKeys(config.Env.OpenAIAPIKey, config.Env.GeminiAPIKey)
+	models := constants.GetAvailableModelsByAPIKeys(config.Env.OpenAIAPIKey, config.Env.GeminiAPIKey, config.Env.ClaudeAPIKey, config.Env.OllamaBaseURL)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

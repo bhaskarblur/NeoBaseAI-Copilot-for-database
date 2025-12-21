@@ -48,6 +48,12 @@ type Environment struct {
 	// Gemini configs (API key only, models defined in constants)
 	GeminiAPIKey string
 
+	// Claude configs (API key only, models defined in constants)
+	ClaudeAPIKey string
+
+	// Ollama configs (base URL only, models defined in constants)
+	OllamaBaseURL string
+
 	// SMTP Email configs
 	SMTPHost      string
 	SMTPPort      int
@@ -125,6 +131,13 @@ func LoadEnv() error {
 
 	// Gemini configs - API key only, models defined in constants/supported_models.go
 	Env.GeminiAPIKey = getRequiredEnv("GEMINI_API_KEY", "")
+
+	// Claude configs - API key only, models defined in constants/supported_models.go
+	Env.ClaudeAPIKey = getRequiredEnv("CLAUDE_API_KEY", "")
+
+	// Ollama configs - base URL only, models defined in constants/supported_models.go
+	// Empty by default - only enable when explicitly configured
+	Env.OllamaBaseURL = getEnvWithDefault("OLLAMA_BASE_URL", "")
 
 	// SMTP Email configs
 	Env.SMTPHost = getEnvWithDefault("SMTP_HOST", "")
@@ -233,7 +246,7 @@ func validateConfig() error {
 	}
 
 	// Log LLM model initialization status
-	constants.LogModelInitialization(Env.OpenAIAPIKey, Env.GeminiAPIKey)
+	constants.LogModelInitialization(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)
 
 	return nil
 }

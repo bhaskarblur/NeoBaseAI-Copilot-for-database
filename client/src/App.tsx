@@ -1236,14 +1236,22 @@ function AppContent() {
             // Show error message instead of temporary message
             setMessages(prev => {
               const withoutTemp = prev.filter(msg => !msg.is_streaming);
+              // Extract error data and LLM model info
+              const errorData = typeof response.data === 'object' ? response.data : { error: response.data };
+              const errorMessage = errorData.error || response.data;
+              const llmModel = errorData.llm_model;
+              const llmModelName = errorData.llm_model_name;
+              
               return [{
                 id: `error-${Date.now()}`,
                 type: 'assistant',
-                content: `${typeof response.data === 'object' ? response.data.error : response.data}`, // Handle both string and object errors
+                content: `${errorMessage}`,
                 queries: [],
                 is_loading: false,
                 loading_steps: [],
                 is_streaming: false,
+                llm_model: llmModel,
+                llm_model_name: llmModelName,
                 created_at: new Date().toISOString()
               }, ...withoutTemp];
             });

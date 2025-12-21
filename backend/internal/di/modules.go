@@ -275,6 +275,122 @@ func Initialize() {
 			}
 		}
 
+		// Register Claude client if API key is available
+		if config.Env.ClaudeAPIKey != "" {
+			// Get default Claude model from supported models
+			defaultClaudeModel := constants.GetDefaultModelForProvider(constants.Claude)
+			if defaultClaudeModel == nil {
+				log.Printf("Warning: No default Claude model found")
+				defaultClaudeModel = &constants.LLMModel{
+					ID:                  "claude-3-5-sonnet-20241022",
+					Provider:            constants.Claude,
+					MaxCompletionTokens: 8192,
+					Temperature:         1,
+				}
+			}
+
+			err := manager.RegisterClient(constants.Claude, llm.Config{
+				Provider:            constants.Claude,
+				Model:               defaultClaudeModel.ID,
+				APIKey:              config.Env.ClaudeAPIKey,
+				MaxCompletionTokens: defaultClaudeModel.MaxCompletionTokens,
+				Temperature:         defaultClaudeModel.Temperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypePostgreSQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeYugabyteDB, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeMySQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeClickhouse,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeClickhouse, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeMongoDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeMongoDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeMongoDB, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeSpreadsheet,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeSpreadsheet),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeSpreadsheet, false),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register Claude client: %v", err)
+			}
+		}
+
+		// Register Ollama client if base URL is available
+		if config.Env.OllamaBaseURL != "" {
+			// Get default Ollama model from supported models
+			defaultOllamaModel := constants.GetDefaultModelForProvider(constants.Ollama)
+			if defaultOllamaModel == nil {
+				log.Printf("Warning: No default Ollama model found")
+				defaultOllamaModel = &constants.LLMModel{
+					ID:                  "llama3.1:latest",
+					Provider:            constants.Ollama,
+					MaxCompletionTokens: 4096,
+					Temperature:         1,
+				}
+			}
+
+			err := manager.RegisterClient(constants.Ollama, llm.Config{
+				Provider:            constants.Ollama,
+				Model:               defaultOllamaModel.ID,
+				APIKey:              config.Env.OllamaBaseURL, // Use APIKey field for base URL
+				MaxCompletionTokens: defaultOllamaModel.MaxCompletionTokens,
+				Temperature:         defaultOllamaModel.Temperature,
+				DBConfigs: []llm.LLMDBConfig{
+					{
+						DBType:       constants.DatabaseTypePostgreSQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypePostgreSQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypePostgreSQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeYugabyteDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeYugabyteDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeYugabyteDB, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeMySQL,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeMySQL),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeClickhouse,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeClickhouse),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeClickhouse, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeMongoDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeMongoDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeMongoDB, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeSpreadsheet,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeSpreadsheet),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeSpreadsheet, false),
+					},
+				},
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to register Ollama client: %v", err)
+			}
+		}
+
 		return manager
 	}); err != nil {
 		log.Fatalf("Failed to provide LLM manager: %v", err)

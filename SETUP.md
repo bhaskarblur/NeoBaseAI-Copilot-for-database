@@ -54,8 +54,10 @@ NeoBase requires the following services to function properly:
 
 ### Supported LLM Clients
 
-- OpenAI (15 models) - GPT-5.2, O3, GPT-4o, GPT-4.1, and legacy models
-- Google Gemini (7 models) - Gemini 3 Pro, Gemini 2.5 Flash, Gemini 2.0, and more
+- **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and legacy models
+- **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
+- **Anthropic Claude** (10 models) - Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
+- **Ollama** (32+ models) - Self-hosted open-source: DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, Gemma, Phi, and more
 
 #### Dynamic Model Selection
 
@@ -64,16 +66,103 @@ NeoBase supports **dynamic LLM model selection** - you can choose a different AI
 - Displays model capabilities (token limits, descriptions)
 - Allows per-message model selection via dropdown
 - Persists model choice in chat history
-- Routes each model to its correct provider
+- Routes each model to its correct provider (OpenAI, Gemini, Claude, or Ollama)
+
+#### Enabling/Disabling AI Providers
+
+NeoBase uses a **simple configuration-based approach** to enable or disable AI providers. Each provider is controlled by a single environment variable:
+
+**How it works:**
+1. **Set the environment variable** = Provider and all its models are enabled
+2. **Leave it empty or unset** = Provider and all its models are disabled
+3. **No code changes needed** - Just update your `.env` file
 
 **Environment Variables:**
-- `OPENAI_API_KEY` - Required for OpenAI models (enables all 15 OpenAI models)
-- `GEMINI_API_KEY` - Required for Gemini models (enables all 7 Gemini models)
-- `DEFAULT_LLM_MODEL` - Default model ID (optional, if not set, first available model is used)
+- `OPENAI_API_KEY` - Enables all 14 OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+- `GEMINI_API_KEY` - Enables all 7 Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+- `CLAUDE_API_KEY` - Enables all 10 Claude models (Opus 4.5, Sonnet 4, etc.)
+- `OLLAMA_BASE_URL` - Enables all 32+ Ollama models (default: http://localhost:11434)
+- `DEFAULT_LLM_MODEL` - Default model ID (optional, auto-selects if not set)
 
-At least one API key is required. Models are automatically available once their provider's API key is configured.
-- Anthropic Claude (Planned)
-- Ollama (Planned)
+**Requirements:**
+- At least one API key/URL is required for the application to function
+- You can enable multiple providers simultaneously (mix cloud and self-hosted)
+- Models appear in the UI only when their provider is configured
+
+**Examples:**
+```bash
+# Enable only OpenAI
+OPENAI_API_KEY=sk-proj-abc123...
+
+# Enable OpenAI + Claude (hybrid cloud)
+OPENAI_API_KEY=sk-proj-abc123...
+CLAUDE_API_KEY=sk-ant-xyz789...
+
+# Enable Ollama only (self-hosted, privacy-focused)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Enable all providers (maximum flexibility)
+OPENAI_API_KEY=sk-proj-abc123...
+GEMINI_API_KEY=AIza...
+CLAUDE_API_KEY=sk-ant-xyz789...
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+#### Disabling Individual Models (Code Level)
+
+If you want to disable specific models while keeping their provider enabled, edit `/backend/internal/constants/supported_models.go`:
+
+**How to disable a model:**
+1. Open `backend/internal/constants/supported_models.go`
+2. Find the model in the `SupportedLLMModels` array
+3. Change `IsEnabled: true` to `IsEnabled: false`
+4. Restart the backend
+
+**Example - Disable GPT-4o:**
+```go
+{
+    ID:                  "gpt-4o",
+    Provider:            OpenAI,
+    DisplayName:         "GPT-4o (Omni)",
+    IsEnabled:           false,  // Changed from true to false
+    MaxCompletionTokens: 16384,
+    Temperature:         1,
+    InputTokenLimit:     128000,
+    Description:         "Multimodal model for text and vision tasks",
+}
+```
+
+**Example - Disable all Ollama vision models:**
+```go
+// Disable LLaVA
+{
+    ID:                  "llava:latest",
+    IsEnabled:           false,  // Disabled
+    // ... rest of config
+}
+
+// Disable Llama 3.2 Vision
+{
+    ID:                  "llama3.2-vision:11b",
+    IsEnabled:           false,  // Disabled
+    // ... rest of config
+}
+```
+
+**When to use this:**
+- Restrict expensive models in production
+- Remove legacy/deprecated models
+- Limit model selection for specific use cases
+- Reduce UI clutter by hiding unused models
+
+**Note:** This requires code changes and backend restart. For enabling/disabling entire providers, use environment variables instead.
+
+**Enterprise & Self-Hosted Options:**
+- Use Claude Opus 4.5 - the world's best model for coding, agents, and computer use
+- Claude with your enterprise Anthropic license for advanced coding and reasoning
+- Self-host models with Ollama for complete data privacy and cost control
+- Mix cloud and self-hosted models based on your security and performance needs
+- Choose from 63 total models across 4 providers for maximum flexibility
 
 ## Setup Options
 

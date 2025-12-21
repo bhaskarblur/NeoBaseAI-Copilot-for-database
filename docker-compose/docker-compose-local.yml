@@ -77,6 +77,8 @@ services:
       - NEOBASE_REDIS_PASSWORD=${NEOBASE_REDIS_PASSWORD} # default
       - OPENAI_API_KEY=${OPENAI_API_KEY} # OpenAI API key - enables GPT-4 Omni, GPT-4 Turbo, O1, etc.
       - GEMINI_API_KEY=${GEMINI_API_KEY} # Gemini API key - enables Gemini 2.0 Flash, Gemini 1.5 Pro, etc.
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY} # Claude API key - enables Claude 4.5 Sonnet, Claude 4.5 Opus, etc.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL} # Ollama base URL - enables self-hosted open-source models
       - EXAMPLE_DB_TYPE=${EXAMPLE_DB_TYPE} # postgres, clickhouse, mysql, yugabyte...
       - EXAMPLE_DB_HOST=${EXAMPLE_DB_HOST} # localhost
       - EXAMPLE_DB_PORT=${EXAMPLE_DB_PORT} # 5432

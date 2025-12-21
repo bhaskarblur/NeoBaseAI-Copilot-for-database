@@ -31,7 +31,11 @@ func (m *Manager) RegisterClient(name string, config Config) error {
 		client, err = NewOpenAIClient(config)
 	case "gemini":
 		client, err = NewGeminiClient(config)
-	// Add other providers here (Gemini, etc.)
+	case "claude":
+		client, err = NewClaudeClient(config)
+	case "ollama":
+		client, err = NewOllamaClient(config)
+	// Add other providers here
 	default:
 		return fmt.Errorf("unsupported LLM provider: %s", config.Provider)
 	}

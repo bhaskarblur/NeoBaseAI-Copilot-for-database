@@ -258,6 +258,469 @@ var SupportedLLMModels = []LLMModel{
 		InputTokenLimit:     1000000,
 		Description:         "Second generation small workhorse model with 1M token context, lightweight version",
 	},
+
+	// =====================================================
+	// ANTHROPIC CLAUDE MODELS (Latest as of December 2025)
+	// Claude 4.5 series are the world's best models for coding, agents, and computer use
+	// All models support chat completion API
+	// =====================================================
+
+	// Claude 4.5 Series (Latest - State of the Art)
+	{
+		ID:                  "claude-opus-4-5-20251101",
+		Provider:            Claude,
+		DisplayName:         "Claude Opus 4.5 (Best in World)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 16384,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "World's best model for coding, agents, and computer use. State-of-the-art across all domains with 2x token efficiency",
+	},
+	{
+		ID:                  "claude-sonnet-4-5",
+		Provider:            Claude,
+		DisplayName:         "Claude Sonnet 4.5 (Frontier Intelligence)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 16384,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Best coding model in the world. State-of-the-art on SWE-bench, strongest for complex agents, most aligned model",
+	},
+	{
+		ID:                  "claude-haiku-4-5",
+		Provider:            Claude,
+		DisplayName:         "Claude Haiku 4.5 (Fast Intelligence)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "State-of-the-art coding with unprecedented speed and cost-efficiency. Matches older frontier models at fraction of cost",
+	},
+
+	// Claude 4 Series (Reliable Production)
+	{
+		ID:                  "claude-sonnet-4",
+		Provider:            Claude,
+		DisplayName:         "Claude Sonnet 4 (Production Workhorse)",
+		IsEnabled:           true,
+		Default:             ptrBool(true),
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Reliable production model with frontier performance, improved coding over 3.7. Practical for most AI use cases and high-volume tasks",
+	},
+
+	// Claude 3.5 Series (Production Ready)
+	{
+		ID:                  "claude-3-5-sonnet-20241022",
+		Provider:            Claude,
+		DisplayName:         "Claude 3.5 Sonnet v2 (Oct 2024)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Previous generation flagship with excellent coding and reasoning, reliable for production use",
+	},
+	{
+		ID:                  "claude-3-5-sonnet-20240620",
+		Provider:            Claude,
+		DisplayName:         "Claude 3.5 Sonnet v1 (June 2024)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "First version of Claude 3.5 Sonnet, highly capable for most enterprise tasks",
+	},
+	{
+		ID:                  "claude-3-5-haiku-20241022",
+		Provider:            Claude,
+		DisplayName:         "Claude 3.5 Haiku (Fast)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Fast and cost-effective 3.5 model for high-volume production tasks",
+	},
+
+	// Claude 3 Series (Stable Legacy)
+	{
+		ID:                  "claude-3-opus-20240229",
+		Provider:            Claude,
+		DisplayName:         "Claude 3 Opus (Legacy Powerful)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Legacy Claude 3 model for complex tasks, superseded by 4.5 series",
+	},
+	{
+		ID:                  "claude-3-sonnet-20240229",
+		Provider:            Claude,
+		DisplayName:         "Claude 3 Sonnet (Legacy Balanced)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Legacy balanced model for standard workloads, superseded by 4.5 series",
+	},
+	{
+		ID:                  "claude-3-haiku-20240307",
+		Provider:            Claude,
+		DisplayName:         "Claude 3 Haiku (Legacy Fast)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Legacy fast model for simple tasks, superseded by Haiku 4.5",
+	},
+
+	// =====================================================
+	// OLLAMA MODELS (Open Source & Self-Hosted)
+	// Popular models with millions of downloads from ollama.com/library
+	// =====================================================
+
+	// === REASONING MODELS ===
+	// DeepSeek R1 Series (74.6M+ pulls) - State-of-the-art reasoning
+	{
+		ID:                  "deepseek-r1:latest",
+		Provider:            Ollama,
+		DisplayName:         "DeepSeek R1 (Top Reasoning)",
+		IsEnabled:           true,
+		Default:             ptrBool(true),
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "State-of-the-art reasoning model rivaling GPT-4, excellent for complex problem-solving and analysis",
+	},
+	{
+		ID:                  "deepseek-r1:70b",
+		Provider:            Ollama,
+		DisplayName:         "DeepSeek R1 70B (Powerful Reasoning)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "70B parameter reasoning model for demanding analytical tasks",
+	},
+	{
+		ID:                  "deepseek-r1:8b",
+		Provider:            Ollama,
+		DisplayName:         "DeepSeek R1 8B (Fast Reasoning)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Lightweight reasoning model running efficiently on consumer hardware",
+	},
+	{
+		ID:                  "qwq:32b",
+		Provider:            Ollama,
+		DisplayName:         "QwQ 32B (Qwen Reasoning)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Alibaba's reasoning model from Qwen series, 1.9M+ pulls, strong math and logic",
+	},
+
+	// === META LLAMA FAMILY ===
+	// Llama 3.1 Series (107.8M+ pulls) - Most popular
+	{
+		ID:                  "llama3.1:latest",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.1 8B (Most Popular)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Most downloaded model on Ollama (107M+ pulls), excellent all-around performance",
+	},
+	{
+		ID:                  "llama3.1:70b",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.1 70B (Flagship)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Meta's flagship model with best quality, competitive with GPT-4",
+	},
+	{
+		ID:                  "llama3.1:405b",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.1 405B (Largest Open)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Largest open-source model, requires high-end hardware but exceptional quality",
+	},
+	{
+		ID:                  "llama3.3:70b",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.3 70B (Latest Quality)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Newest Llama 3.3 with quality matching 405B model (2.8M+ pulls)",
+	},
+	{
+		ID:                  "llama3.2:latest",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.2 (Lightweight)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Small 1B-3B models for edge devices and rapid inference (50M+ pulls)",
+	},
+
+	// === QWEN FAMILY (ALIBABA) ===
+	// Qwen 2.5 Series (18.3M+ pulls)
+	{
+		ID:                  "qwen2.5-coder:latest",
+		Provider:            Ollama,
+		DisplayName:         "Qwen 2.5 Coder (Top Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Best open-source coding model (9.3M+ pulls), excels at code generation and debugging",
+	},
+	{
+		ID:                  "qwen2.5:32b",
+		Provider:            Ollama,
+		DisplayName:         "Qwen 2.5 32B (Powerful General)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "32B general purpose with 128K context, excellent multilingual support",
+	},
+	{
+		ID:                  "qwen2.5:72b",
+		Provider:            Ollama,
+		DisplayName:         "Qwen 2.5 72B (Flagship)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Largest Qwen 2.5 model with best performance across all tasks",
+	},
+	// Qwen 3 Series (15.4M+ pulls) - Latest
+	{
+		ID:                  "qwen3:latest",
+		Provider:            Ollama,
+		DisplayName:         "Qwen 3 (Latest Generation)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Latest Qwen with MoE architecture and improved reasoning capabilities",
+	},
+	{
+		ID:                  "qwen3-coder:latest",
+		Provider:            Ollama,
+		DisplayName:         "Qwen 3 Coder (Latest Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Latest coding model from Qwen 3 series (1.4M+ pulls)",
+	},
+
+	// === DEEPSEEK CODING ===
+	{
+		ID:                  "deepseek-coder-v2:latest",
+		Provider:            Ollama,
+		DisplayName:         "DeepSeek Coder V2 (Strong Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "GPT-4 level coding model with MoE architecture (1.3M+ pulls)",
+	},
+	{
+		ID:                  "deepseek-v3:latest",
+		Provider:            Ollama,
+		DisplayName:         "DeepSeek V3 (MoE 671B)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Massive MoE model with 671B parameters, 37B active (3M+ pulls)",
+	},
+
+	// === GOOGLE GEMMA ===
+	{
+		ID:                  "gemma3:latest",
+		Provider:            Ollama,
+		DisplayName:         "Gemma 3 (Google Latest)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Latest Google model with vision support (28.5M+ pulls)",
+	},
+	{
+		ID:                  "gemma2:27b",
+		Provider:            Ollama,
+		DisplayName:         "Gemma 2 27B (Powerful)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Largest Gemma 2 model, excellent performance (11.6M+ pulls)",
+	},
+	{
+		ID:                  "gemma2:9b",
+		Provider:            Ollama,
+		DisplayName:         "Gemma 2 9B (Balanced)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Balanced 9B model with good quality and speed",
+	},
+
+	// === MISTRAL FAMILY ===
+	{
+		ID:                  "mistral:latest",
+		Provider:            Ollama,
+		DisplayName:         "Mistral 7B (Efficient)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     32000,
+		Description:         "Fast and efficient 7B model (23.3M+ pulls), great balance of speed and quality",
+	},
+	{
+		ID:                  "mistral-nemo:12b",
+		Provider:            Ollama,
+		DisplayName:         "Mistral Nemo 12B (128K Context)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "12B model with 128K context by Mistral + NVIDIA (3.1M+ pulls)",
+	},
+	{
+		ID:                  "mistral-large:123b",
+		Provider:            Ollama,
+		DisplayName:         "Mistral Large 123B (Flagship)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Mistral's flagship with 128K context, top-tier quality (299K+ pulls)",
+	},
+	{
+		ID:                  "mixtral:8x7b",
+		Provider:            Ollama,
+		DisplayName:         "Mixtral 8x7B (MoE)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     32000,
+		Description:         "Mixture of Experts model with 47B params, 13B active (1.5M+ pulls)",
+	},
+	{
+		ID:                  "mixtral:8x22b",
+		Provider:            Ollama,
+		DisplayName:         "Mixtral 8x22B (Large MoE)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 8192,
+		Temperature:         1,
+		InputTokenLimit:     64000,
+		Description:         "Larger MoE with 141B params, 39B active per token",
+	},
+
+	// === PHI FAMILY (MICROSOFT) ===
+	{
+		ID:                  "phi4:latest",
+		Provider:            Ollama,
+		DisplayName:         "Phi 4 14B (Microsoft Latest)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     16000,
+		Description:         "Microsoft's latest small model with strong reasoning (6.6M+ pulls)",
+	},
+	{
+		ID:                  "phi3:14b",
+		Provider:            Ollama,
+		DisplayName:         "Phi 3 14B (Efficient)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Lightweight 14B model with excellent quality (15.2M+ pulls)",
+	},
+
+	// === CODING SPECIALISTS ===
+	{
+		ID:                  "codellama:latest",
+		Provider:            Ollama,
+		DisplayName:         "Code Llama 7B (Meta Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     16000,
+		Description:         "Meta's specialized coding model, reliable and fast (3.7M+ pulls)",
+	},
+	{
+		ID:                  "codellama:34b",
+		Provider:            Ollama,
+		DisplayName:         "Code Llama 34B (Powerful Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     16000,
+		Description:         "Larger Code Llama for complex coding tasks",
+	},
+	{
+		ID:                  "starcoder2:15b",
+		Provider:            Ollama,
+		DisplayName:         "StarCoder2 15B (Code Generation)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     16000,
+		Description:         "Open code generation model trained on 600+ languages (1.6M+ pulls)",
+	},
+	{
+		ID:                  "granite-code:20b",
+		Provider:            Ollama,
+		DisplayName:         "Granite Code 20B (IBM Coding)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     8000,
+		Description:         "IBM's code intelligence model (397K+ pulls)",
+	},
+
+	// === VISION MODELS ===
+	{
+		ID:                  "llava:latest",
+		Provider:            Ollama,
+		DisplayName:         "LLaVA (Vision + Language)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Multimodal model combining vision and language (11.9M+ pulls)",
+	},
+	{
+		ID:                  "llama3.2-vision:11b",
+		Provider:            Ollama,
+		DisplayName:         "Llama 3.2 Vision 11B (Image Reasoning)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 4096,
+		Temperature:         1,
+		InputTokenLimit:     128000,
+		Description:         "Vision-enabled Llama for image understanding and reasoning (3.3M+ pulls)",
+	},
 }
 
 // GetEnabledLLMModels returns only enabled LLM models
@@ -302,6 +765,19 @@ func GetDefaultModelForProvider(provider string) *LLMModel {
 	return nil
 }
 
+// GetFirstAvailableModel returns the first available (enabled) model from any provider
+// Priority order: OpenAI -> Gemini -> Claude -> Ollama (matches initialization order)
+func GetFirstAvailableModel() *LLMModel {
+	// Try providers in order of preference
+	providers := []string{OpenAI, Gemini, Claude, Ollama}
+	for _, provider := range providers {
+		if model := GetDefaultModelForProvider(provider); model != nil {
+			return model
+		}
+	}
+	return nil
+}
+
 // IsValidModel checks if a model ID is valid and enabled
 func IsValidModel(modelID string) bool {
 	model := GetLLMModel(modelID)
@@ -311,7 +787,7 @@ func IsValidModel(modelID string) bool {
 // GetAvailableModelsByAPIKeys returns only models for providers that have API keys configured
 // Pass empty strings for API keys that are not available
 // This filters the model list based on which API providers are actually configured
-func GetAvailableModelsByAPIKeys(openAIKey, geminiKey string) []LLMModel {
+func GetAvailableModelsByAPIKeys(openAIKey, geminiKey, claudeKey, ollamaURL string) []LLMModel {
 	var available []LLMModel
 
 	for _, model := range SupportedLLMModels {
@@ -327,6 +803,14 @@ func GetAvailableModelsByAPIKeys(openAIKey, geminiKey string) []LLMModel {
 			}
 		case Gemini:
 			if geminiKey != "" {
+				available = append(available, model)
+			}
+		case Claude:
+			if claudeKey != "" {
+				available = append(available, model)
+			}
+		case Ollama:
+			if ollamaURL != "" {
 				available = append(available, model)
 			}
 		}
@@ -346,25 +830,35 @@ func GetAvailableModelsByProviderAndKeys(provider, apiKey string) []LLMModel {
 
 // LogModelInitialization logs which models are enabled/disabled and why
 // Call this during application startup to inform admin about model availability
-func LogModelInitialization(openAIKey, geminiKey string) {
+func LogModelInitialization(openAIKey, geminiKey, claudeKey, ollamaURL string) {
 	separator := strings.Repeat("=", 80)
 	log.Println("\n" + separator)
 	log.Println("🤖 LLM MODEL INITIALIZATION REPORT")
 	log.Println(separator)
 
-	availableModels := GetAvailableModelsByAPIKeys(openAIKey, geminiKey)
+	availableModels := GetAvailableModelsByAPIKeys(openAIKey, geminiKey, claudeKey, ollamaURL)
 
 	// Count by provider
 	openAIModels := GetLLMModelsByProvider(OpenAI)
 	geminiModels := GetLLMModelsByProvider(Gemini)
+	claudeModels := GetLLMModelsByProvider(Claude)
+	ollamaModels := GetLLMModelsByProvider(Ollama)
+
 	openAIAvailable := []LLMModel{}
 	geminiAvailable := []LLMModel{}
+	claudeAvailable := []LLMModel{}
+	ollamaAvailable := []LLMModel{}
 
 	for _, model := range availableModels {
-		if model.Provider == OpenAI {
+		switch model.Provider {
+		case OpenAI:
 			openAIAvailable = append(openAIAvailable, model)
-		} else if model.Provider == Gemini {
+		case Gemini:
 			geminiAvailable = append(geminiAvailable, model)
+		case Claude:
+			claudeAvailable = append(claudeAvailable, model)
+		case Ollama:
+			ollamaAvailable = append(ollamaAvailable, model)
 		}
 	}
 
@@ -396,11 +890,43 @@ func LogModelInitialization(openAIKey, geminiKey string) {
 		log.Printf("  ⚠️  To enable Gemini models, set GEMINI_API_KEY environment variable\n")
 	}
 
+	// Claude Status
+	log.Println("\n🟣 ANTHROPIC CLAUDE MODELS:")
+	if claudeKey != "" {
+		log.Printf("  ✅ API Key: CONFIGURED\n")
+		log.Printf("  📊 Available Models: %d/%d\n", len(claudeAvailable), len(claudeModels))
+		for _, model := range claudeAvailable {
+			log.Printf("     • %s (%s)\n", model.DisplayName, model.ID)
+		}
+	} else {
+		log.Printf("  ❌ API Key: NOT CONFIGURED\n")
+		log.Printf("  📊 Available Models: 0/%d\n", len(claudeModels))
+		log.Printf("  ⚠️  To enable Claude models, set CLAUDE_API_KEY environment variable\n")
+	}
+
+	// Ollama Status
+	log.Println("\n🦙 OLLAMA MODELS (Self-Hosted):")
+	if ollamaURL != "" {
+		log.Printf("  ✅ Base URL: CONFIGURED (%s)\n", ollamaURL)
+		log.Printf("  📊 Available Models: %d/%d\n", len(ollamaAvailable), len(ollamaModels))
+		for _, model := range ollamaAvailable {
+			log.Printf("     • %s (%s)\n", model.DisplayName, model.ID)
+		}
+	} else {
+		log.Printf("  ❌ Base URL: NOT CONFIGURED\n")
+		log.Printf("  📊 Available Models: 0/%d\n", len(ollamaModels))
+		log.Printf("  ⚠️  To enable Ollama models, set OLLAMA_BASE_URL environment variable\n")
+	}
+
 	log.Printf("\n📌 TOTAL AVAILABLE MODELS: %d/%d\n", len(availableModels), len(SupportedLLMModels))
 
 	if len(availableModels) == 0 {
 		log.Println("\n⚠️  WARNING: No LLM models are available!")
-		log.Println("   Please configure at least one API key (OPENAI_API_KEY or GEMINI_API_KEY)")
+		log.Println("   Please configure at least one provider:")
+		log.Println("   - OPENAI_API_KEY for OpenAI models")
+		log.Println("   - GEMINI_API_KEY for Google Gemini models")
+		log.Println("   - CLAUDE_API_KEY for Anthropic Claude models")
+		log.Println("   - OLLAMA_BASE_URL for self-hosted Ollama models")
 	}
 
 	log.Println(separator + "\n")

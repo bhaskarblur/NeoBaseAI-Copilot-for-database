@@ -5,6 +5,8 @@ import "log"
 const (
 	OpenAI = "openai"
 	Gemini = "gemini"
+	Claude = "claude"
+	Ollama = "ollama"
 )
 
 func GetLLMResponseSchema(provider string, dbType string) interface{} {
@@ -26,6 +28,12 @@ func GetLLMResponseSchema(provider string, dbType string) interface{} {
 		default:
 			return OpenAIPostgresLLMResponseSchema
 		}
+	case Claude:
+		// Claude uses JSON string schema for all databases (same structure)
+		return ClaudeLLMResponseSchemaJSON
+	case Ollama:
+		// Ollama uses JSON string schema for all databases (same structure)
+		return OllamaLLMResponseSchemaJSON
 	case Gemini:
 		switch dbType {
 		case DatabaseTypePostgreSQL:
@@ -69,6 +77,40 @@ func GetSystemPrompt(provider string, dbType string, nonTechMode bool) string {
 			basePrompt = OpenAISpreadsheetPrompt
 		default:
 			basePrompt = OpenAIPostgreSQLPrompt // Default to PostgreSQL
+		}
+	case Claude:
+		switch dbType {
+		case DatabaseTypePostgreSQL:
+			basePrompt = ClaudePostgreSQLPrompt
+		case DatabaseTypeMySQL:
+			basePrompt = ClaudeMySQLPrompt
+		case DatabaseTypeYugabyteDB:
+			basePrompt = ClaudePostgreSQLPrompt // Yugabyte uses PostgreSQL-compatible prompt
+		case DatabaseTypeClickhouse:
+			basePrompt = ClaudeClickhousePrompt
+		case DatabaseTypeMongoDB:
+			basePrompt = ClaudeMongoDBPrompt
+		case DatabaseTypeSpreadsheet:
+			basePrompt = ClaudeSpreadsheetPrompt
+		default:
+			basePrompt = ClaudePostgreSQLPrompt // Default to PostgreSQL
+		}
+	case Ollama:
+		switch dbType {
+		case DatabaseTypePostgreSQL:
+			basePrompt = OllamaPostgreSQLPrompt
+		case DatabaseTypeMySQL:
+			basePrompt = OllamaMySQLPrompt
+		case DatabaseTypeYugabyteDB:
+			basePrompt = OllamaPostgreSQLPrompt // Yugabyte uses PostgreSQL-compatible prompt
+		case DatabaseTypeClickhouse:
+			basePrompt = OllamaClickhousePrompt
+		case DatabaseTypeMongoDB:
+			basePrompt = OllamaMongoDBPrompt
+		case DatabaseTypeSpreadsheet:
+			basePrompt = OllamaSpreadsheetPrompt
+		default:
+			basePrompt = OllamaPostgreSQLPrompt // Default to PostgreSQL
 		}
 	case Gemini:
 		switch dbType {
@@ -377,6 +419,10 @@ func GetRecommendationsPrompt(provider string) string {
 		return OpenAIRecommendationsPrompt
 	case Gemini:
 		return GeminiRecommendationsPrompt
+	case Claude:
+		return ClaudeRecommendationsPrompt
+	case Ollama:
+		return OllamaRecommendationsPrompt
 	default:
 		return OpenAIRecommendationsPrompt // Default to OpenAI
 	}
@@ -389,6 +435,10 @@ func GetRecommendationsSchema(provider string) interface{} {
 		return OpenAIRecommendationsResponseSchema
 	case Gemini:
 		return GeminiRecommendationsResponseSchema
+	case Claude:
+		return ClaudeRecommendationsSchemaJSON
+	case Ollama:
+		return OllamaRecommendationsSchemaJSON
 	default:
 		return OpenAIRecommendationsResponseSchema // Default to OpenAI
 	}

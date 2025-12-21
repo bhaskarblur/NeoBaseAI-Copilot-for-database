@@ -43,15 +43,27 @@
 - Neo4j DB (Priority 3)
 
 ## Supported LLM Clients
-- **OpenAI** - 15 models including GPT-5.2, O3, GPT-4o, and more
-- **Google Gemini** - 7 models including Gemini 3 Pro, Gemini 2.5 Flash, and more
+- **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and more cutting-edge models
+- **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
+- **Anthropic Claude** (10 models) - Claude Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
+- **Ollama** (32+ models) - Self-hosted open-source models including DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, and more
 
 ### Dynamic Model Selection
-Select different AI models for each message without restarting. Choose from 22+ pre-configured models with automatic API key filtering.
+Select different AI models for each message without restarting. Choose from **63 pre-configured models** across 4 providers with automatic API key filtering and intelligent routing.
 
-## Planned to be supported LLM Clients
-- Anthropic (Claude 3.5 Sonnet)
-- Ollama (Any chat completion model)
+### Configurable AI Providers
+Enable or disable AI providers through simple environment variables:
+- Set `OPENAI_API_KEY` → Enables all 14 OpenAI models
+- Set `GEMINI_API_KEY` → Enables all 7 Gemini models
+- Set `CLAUDE_API_KEY` → Enables all 10 Claude models
+- Set `OLLAMA_BASE_URL` → Enables all 32+ Ollama models
+
+No code changes needed - just configure your `.env` file. Use one provider or mix multiple providers based on your needs. You can also disable individual models at the code level by editing `IsEnabled` in `supported_models.go`. See [SETUP.md](SETUP.md) for detailed configuration examples.
+
+### Enterprise & Self-Hosted Options
+- Use Claude with your enterprise Anthropic license for world-class coding and reasoning
+- Self-host models with Ollama for complete data privacy and cost control
+- Mix cloud and self-hosted models based on your security and performance needs
 
 ## Tech Stack
 
