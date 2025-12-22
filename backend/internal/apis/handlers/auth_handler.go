@@ -298,3 +298,74 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		Data:    "Password reset successfully",
 	})
 }
+
+// @Description Validate signup secret
+// @Accept json
+// @Produce json
+// @Param validateSignupSecretRequest body dtos.ValidateSignupSecretRequest true "Validate signup secret request"
+// @Success 200 {object} dtos.ValidateSignupSecretResponse
+func (h *AuthHandler) ValidateSignupSecret(c *gin.Context) {
+	var req dtos.ValidateSignupSecretRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	isValid, err := h.authService.ValidateSignupSecret(req.UserSignupSecret)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusInternalServerError, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.ValidateSignupSecretResponse{
+		Valid: isValid,
+	})
+}
+
+// @Description Handle Google OAuth callback for authentication
+// @Accept json
+// @Produce json
+// @Param googleOAuthRequest body dtos.GoogleOAuthRequest true "Google OAuth request"
+// @Success 200 {object} dtos.AuthResponse
+func (h *AuthHandler) GoogleOAuthCallback(c *gin.Context) {
+	var req dtos.GoogleOAuthRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Route to appropriate handler based on action
+	var authResponse *dtos.AuthResponse
+	var statusCode uint
+	var err error
+
+	if req.Action == "signup" {
+		authResponse, statusCode, err = h.authService.GoogleOAuthSignup(&req)
+	} else {
+		// Default to login for backward compatibility
+		authResponse, statusCode, err = h.authService.GoogleOAuthLogin(&req)
+	}
+
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, authResponse)
+}

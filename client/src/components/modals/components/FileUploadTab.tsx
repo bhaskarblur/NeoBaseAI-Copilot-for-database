@@ -396,7 +396,7 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
         <div className="flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-gray-700">
-            <p className="font-medium mb-1 mt-0.5">Data Security & Privacy</p>
+            <p className="font-semibold text-base mb-1 mt-0.5">Data Security & Privacy</p>
             <p>
               Your CSV and Excel data will be encrypted using AES-GCM encryption before storage. 
               Each user's data is isolated in separate database schemas. You can export or delete 

@@ -157,7 +157,7 @@ func LoadEnv() error {
 	Env.SpreadsheetPostgresSSLMode = getEnvWithDefault("SPREADSHEET_POSTGRES_SSL_MODE", "disable")
 	Env.SpreadsheetDataEncryptionKey = getRequiredEnv("SPREADSHEET_DATA_ENCRYPTION_KEY", "spreadsheet_data_key_32bytes")
 
-	// Google OAuth configs
+	// Google OAuth configs (used for both authentication and Google Sheets integration)
 	Env.GoogleClientID = getEnvWithDefault("GOOGLE_CLIENT_ID", "")
 	Env.GoogleClientSecret = getEnvWithDefault("GOOGLE_CLIENT_SECRET", "")
 	Env.GoogleRedirectURL = getEnvWithDefault("GOOGLE_REDIRECT_URL", "http://localhost:5173/auth/google/callback")
@@ -244,6 +244,9 @@ func validateConfig() error {
 			return fmt.Errorf("DEFAULT_LLM_MODEL: %s is disabled", Env.DefaultLLMModel)
 		}
 	}
+
+	// Disable models for providers without API keys configured
+	constants.DisableUnavailableProviders(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)
 
 	// Log LLM model initialization status
 	constants.LogModelInitialization(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)

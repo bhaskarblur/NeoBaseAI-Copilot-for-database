@@ -193,29 +193,27 @@ function AppContent() {
   const handleLogin = async (data: LoginFormData) => {
     try {
       const response = await authService.login(data);
-      if (response.success) {
-        const userData = {
-          id: response.data.user.id,
-          username: response.data.user.username,
-          created_at: response.data.user.created_at
-        };
-        
-        setUser(userData);
-        setIsAuthenticated(true);
-        setSuccessMessage(`Welcome back, ${userData.username}!`);
-        
-        // Track login in analytics
-        try {
-          analyticsService.trackLogin(userData.id, userData.username);
-          analyticsService.identifyUser(
-            userData.id,
-            userData.username,
-            userData.created_at
-          );
-          console.log('Login tracked in analytics');
-        } catch (error) {
-          console.error('Failed to track login in analytics:', error);
-        }
+      const userData = {
+        id: response.user.id,
+        username: response.user.username,
+        created_at: response.user.created_at
+      };
+      
+      setUser(userData);
+      setIsAuthenticated(true);
+      setSuccessMessage(`Welcome back, ${userData.username}!`);
+      
+      // Track login in analytics
+      try {
+        analyticsService.trackLogin(userData.id, userData.username);
+        analyticsService.identifyUser(
+          userData.id,
+          userData.username,
+          userData.created_at
+        );
+        console.log('Login tracked in analytics');
+      } catch (error) {
+        console.error('Failed to track login in analytics:', error);
       }
     } catch (error: any) {
       console.error("Login error:", error);
@@ -229,9 +227,9 @@ function AppContent() {
       console.log("handleSignup response", response);
       
       const userData = {
-        id: response.data.user.id,
-        username: response.data.user.username,
-        created_at: response.data.user.created_at
+        id: response.user.id,
+        username: response.user.username,
+        created_at: response.user.created_at
       };
       
       setIsAuthenticated(true);

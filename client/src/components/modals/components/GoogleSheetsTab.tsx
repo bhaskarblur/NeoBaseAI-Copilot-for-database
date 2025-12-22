@@ -12,7 +12,6 @@ interface GoogleSheetsTabProps {
     google_auth_token: string; 
     google_refresh_token: string;
   }) => void;
-  chatId?: string; // Chat ID for refresh functionality
   onRefreshData?: () => void; // Callback to trigger refresh knowledge modal
 }
 
@@ -21,7 +20,6 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
   handleChange,
   isEditMode,
   onGoogleAuthChange,
-  chatId,
   onRefreshData,
 }) => {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -140,55 +138,141 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
     return null;
   };
 
-  // Handle Google authentication
+  // Build Google OAuth URL for spreadsheet access
+  const buildGoogleOAuthURL = (): string => {
+    const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const GOOGLE_REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/google/callback';
+    
+    if (!GOOGLE_CLIENT_ID) {
+      throw new Error('Google Client ID is not configured');
+    }
+
+    const state = btoa(JSON.stringify({ purpose: 'spreadsheet' }));
+    const scope = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.append('client_id', GOOGLE_CLIENT_ID);
+    authUrl.searchParams.append('redirect_uri', GOOGLE_REDIRECT_URI);
+    authUrl.searchParams.append('response_type', 'code');
+    authUrl.searchParams.append('scope', scope);
+    authUrl.searchParams.append('access_type', 'offline');
+    authUrl.searchParams.append('state', state);
+    authUrl.searchParams.append('prompt', 'consent');
+
+    return authUrl.toString();
+  };
+
+  // Handle Google authentication for spreadsheet access
   const handleGoogleAuth = async () => {
     try {
       setIsAuthenticating(true);
       setAuthError(null);
       
-      // Get OAuth URL from backend
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/google/auth`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      // Build OAuth URL
+      const oauthUrl = buildGoogleOAuthURL();
       
-      if (!response.ok) {
-        throw new Error('Failed to get authentication URL');
+      // Open a popup window for the OAuth flow
+      const width = 600;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      const authWindow = window.open(
+        oauthUrl, 
+        'google-sheets-auth', 
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+      
+      if (!authWindow) {
+        throw new Error('Failed to open authentication window');
       }
       
-      const { auth_url } = await response.json();
-      
-      // Open OAuth window
-      const authWindow = window.open(auth_url, 'google-auth', 'width=600,height=600');
-      
-      // Listen for callback
-      const handleMessage = async (event: MessageEvent) => {
+      // Set up message listener before initiating OAuth
+      let handleMessage: (event: MessageEvent) => Promise<void>;
+      handleMessage = async (event: MessageEvent) => {
+        // Verify origin for security
         if (event.origin !== window.location.origin) return;
         
         if (event.data.type === 'google-auth-success') {
-          const { access_token, refresh_token, user_email, expiry } = event.data;
+          // The spreadsheet OAuth returns the authorization code
+          const { code } = event.data;
           
-          // Store tokens persistently
-          localStorage.setItem('google_access_token', access_token);
-          localStorage.setItem('google_refresh_token', refresh_token);
-          localStorage.setItem('google_user_email', user_email);
-          if (expiry) {
-            localStorage.setItem('google_token_expiry', expiry);
+          try {
+            // Exchange the code for tokens using the backend endpoint
+            const redirectURI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/google/callback';
+            
+            const tokenResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/google/callback`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify({
+                code: code,
+                redirect_uri: redirectURI,
+                purpose: 'spreadsheet'
+              })
+            });
+            
+            if (!tokenResponse.ok) {
+              const errorText = await tokenResponse.text();
+              console.error('Token exchange error response status:', tokenResponse.status);
+              console.error('Token exchange error response text:', errorText);
+              try {
+                const error = JSON.parse(errorText);
+                throw new Error(error.error || error.Error || 'Failed to exchange authorization code');
+              } catch (parseError) {
+                throw new Error(`Token exchange failed with status ${tokenResponse.status}: ${errorText}`);
+              }
+            }
+            
+            const responseText = await tokenResponse.text();
+            console.log('Token exchange response status:', tokenResponse.status);
+            console.log('Token exchange response text:', responseText);
+            console.log('Token exchange response type:', tokenResponse.headers.get('content-type'));
+            
+            if (!responseText) {
+              throw new Error('Empty response from token exchange');
+            }
+            
+            const tokenData = JSON.parse(responseText);
+            console.log('Parsed token data:', tokenData);
+            
+            // Extract email from user object
+            const userEmail = tokenData.user?.email || tokenData.user_email;
+            if (!userEmail) {
+              console.warn('No email found in token response. Token data keys:', Object.keys(tokenData));
+              throw new Error('No email returned from Google authentication');
+            }
+            
+            // Store tokens persistently
+            localStorage.setItem('google_access_token', tokenData.access_token);
+            localStorage.setItem('google_refresh_token', tokenData.refresh_token);
+            localStorage.setItem('google_user_email', userEmail);
+            if (tokenData.expiry) {
+              localStorage.setItem('google_token_expiry', tokenData.expiry);
+            }
+            
+            setUserEmail(userEmail);
+            setAuthSuccess(true);
+            setIsAuthenticating(false);
+            
+            // Close the auth window
+            if (authWindow) {
+              authWindow.close();
+            }
+            
+            window.removeEventListener('message', handleMessage);
+          } catch (exchangeError: any) {
+            setAuthError(exchangeError.message || 'Failed to exchange authorization code');
+            setIsAuthenticating(false);
+            if (authWindow) {
+              authWindow.close();
+            }
+            window.removeEventListener('message', handleMessage);
           }
-          
-          setUserEmail(user_email);
-          setAuthSuccess(true);
-          setIsAuthenticating(false);
-          
-          // Close the auth window
-          if (authWindow) {
-            authWindow.close();
-          }
-          
-          window.removeEventListener('message', handleMessage);
         } else if (event.data.type === 'google-auth-error') {
-          setAuthError(event.data.error);
+          setAuthError(event.data.error || 'Authentication failed');
           setIsAuthenticating(false);
           
           if (authWindow) {
@@ -495,7 +579,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
         <div className="flex items-start gap-2">
           <AlertCircle className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-gray-700">
-            <p className="font-medium mb-1">Data Security & Privacy</p>
+            <p className="font-semibold text-base mb-1">Data Security & Privacy</p>
             <p>
               Your Google Sheets data will be synced and encrypted in our secure database. 
               We only request read-only access to your sheets. Authentication tokens are 

@@ -765,6 +765,34 @@ func GetDefaultModelForProvider(provider string) *LLMModel {
 	return nil
 }
 
+// DisableUnavailableProviders disables all models for providers that don't have API keys configured
+// Call this during application startup to prevent fallback to unavailable providers
+func DisableUnavailableProviders(openAIKey, geminiKey, claudeKey, ollamaURL string) {
+	for i := range SupportedLLMModels {
+		model := &SupportedLLMModels[i]
+
+		// Disable models for providers without API keys
+		switch model.Provider {
+		case OpenAI:
+			if openAIKey == "" {
+				model.IsEnabled = false
+			}
+		case Gemini:
+			if geminiKey == "" {
+				model.IsEnabled = false
+			}
+		case Claude:
+			if claudeKey == "" {
+				model.IsEnabled = false
+			}
+		case Ollama:
+			if ollamaURL == "" {
+				model.IsEnabled = false
+			}
+		}
+	}
+}
+
 // GetFirstAvailableModel returns the first available (enabled) model from any provider
 // Priority order: OpenAI -> Gemini -> Claude -> Ollama (matches initialization order)
 func GetFirstAvailableModel() *LLMModel {

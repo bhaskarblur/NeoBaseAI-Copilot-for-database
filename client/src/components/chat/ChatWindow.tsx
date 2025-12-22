@@ -162,7 +162,7 @@ export default function ChatWindow({
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(false);
   const [inputPrefill, setInputPrefill] = useState<string | null>(null);
   // recoVersion comes from props to trigger recommendation refresh
-  const [shimmerTexts, setShimmerTexts] = useState<string[]>([]);
+  const [_shimmerTexts, setShimmerTexts] = useState<string[]>([]);
   const lastRecoKeyRef = useRef<string | null>(null);
 
   // Search functionality

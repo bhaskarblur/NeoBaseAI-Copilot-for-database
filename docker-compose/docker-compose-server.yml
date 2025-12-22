@@ -65,6 +65,8 @@ services:
         - VITE_FRONTEND_BASE_URL=${VITE_FRONTEND_BASE_URL}
         - VITE_API_URL=${VITE_API_URL}
         - VITE_ENVIRONMENT=${VITE_ENVIRONMENT}
+        - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+        - VITE_GOOGLE_REDIRECT_URI=${VITE_GOOGLE_REDIRECT_URI}
     container_name: neobase-client
     restart: always
     ports:

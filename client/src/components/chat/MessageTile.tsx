@@ -120,8 +120,8 @@ export default function MessageTile({
         queryId: string | null;
     }>({ show: false, queryId: null });
     const [streamingQueryIndex, setStreamingQueryIndex] = useState<number>(-1);
-    const [isDescriptionStreaming, setIsDescriptionStreaming] = useState(false);
-    const [isQueryStreaming, setIsQueryStreaming] = useState(false);
+    const [isDescriptionStreaming] = useState(false);
+    const [isQueryStreaming] = useState(false);
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
     const abortControllerRef = useRef<Record<string, AbortController>>({});

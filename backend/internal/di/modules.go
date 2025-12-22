@@ -127,6 +127,13 @@ func Initialize() {
 		log.Fatalf("Failed to provide email service: %v", err)
 	}
 
+	// Provide Google OAuth service
+	if err := DiContainer.Provide(func() services.GoogleOAuthService {
+		return services.NewGoogleOAuthService()
+	}); err != nil {
+		log.Fatalf("Failed to provide Google OAuth service: %v", err)
+	}
+
 	// Provide waitlist repository
 	if err := DiContainer.Provide(func(db *mongodb.MongoDBClient) *repositories.WaitlistRepository {
 		return repositories.NewWaitlistRepository(db.Client.Database(db.Config.DatabaseName))
@@ -149,8 +156,8 @@ func Initialize() {
 	}
 
 	// Provide services
-	if err := DiContainer.Provide(func(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepository, jwt utils.JWTService, emailService services.EmailService) services.AuthService {
-		return services.NewAuthService(userRepo, jwt, tokenRepo, emailService)
+	if err := DiContainer.Provide(func(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepository, jwt utils.JWTService, emailService services.EmailService, googleOAuthService services.GoogleOAuthService) services.AuthService {
+		return services.NewAuthService(userRepo, jwt, tokenRepo, emailService, googleOAuthService)
 	}); err != nil {
 		log.Fatalf("Failed to provide auth service: %v", err)
 	}

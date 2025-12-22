@@ -1,4 +1,4 @@
-import { Send, Square, ChevronDown, Brain, Cpu } from 'lucide-react';
+import { Send, Square, ChevronDown, Cpu } from 'lucide-react';
 import { FormEvent, useState, useEffect, useRef, useMemo } from 'react';
 import analyticsService from '../../services/analyticsService';
 import { LLMModel, CategorizedLLMModels } from '../../types/chat';

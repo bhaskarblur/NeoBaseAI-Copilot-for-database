@@ -23,18 +23,21 @@ export interface SignupFormData {
   userSignupSecret: string;
 }
 
+
 export interface AuthResponse {
-  success: boolean;
-  data: {
-    access_token: string;
-    refresh_token: string;
-    user: {
-      id: string;
-      username: string;
-      email: string;
-      created_at: string;
-    };
+  access_token: string;
+  refresh_token: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    created_at: string;
   };
+}
+
+export interface AuthResponseWrapper {
+  success: boolean;
+  data: AuthResponse;
   error?: string;
 }
 
