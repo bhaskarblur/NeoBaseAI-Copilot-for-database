@@ -16,6 +16,10 @@ Add core team members here with their GitHub profiles and roles -->
   <img src="https://contrib.rocks/image?repo=bhaskarblur/neobase-ai-dba" />
 </a>
 
+## Join Our Community
+
+Connect with us on [Discord](https://discord.gg/VT9NRub86D) to discuss NeoBase, share ideas, ask questions, and collaborate with the community!
+
 ## How to Contribute
 
 We welcome contributions from everyone! Please see our [Contributing Guidelines](CONTRIBUTING.md) for more information on how to get started.

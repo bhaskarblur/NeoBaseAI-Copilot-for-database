@@ -107,9 +107,13 @@ Read ([SETUP](https://github.com/bhaskarblur/neobase-ai-dba/blob/main/SETUP.md))
    - Get AI-driven suggestions to improve query performance.
 
 
+## Community
+
+Join our [Discord community](https://discord.gg/VT9NRub86D) to connect with other users, share feedback, discuss features, and get help from the NeoBase team!
+
 ## Contributing
 
-We welcome contributions! Here’s how you can help:
+We welcome contributions! Here's how you can help:
 
 1. Fork the repository.
 2. Create a new branch (`git checkout -b feature/your-feature`).
