@@ -6,16 +6,7 @@ const (
 	OllamaMaxCompletionTokens = 8192
 )
 
-// Ollama uses the same database-specific system prompts as Gemini
-// These are comprehensive prompts that work well across all providers
-const OllamaPostgreSQLPrompt = GeminiPostgreSQLPrompt
-const OllamaMySQLPrompt = GeminiMySQLPrompt
-const OllamaClickhousePrompt = GeminiClickhousePrompt
-const OllamaMongoDBPrompt = GeminiMongoDBPrompt
-const OllamaSpreadsheetPrompt = GeminiSpreadsheetPrompt
-
-// Ollama Response Schema as JSON object (for format parameter)
-// Ollama uses a format parameter with JSON schema similar to Gemini
+// Initial LLM Response Schema for Ollama
 const OllamaLLMResponseSchemaJSON = `{
 	"type": "object",
 	"properties": {
@@ -147,6 +138,3 @@ const OllamaRecommendationsSchemaJSON = `{
 	},
 	"required": ["recommendations"]
 }`
-
-// Query Recommendations Prompt for Ollama (same as Gemini)
-const OllamaRecommendationsPrompt = GeminiRecommendationsPrompt

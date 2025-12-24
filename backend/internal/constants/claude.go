@@ -6,16 +6,7 @@ const (
 	ClaudeMaxCompletionTokens = 8192
 )
 
-// Claude uses the same database-specific system prompts as Gemini
-// These are comprehensive prompts that work well across all providers
-const ClaudePostgreSQLPrompt = GeminiPostgreSQLPrompt
-const ClaudeMySQLPrompt = GeminiMySQLPrompt
-const ClaudeClickhousePrompt = GeminiClickhousePrompt
-const ClaudeMongoDBPrompt = GeminiMongoDBPrompt
-const ClaudeSpreadsheetPrompt = GeminiSpreadsheetPrompt
-
-// Claude Response Schema as JSON string (for tool use pattern)
-// Claude uses a tool-calling pattern for structured outputs
+// Initial LLM Response Schema for Claude
 const ClaudeLLMResponseSchemaJSON = `{
 	"type": "object",
 	"properties": {
@@ -147,6 +138,3 @@ const ClaudeRecommendationsSchemaJSON = `{
 	},
 	"required": ["recommendations"]
 }`
-
-// Query Recommendations Prompt for Claude (same as Gemini)
-const ClaudeRecommendationsPrompt = GeminiRecommendationsPrompt
