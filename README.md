@@ -126,6 +126,4 @@ See the list of contributors in [CONTRIBUTORS](CONTRIBUTORS) file.
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-
-Let me know if you'd like to add or modify anything!
+For more details regarding the legal usage & licensing, reach out to any of the maintainers or create an issue.
