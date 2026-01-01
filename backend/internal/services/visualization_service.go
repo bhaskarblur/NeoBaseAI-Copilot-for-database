@@ -422,16 +422,37 @@ func (s *chatService) GenerateVisualizationForQueryResults(
 	)
 	log.Printf("GenerateVisualizationForQueryResults -> Request built, connection type: %s", chat.Connection.Type)
 
+	// Analyze data quality to pass to LLM
+	dataQuality := analyzeDataQuality(queryResults)
+	log.Printf("GenerateVisualizationForQueryResults -> Data quality analysis: has_numeric=%v, numeric_columns=%v, categorical_columns=%v",
+		dataQuality["has_numeric"], dataQuality["numeric_columns"], dataQuality["categorical_columns"])
+
 	// Get visualization prompt
 	visualizationPrompt := constants.GetVisualizationPrompt(chat.Connection.Type)
 	log.Printf("GenerateVisualizationForQueryResults -> Visualization prompt retrieved for type: %s", chat.Connection.Type)
+
+	// Enhance visualization prompt with data quality context
+	dataQualityStr, _ := json.Marshal(dataQuality)
+	enhancedVisualizationPrompt := fmt.Sprintf(`%s
+
+DATA QUALITY ANALYSIS FOR THIS QUERY:
+%s
+
+CRITICAL: Use this data quality analysis to make your decision:
+- If has_numeric=false, the data has NO numeric columns
+- If data has no numeric columns, you MUST set can_visualize=false and provide a suggested_query
+- Do NOT try to use string/categorical columns as numeric Y-axis values
+- When you see has_numeric=false, always suggest aggregation with COUNT/SUM and GROUP BY`,
+		visualizationPrompt, string(dataQualityStr))
+
+	log.Printf("GenerateVisualizationForQueryResults -> Using enhanced visualization prompt with data quality context")
 
 	// Call LLM to generate visualization configuration
 	log.Printf("GenerateVisualizationForQueryResults -> Calling LLM with model: %s", selectedLLMModel)
 	visualizationResponse, err := s.callVisualizationLLM(
 		ctx,
 		selectedLLMModel,
-		visualizationPrompt,
+		enhancedVisualizationPrompt,
 		req,
 	)
 	log.Printf("GenerateVisualizationForQueryResults -> LLM call completed, err: %v", err)
@@ -601,10 +622,28 @@ func (s *chatService) callVisualizationLLM(
 
 CRITICAL: You MUST respond with ONLY a JSON object (no markdown, no explanation outside JSON).
 
+INTELLIGENCE RULES - CRITICAL FOR SUCCESS:
+1. ANALYZE DATA QUALITY FIRST:
+   - Check if data has numeric columns for Y-axis
+   - Check if data has categorical/date columns for X-axis
+   - If NO numeric fields exist but data has dates/categories, STRONGLY suggest aggregation
+
+2. IF NO NUMERIC DATA EXISTS:
+   - Set can_visualize: false
+   - Reason: "Data lacks numeric fields for visualization. Suggest aggregating with COUNT/SUM/AVG and GROUP BY"
+   - Include suggested_query in response with example SQL using COUNT(*) GROUP BY DATE or CATEGORY
+   - Example: "Try: SELECT DATE(timestamp_col) AS date, COUNT(*) as count FROM table GROUP BY DATE(timestamp_col)"
+
+3. IF DATA NEEDS TRANSFORMATION:
+   - Still set can_visualize: false if current data won't work
+   - Provide helpful transformation guidance in reason field
+   - Users can then modify their query based on your suggestion
+
 Response MUST have this exact structure:
 {
   "can_visualize": boolean,
-  "reason": "string explaining why or why not",
+  "reason": "string explaining why or why not, with suggestions if needed",
+  "suggested_query": "optional SQL suggestion if data needs aggregation",
   "chart_configuration": {
     "chart_type": "string",
     "title": "string", 
@@ -617,9 +656,10 @@ Response MUST have this exact structure:
 REQUIRED RULES:
 1. Always include "can_visualize" and "reason" fields
 2. If can_visualize=true, chart_configuration must have valid values
-3. If can_visualize=false, chart_configuration can be null
+3. If can_visualize=false, chart_configuration can be null, but suggest_query should guide the user
 4. Use ONLY valid JSON - no markdown code blocks, no text before/after JSON
 5. Valid chart types: line, bar, pie, area, scatter, heatmap, funnel, bubble, waterfall
+6. If data has NO numeric columns, suggest aggregation with specific SQL examples
 `
 
 	// Call the LLM client with the new GenerateVisualization method
@@ -976,7 +1016,7 @@ func (s *chatService) GetVisualizationData(
 		return nil, fmt.Errorf("failed to execute chart query: %s", queryErr.Message)
 	}
 
-	log.Printf("GetVisualizationData -> result: %+v", result)
+	// log.Printf("GetVisualizationData -> result: %+v", result)
 	log.Printf("GetVisualizationData -> result.Result type: %T", result.Result)
 
 	// Convert result to map format
@@ -1011,6 +1051,16 @@ func (s *chatService) GetVisualizationData(
 				case []map[string]interface{}:
 					log.Printf("GetVisualizationData -> 'results' is []map[string]interface{}, length: %d", len(resultsVal))
 					fullData = resultsVal
+				case []primitive.M:
+					log.Printf("GetVisualizationData -> 'results' is []primitive.M, length: %d", len(resultsVal))
+					for _, item := range resultsVal {
+						// Convert primitive.M to map[string]interface{} explicitly
+						converted := make(map[string]interface{})
+						for k, v := range item {
+							converted[k] = v
+						}
+						fullData = append(fullData, converted)
+					}
 				}
 			}
 		default:

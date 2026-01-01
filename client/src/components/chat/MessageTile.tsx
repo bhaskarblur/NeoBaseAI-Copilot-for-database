@@ -2201,13 +2201,13 @@ export default function MessageTile({
                                                                             </div>
                                                                             <div className="text-white font-semibold mb-2 text-base">Visualization Not Supported</div>
                                                                             <p className="text-gray-400 text-sm mb-4">{visualizationStates[query.id].error}</p>
-                                                                            <button
+                                                                            {/* <button
                                                                                 onClick={() => handleGenerateVisualization(query.id)}
                                                                                 className="px-4 py-2 bg-gray-600 text-white font-semibold rounded hover:bg-gray-500 transition-colors text-sm"
                                                                             >
                                                                                 <RefreshCcw className="w-4 h-4 inline-block mr-2" />
                                                                                 Try Again
-                                                                            </button>
+                                                                            </button> */}
                                                                         </div>
                                                                     ) : (
                                                                         <div className="bg-neo-error/10 rounded-lg p-8 text-center">
@@ -2228,6 +2228,7 @@ export default function MessageTile({
                                                                             config={visualizations[query.id].chart_configuration}
                                                                             data={visualizations[query.id].chart_data}
                                                                             onRetry={() => handleGenerateVisualization(query.id)}
+                                                                            onRegenerate={() => handleGenerateVisualization(query.id)}
                                                                         />
                                                                     </div>
                                                                 ) : query.visualization && query.visualization.can_visualize && !visualizations[query.id]?.chart_data ? (

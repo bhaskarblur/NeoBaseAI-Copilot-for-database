@@ -92,40 +92,12 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	var selectedLLMModel string
 
-	// For edited messages, use the chat's preferred model or default model
+	// Initialize selectedLLMModel, will be finalized after fetching messages
 	// For new messages, use the model from the user message (if set)
-	if userMessage != nil && userMessage.IsEdited {
-		// Edited message: use chat's preferred model or default
-		if chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
-			selectedLLMModel = *chat.PreferredLLMModel
-			log.Printf("processLLMResponse -> Using chat's preferred model for edited message: %s", selectedLLMModel)
-		} else {
-			// Fallback to first available model from any provider
-			defaultModel := constants.GetFirstAvailableModel()
-			if defaultModel != nil {
-				selectedLLMModel = defaultModel.ID
-				log.Printf("processLLMResponse -> Using first available model for edited message: %s (%s)", selectedLLMModel, defaultModel.Provider)
-			}
-		}
-		// Update the user message with the new model
-		if userMessage.LLMModel == nil || *userMessage.LLMModel != selectedLLMModel {
-			userMessage.LLMModel = &selectedLLMModel
-			userMessageID := userMessage.ID
-			if err := s.chatRepo.UpdateMessage(userMessageID, userMessage); err != nil {
-				log.Printf("Warning: Failed to update user message with new model: %v", err)
-			}
-		}
-	} else if userMessage != nil && userMessage.LLMModel != nil && *userMessage.LLMModel != "" {
+	if userMessage != nil && !userMessage.IsEdited && userMessage.LLMModel != nil && *userMessage.LLMModel != "" {
 		// New message: use the model from the user message
 		selectedLLMModel = *userMessage.LLMModel
 		log.Printf("processLLMResponse -> Selected LLM Model from user message: %s", selectedLLMModel)
-	} else {
-		// Fallback to first available model from any provider
-		defaultModel := constants.GetFirstAvailableModel()
-		if defaultModel != nil {
-			selectedLLMModel = defaultModel.ID
-			log.Printf("processLLMResponse -> Using first available model: %s (%s)", selectedLLMModel, defaultModel.Provider)
-		}
 	}
 
 	// Get connection info
@@ -168,6 +140,85 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		filteredMessages = append(filteredMessages, msg)
 		if msg.MessageID == userMessageObjID {
 			break
+		}
+	}
+
+	// Now finalize model selection for edited messages
+	// Priority: 1) Chat's preferred model, 2) Last assistant message's model, 3) Default LLM model for the provider
+	if userMessage != nil && userMessage.IsEdited && selectedLLMModel == "" {
+		// Edited message: Priority 1) Chat's preferred model, 2) Last assistant message's model, 3) Default LLM model for the provider
+
+		// Priority 1: Check chat's preferred model first
+		if chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+			selectedLLMModel = *chat.PreferredLLMModel
+			log.Printf("processLLMResponse -> Edited message: Using chat's preferred model: %s", selectedLLMModel)
+		} else {
+			// Priority 2: Check last assistant message's model
+			lastAssistantModel := ""
+			if len(filteredMessages) > 0 {
+				// Find the last assistant message (looking backwards from the end)
+				for i := len(filteredMessages) - 1; i >= 0; i-- {
+					if filteredMessages[i].Role == string(constants.MessageTypeAssistant) {
+						if filteredMessages[i].Content != nil {
+							// Content is already map[string]interface{}
+							if modelID, exists := filteredMessages[i].Content["llm_model_id"]; exists && modelID != "" {
+								lastAssistantModel = modelID.(string)
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if lastAssistantModel != "" {
+				// Validate that the last assistant model is still enabled and valid
+				if constants.IsValidModel(lastAssistantModel) {
+					selectedLLMModel = lastAssistantModel
+					log.Printf("processLLMResponse -> Edited message: Using last assistant message's model: %s", selectedLLMModel)
+				} else {
+					log.Printf("processLLMResponse -> Last assistant model %s is no longer available, falling back to provider default", lastAssistantModel)
+				}
+			}
+
+			// If last assistant model is not available, try provider defaults
+			if selectedLLMModel == "" {
+				// Priority 3: Get default LLM model for the provider (in provider priority order)
+				// Try providers in order: OpenAI -> Gemini -> Claude -> Ollama
+				providers := []string{constants.OpenAI, constants.Gemini, constants.Claude, constants.Ollama}
+				for _, provider := range providers {
+					if defaultModel := constants.GetDefaultModelForProvider(provider); defaultModel != nil && defaultModel.IsEnabled {
+						selectedLLMModel = defaultModel.ID
+						log.Printf("processLLMResponse -> Edited message: Using default model for provider: %s (%s)", selectedLLMModel, defaultModel.Provider)
+						break
+					}
+				}
+			}
+		}
+
+		// Update the user message with the selected model
+		if userMessage.LLMModel == nil || *userMessage.LLMModel != selectedLLMModel {
+			userMessage.LLMModel = &selectedLLMModel
+			userMessageID := userMessage.ID
+			if err := s.chatRepo.UpdateMessage(userMessageID, userMessage); err != nil {
+				log.Printf("Warning: Failed to update user message with new model: %v", err)
+			}
+		}
+	}
+
+	// Handle fallback if still no model selected
+	if selectedLLMModel == "" {
+		// Use default LLM model for the provider (in provider priority order)
+		// Try providers in order: OpenAI -> Gemini -> Claude -> Ollama
+		providers := []string{constants.OpenAI, constants.Gemini, constants.Claude, constants.Ollama}
+		for _, provider := range providers {
+			if defaultModel := constants.GetDefaultModelForProvider(provider); defaultModel != nil && defaultModel.IsEnabled {
+				// Validate that the model is properly configured
+				if constants.IsValidModel(defaultModel.ID) {
+					selectedLLMModel = defaultModel.ID
+					log.Printf("processLLMResponse -> No model selected, using default model for provider: %s (%s)", selectedLLMModel, defaultModel.Provider)
+					break
+				}
+			}
 		}
 	}
 
@@ -528,6 +579,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			})
 		}
 
+		// Compute LLM model name for the synchronous response
+		var llmModelNameForResponse *string
+		if existingMessage.LLMModel != nil {
+			displayName := s.getModelDisplayName(*existingMessage.LLMModel)
+			llmModelNameForResponse = &displayName
+		}
+
 		return &dtos.MessageResponse{
 			ID:            existingMessage.ID.Hex(),
 			ChatID:        existingMessage.ChatID.Hex(),
@@ -537,7 +595,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
 			LLMModel:      existingMessage.LLMModel,
-			LLMModelName:  existingMessage.LLMModelName,
+			LLMModelName:  llmModelNameForResponse,
 			NonTechMode:   existingMessage.NonTechMode,
 			CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
@@ -2904,7 +2962,7 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 	log.Printf("ChatService -> GetQueryRecommendations -> Found %d LLM messages, using conversation and schema context", len(llmMessages))
 
 	// Determine which LLM model to use for recommendations
-	// Priority: 1) Chat's preferred model, 2) Last user message's model, 3) Default model
+	// Priority: 1) Chat's preferred model, 2) Last assistant message's model, 3) Default model
 	selectedLLMModel := ""
 
 	// Check chat's preferred model first
@@ -2913,14 +2971,16 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		selectedLLMModel = *chat.PreferredLLMModel
 		log.Printf("ChatService -> GetQueryRecommendations -> Using chat's preferred model: %s", selectedLLMModel)
 	} else {
-		// Fallback to the last user message's model
-		chatMessages, _, err := s.chatRepo.FindLatestMessageByChat(chatObjID, 1, 1) // Get only the last message
+		// Fallback to the last assistant message's model (what LLM model was used for the conversation)
+		chatMessages, _, err := s.chatRepo.FindLatestMessageByChat(chatObjID, 20, 1) // Get up to 20 recent messages
 		if err == nil && len(chatMessages) > 0 {
-			lastMsg := chatMessages[0]
-			if lastMsg.Type == string(constants.MessageTypeUser) &&
-				lastMsg.LLMModel != nil && *lastMsg.LLMModel != "" {
-				selectedLLMModel = *lastMsg.LLMModel
-				log.Printf("ChatService -> GetQueryRecommendations -> Using last user message's model: %s", selectedLLMModel)
+			// Find the last assistant/AI message
+			for _, msg := range chatMessages {
+				if msg.Type == string(constants.MessageTypeAssistant) && msg.LLMModel != nil && *msg.LLMModel != "" {
+					selectedLLMModel = *msg.LLMModel
+					log.Printf("ChatService -> GetQueryRecommendations -> Using last assistant message's model: %s", selectedLLMModel)
+					break
+				}
 			}
 		}
 	}

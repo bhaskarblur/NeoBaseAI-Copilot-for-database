@@ -5,7 +5,7 @@ import {
   Cell, ReferenceLine
 } from 'recharts';
 import { ChartConfiguration } from '../types/visualization';
-import { PencilRuler } from 'lucide-react';
+import { PencilRuler, RefreshCcw } from 'lucide-react';
 
 interface ChartRendererProps {
   config: ChartConfiguration;
@@ -14,6 +14,7 @@ interface ChartRendererProps {
   error?: string;
   onError?: (error: string) => void;
   onRetry?: () => void;
+  onRegenerate?: () => void;
 }
 
 // ============================================
@@ -40,30 +41,30 @@ const CHART_THEME = {
     fontSize: 13,
     fontWeight: 400,
     tickColor: '#fff',
-    labelFontSize: 13,
+    labelFontSize: 14,
     labelFontWeight: 'bold' as const,
     labelColor: '#fff',
   },
   // Grid styling
   grid: {
-    stroke: '#444',
+    stroke: '#505050ff',
     strokeDasharray: '3 3',
   },
   // Legend styling
   legend: {
-    fontSize: 12,
-    fontWeight: 600,
+    fontSize: 14,
+    fontWeight: 700,
     color: '#fff',
-    paddingBottom: 30,
+    paddingBottom: 40,
   },
   // Chart dimensions
   dimensions: {
-    height: 500,
+    height: 400,
     marginTop: 20,
-    marginRight: 30,
-    marginLeft: 20,
-    marginBottom: 100,
-    xAxisHeight: 100,
+    marginRight: 15,
+    marginLeft: 15,
+    marginBottom: 0,
+    xAxisHeight: 75,
     scatterMarginLeft: 60,
   },
   // Tooltip styling
@@ -136,11 +137,23 @@ const ChartErrorState = ({ error, onRetry }: { error: string; onRetry?: () => vo
   </div>
 );
 
-const ChartHeader = ({ config }: { config: ChartConfiguration }) => (
-  <div className="mb-3 pb-2 border-b border-gray-700/30">
-    <h3 className="text-base font-bold text-white mb-1">{config.title}</h3>
-    {config.description && (
-      <p className="text-sm text-gray-400">{config.description}</p>
+const ChartHeader = ({ config, onRegenerate }: { config: ChartConfiguration; onRegenerate?: () => void }) => (
+  <div className="mb-4 pb-2 border-b border-gray-700/30 flex items-center justify-between">
+    <div>
+      <h3 className="text-base font-bold text-white mb-1">{config.title}</h3>
+      {config.description && (
+        <p className="text-sm text-gray-400">{config.description}</p>
+      )}
+    </div>
+    {onRegenerate && (
+      <button
+        onClick={onRegenerate}
+        className="p-2 hover:bg-gray-800 rounded transition-colors text-gray-400 hover:text-gray-200 flex items-center gap-2 whitespace-nowrap"
+        title="Regenerate chart"
+      >
+        <RefreshCcw className="w-4 h-4" />
+        <span className="text-sm font-semibold">Regenerate</span>
+      </button>
     )}
   </div>
 );
@@ -162,8 +175,8 @@ const LineChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
         margin={{
           top: CHART_THEME.dimensions.marginTop,
           right: CHART_THEME.dimensions.marginRight,
-          left: CHART_THEME.dimensions.marginLeft,
-          bottom: CHART_THEME.dimensions.marginBottom,
+          left: CHART_THEME.dimensions.marginLeft + 20,
+          bottom: CHART_THEME.dimensions.marginBottom + 15,
         }}
       >
         {config.chart_render.features.grid && (
@@ -180,7 +193,7 @@ const LineChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
           label={{
             value: config.chart_render.x_axis.label,
             position: 'bottom' as const,
-            offset: 15,
+            offset: -20,
             fontSize: CHART_THEME.axis.labelFontSize,
             fontWeight: CHART_THEME.axis.labelFontWeight,
             fill: CHART_THEME.axis.labelColor,
@@ -195,7 +208,7 @@ const LineChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
               value: config.chart_render.y_axis.label,
               angle: -90,
               position: 'insideLeft' as const,
-              offset: 10,
+              offset: -20,
               fontSize: CHART_THEME.axis.labelFontSize,
               fontWeight: CHART_THEME.axis.labelFontWeight,
               fill: CHART_THEME.axis.labelColor,
@@ -261,14 +274,14 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
           dataKey={config.chart_render.x_axis.data_key}
           stroke={CHART_THEME.axis.stroke}
           style={{ fontSize: CHART_THEME.axis.fontSize, fontWeight: CHART_THEME.axis.fontWeight, fill: CHART_THEME.axis.stroke }}
-          angle={-45}
+          angle={0}
           textAnchor="end"
           height={CHART_THEME.dimensions.xAxisHeight}
-          tick={{ fill: CHART_THEME.axis.tickColor }}
+          tick={{ fill: CHART_THEME.axis.tickColor, dx: 25, dy: 10 }}
           label={{
             value: config.chart_render.x_axis.label,
             position: 'bottom' as const,
-            offset: 15,
+            offset: -25,
             fontSize: CHART_THEME.axis.labelFontSize,
             fontWeight: CHART_THEME.axis.labelFontWeight,
             fill: CHART_THEME.axis.labelColor,
@@ -283,7 +296,8 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
               value: config.chart_render.y_axis.label,
               angle: -90,
               position: 'insideLeft' as const,
-              offset: 10,
+              offset: -4,
+              dy: 20,
               fontSize: CHART_THEME.axis.labelFontSize,
               fontWeight: CHART_THEME.axis.labelFontWeight,
               fill: CHART_THEME.axis.labelColor,
@@ -310,7 +324,7 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
             name={series.name}
             fill={series.fill || colors[idx % colors.length]}
             isAnimationActive={CHART_THEME.animation.isAnimationActive}
-            radius={[6, 6, 0, 0]}
+            radius={[10, 10, 0, 0]}
           />
         ))}
       </BarChart>
@@ -838,7 +852,8 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({
   data,
   isLoading = false,
   error,
-  onRetry
+  onRetry,
+  onRegenerate
 }) => {
   const isEmpty = !data || data.length === 0;
 
@@ -873,7 +888,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({
 
   return (
     <div className="w-full bg-gray-950 rounded-lg p-5">
-      <ChartHeader config={config} />
+      <ChartHeader config={config} onRegenerate={onRegenerate} />
       <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto overflow-y-auto" style={{ maxHeight: '600px' }}>
         {renderChart()}
       </div>

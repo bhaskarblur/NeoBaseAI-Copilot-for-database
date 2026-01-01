@@ -62,8 +62,17 @@ func GetLLMModel(modelID string) *LLMModel {
 	return nil
 }
 
-// GetDefaultModelForProvider returns the default (first enabled) model for a provider
+// GetDefaultModelForProvider returns the default model for a provider
+// Prioritizes the model with Default=true, then falls back to first enabled model
 func GetDefaultModelForProvider(provider string) *LLMModel {
+	// First pass: look for the model marked as default
+	for i := range SupportedLLMModels {
+		model := &SupportedLLMModels[i]
+		if model.Provider == provider && model.IsEnabled && model.Default != nil && *model.Default {
+			return model
+		}
+	}
+	// Fallback: return first enabled model for this provider
 	for i := range SupportedLLMModels {
 		if SupportedLLMModels[i].Provider == provider && SupportedLLMModels[i].IsEnabled {
 			return &SupportedLLMModels[i]
