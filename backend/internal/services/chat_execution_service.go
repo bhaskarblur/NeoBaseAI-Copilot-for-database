@@ -516,7 +516,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 					ChatID:        existingMessage.ChatID.Hex(),
 					Content:       existingMessage.Content,
 					UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
-					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
+					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
 					LLMModel:      existingMessage.LLMModel,
@@ -533,7 +533,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			ChatID:        existingMessage.ChatID.Hex(),
 			Content:       existingMessage.Content,
 			UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
-			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
+			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
 			LLMModel:      existingMessage.LLMModel,
@@ -600,7 +600,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				ChatID:        chatResponseMsg.ChatID.Hex(),
 				Content:       chatResponseMsg.Content,
 				UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
-				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
+				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
 				LLMModel:      chatResponseMsg.LLMModel,
@@ -621,7 +621,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		ChatID:        chatResponseMsg.ChatID.Hex(),
 		Content:       chatResponseMsg.Content,
 		UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
-		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
+		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
 		LLMModel:      chatResponseMsg.LLMModel,
@@ -2209,6 +2209,18 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			s.processesMu.Unlock()
 		}()
 
+		// Get chat settings for auto-visualization
+		chatObjID, chatErr := primitive.ObjectIDFromHex(chatID)
+		if chatErr != nil {
+			log.Printf("ProcessLLMResponseAndRunQuery -> Invalid chat ID: %v", chatErr)
+			return
+		}
+		chat, chatErr := s.chatRepo.FindByID(chatObjID)
+		if chatErr != nil {
+			log.Printf("ProcessLLMResponseAndRunQuery -> Error fetching chat: %v", chatErr)
+			return
+		}
+
 		msgResp, err := s.processLLMResponse(msgCtx, userID, chatID, messageID, streamID, true, true)
 		if err != nil {
 			log.Printf("Error processing LLM response: %v", err)
@@ -2226,7 +2238,7 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			if msgResp.Queries != nil {
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-step",
-					Data:  "Executing the needful operations now.",
+					Data:  "Combining & structuring the response",
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {
@@ -2275,6 +2287,89 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 						query.Error = executionResult.Error
 						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
 							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount
+						}
+
+						// AUTO-GENERATE VISUALIZATION if enabled and query succeeded
+						if chat.Settings.AutoGenerateVisualization && executionResult.Error == nil && executionResult.ExecutionResult != nil {
+							log.Printf("ProcessLLMResponseAndRunQuery -> Auto-generating visualization for query: %s", query.ID)
+
+							// Send SSE step update
+							s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+								Event: "ai-response-step",
+								Data:  "Generating visualization for the result",
+							})
+
+							// Generate visualization (synchronous to include in response)
+							vizCtx := context.Background()
+							// Use the same LLM model as the message
+							selectedModel := ""
+							if msgResp.LLMModel != nil {
+								selectedModel = *msgResp.LLMModel
+							}
+							visualization, vizErr := s.GenerateVisualizationForMessage(
+								vizCtx,
+								userID,
+								chatID,
+								msgResp.ID,
+								query.ID,
+								selectedModel,
+							)
+
+							if vizErr != nil {
+								log.Printf("ProcessLLMResponseAndRunQuery -> Error auto-generating visualization: %v", vizErr)
+							} else if visualization != nil {
+								log.Printf("ProcessLLMResponseAndRunQuery -> Auto-generated visualization: can_visualize=%v, visualization_id=%s", visualization.CanVisualize, visualization.VisualizationID)
+
+								// Construct VisualizationData for the response
+								vizData := &dtos.VisualizationData{
+									ID:           visualization.VisualizationID,
+									CanVisualize: visualization.CanVisualize,
+								}
+								if visualization.Reason != "" {
+									vizData.Reason = &visualization.Reason
+								}
+								if visualization.Error != "" {
+									vizData.Error = &visualization.Error
+								}
+								if visualization.ChartConfiguration != nil {
+									vizData.ChartType = &visualization.ChartConfiguration.ChartType
+									vizData.Title = &visualization.ChartConfiguration.Title
+									chartConfigJSON, _ := json.Marshal(visualization.ChartConfiguration)
+									var chartConfigMap map[string]interface{}
+									json.Unmarshal(chartConfigJSON, &chartConfigMap)
+									vizData.ChartConfiguration = chartConfigMap
+								}
+
+								// Update the query with visualization data for SSE response
+								query.Visualization = vizData
+
+								// Update the message in the database with the visualization ID on the query
+								// This ensures the visualization persists and is fetched in ListMessages API
+								if visualization.VisualizationID != "" {
+									msgObjID, _ := primitive.ObjectIDFromHex(msgResp.ID)
+									queryObjID, _ := primitive.ObjectIDFromHex(query.ID)
+									vizObjID, _ := primitive.ObjectIDFromHex(visualization.VisualizationID)
+
+									// Update the query in the message with visualization ID
+									updatedMsg, err := s.chatRepo.FindMessageByID(msgObjID)
+									if err == nil && updatedMsg != nil {
+										// Find and update the specific query in the message
+										for j, q := range *updatedMsg.Queries {
+											if q.ID == queryObjID {
+												(*updatedMsg.Queries)[j].VisualizationID = &vizObjID
+												// Save the updated message back to database
+												saveErr := s.chatRepo.UpdateMessage(msgObjID, updatedMsg)
+												if saveErr != nil {
+													log.Printf("ProcessLLMResponseAndRunQuery -> Error updating message with visualization ID: %v", saveErr)
+												} else {
+													log.Printf("ProcessLLMResponseAndRunQuery -> Query updated with visualization ID in database")
+												}
+												break
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 					tempQueries[i] = query

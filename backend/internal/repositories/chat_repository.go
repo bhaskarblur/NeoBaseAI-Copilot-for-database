@@ -28,8 +28,10 @@ type ChatRepository interface {
 	FindNextMessageByID(id primitive.ObjectID) (*models.Message, error)
 	FindPinnedMessagesByChat(chatID primitive.ObjectID) ([]models.Message, error)
 	FindMessagesByChatAfterTime(chatID primitive.ObjectID, after time.Time, page, pageSize int) ([]models.Message, int64, error)
+	UpdateQueryVisualizationID(messageID, queryID, visualizationID primitive.ObjectID) error
 }
 
+// concrete implementation of ChatRepository, using interface composition
 type chatRepository struct {
 	chatCollection    *mongo.Collection
 	messageCollection *mongo.Collection
@@ -240,8 +242,8 @@ func (r *chatRepository) FindNextMessageByID(id primitive.ObjectID) (*models.Mes
 func (r *chatRepository) FindPinnedMessagesByChat(chatID primitive.ObjectID) ([]models.Message, error) {
 	var messages []models.Message
 	filter := bson.M{
-		"chat_id":    chatID,
-		"is_pinned":  true,
+		"chat_id":   chatID,
+		"is_pinned": true,
 	}
 
 	// Sort by pinnedAt descending (latest first)
@@ -288,4 +290,19 @@ func (r *chatRepository) FindMessagesByChatAfterTime(chatID primitive.ObjectID, 
 
 	err = cursor.All(context.Background(), &messages)
 	return messages, total, err
+}
+
+// UpdateQueryVisualizationID updates a query's visualization ID within a message
+func (r *chatRepository) UpdateQueryVisualizationID(messageID, queryID, visualizationID primitive.ObjectID) error {
+	filter := bson.M{
+		"_id":        messageID,
+		"queries.id": queryID,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"queries.$.visualization_id": visualizationID,
+		},
+	}
+	_, err := r.messageCollection.UpdateOne(context.Background(), filter, update)
+	return err
 }

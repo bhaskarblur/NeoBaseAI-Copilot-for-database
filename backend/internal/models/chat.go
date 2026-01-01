@@ -5,10 +5,11 @@ import (
 )
 
 type ChatSettings struct {
-	AutoExecuteQuery bool   `bson:"auto_execute_query" json:"auto_execute_query,omitempty"` // default is false, Execute query automatically when LLM response is received
-	ShareDataWithAI  bool   `bson:"share_data_with_ai" json:"share_data_with_ai,omitempty"` // default is false, Don't share data with AI
-	NonTechMode      bool   `bson:"non_tech_mode" json:"non_tech_mode,omitempty"`           // default is false, Enable non-technical mode for simplified responses
-	SelectedLLMModel string `bson:"selected_llm_model" json:"selected_llm_model,omitempty"` // LLM model selected for this chat (e.g., "gpt-4o", "gemini-2.0-flash")
+	AutoExecuteQuery          bool   `bson:"auto_execute_query" json:"auto_execute_query,omitempty"`                   // default is true, Execute query automatically when LLM response is received
+	ShareDataWithAI           bool   `bson:"share_data_with_ai" json:"share_data_with_ai,omitempty"`                   // default is false, Don't share data with AI
+	NonTechMode               bool   `bson:"non_tech_mode" json:"non_tech_mode,omitempty"`                             // default is false, Enable non-technical mode for simplified responses
+	SelectedLLMModel          string `bson:"selected_llm_model" json:"selected_llm_model,omitempty"`                   // LLM model selected for this chat (e.g., "gpt-4o", "gemini-2.0-flash")
+	AutoGenerateVisualization bool   `bson:"auto_generate_visualization" json:"auto_generate_visualization,omitempty"` // default is false, Auto-generate chart visualizations for compatible queries
 }
 
 type Connection struct {
@@ -69,8 +70,9 @@ func NewChat(userID primitive.ObjectID, connection Connection, settings ChatSett
 
 func DefaultChatSettings() ChatSettings {
 	return ChatSettings{
-		AutoExecuteQuery: true,  // default is true, Execute query automatically when LLM response is received
-		ShareDataWithAI:  false, // default is false, Don't share data with AI
-		NonTechMode:      false, // default is false, Technical mode enabled by default
+		AutoExecuteQuery:          true,  // default is true, Execute query automatically when LLM response is received
+		ShareDataWithAI:           false, // default is false, Don't share data with AI
+		NonTechMode:               false, // default is false, Technical mode enabled by default
+		AutoGenerateVisualization: false, // default is false, Don't auto-generate visualizations
 	}
 }

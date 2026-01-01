@@ -48,6 +48,7 @@ func Initialize() {
 
 	chatRepo := repositories.NewChatRepository(mongodbClient)
 	llmRepo := repositories.NewLLMMessageRepository(mongodbClient)
+	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient)
 
 	// Provide all dependencies to the container
 	if err := DiContainer.Provide(func() *mongodb.MongoDBClient { return mongodbClient }); err != nil {
@@ -68,6 +69,10 @@ func Initialize() {
 
 	if err := DiContainer.Provide(func() repositories.LLMMessageRepository { return llmRepo }); err != nil {
 		log.Fatalf("Failed to provide LLM message repository: %v", err)
+	}
+
+	if err := DiContainer.Provide(func() repositories.IVisualizationRepository { return visualizationRepo }); err != nil {
+		log.Fatalf("Failed to provide visualization repository: %v", err)
 	}
 
 	// Provide DB Manager
@@ -407,6 +412,7 @@ func Initialize() {
 	if err := DiContainer.Provide(func(
 		chatRepo repositories.ChatRepository,
 		llmRepo repositories.LLMMessageRepository,
+		visualizationRepo repositories.IVisualizationRepository,
 		dbManager *dbmanager.Manager,
 		llmManager *llm.Manager,
 		redisRepo redis.IRedisRepositories,
@@ -436,7 +442,7 @@ func Initialize() {
 			log.Printf("Warning: No LLM client available. Please configure OPENAI_API_KEY or GEMINI_API_KEY")
 		}
 
-		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, llmManager, redisRepo)
+		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)
@@ -481,6 +487,15 @@ func Initialize() {
 		return handler
 	}); err != nil {
 		log.Fatalf("Failed to provide chat handler: %v", err)
+	}
+
+	// Visualization Handler
+	if err := DiContainer.Provide(func(
+		chatService services.ChatService,
+	) *handlers.VisualizationHandler {
+		return handlers.NewVisualizationHandler(chatService)
+	}); err != nil {
+		log.Fatalf("Failed to provide visualization handler: %v", err)
 	}
 }
 
@@ -530,4 +545,64 @@ func GetWaitlistHandler() (*handlers.WaitlistHandler, error) {
 		return nil, err
 	}
 	return handler, nil
+}
+
+// GetVisualizationHandler retrieves the VisualizationHandler from the DI container
+func GetVisualizationHandler() (*handlers.VisualizationHandler, error) {
+	var handler *handlers.VisualizationHandler
+	err := DiContainer.Invoke(func(h *handlers.VisualizationHandler) {
+		handler = h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+// GetChatService retrieves the ChatService from the DI container
+func GetChatService() (services.ChatService, error) {
+	var service services.ChatService
+	err := DiContainer.Invoke(func(s services.ChatService) {
+		service = s
+	})
+	if err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+// GetChatRepository retrieves the ChatRepository from the DI container
+func GetChatRepository() (repositories.ChatRepository, error) {
+	var repo repositories.ChatRepository
+	err := DiContainer.Invoke(func(r repositories.ChatRepository) {
+		repo = r
+	})
+	if err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+// GetVisualizationRepository retrieves the VisualizationRepository from the DI container
+func GetVisualizationRepository() (repositories.IVisualizationRepository, error) {
+	var repo repositories.IVisualizationRepository
+	err := DiContainer.Invoke(func(r repositories.IVisualizationRepository) {
+		repo = r
+	})
+	if err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+// GetDBManager retrieves the DB Manager from the DI container
+func GetDBManager() (*dbmanager.Manager, error) {
+	var manager *dbmanager.Manager
+	err := DiContainer.Invoke(func(m *dbmanager.Manager) {
+		manager = m
+	})
+	if err != nil {
+		return nil, err
+	}
+	return manager, nil
 }

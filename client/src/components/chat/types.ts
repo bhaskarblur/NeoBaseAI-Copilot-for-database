@@ -24,6 +24,17 @@ export interface QueryResult {
     is_streaming?: boolean;
     is_edited?: boolean;
     action_at?: string;
+    visualization?: {
+        id?: string;
+        can_visualize: boolean;
+        reason?: string;
+        error?: string;
+        chart_type?: string;
+        title?: string;
+        description?: string;
+        chart_configuration?: any;
+        generated_by?: string;
+    };
 }
 
 export interface ActionButton {

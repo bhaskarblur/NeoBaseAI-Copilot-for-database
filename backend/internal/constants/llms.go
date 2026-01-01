@@ -149,6 +149,25 @@ func GetRecommendationsPrompt(provider string) string {
 	return RecommendationsPrompt
 }
 
+func GetVisualizationPrompt(dbType string) string {
+	switch dbType {
+	case DatabaseTypePostgreSQL:
+		return PostgreSQLVisualizationPrompt
+	case DatabaseTypeMySQL:
+		return MySQLVisualizationPrompt
+	case DatabaseTypeYugabyteDB:
+		return YugabyteVisualizationPrompt
+	case DatabaseTypeClickhouse:
+		return ClickhouseVisualizationPrompt
+	case DatabaseTypeMongoDB:
+		return MongoDBVisualizationPrompt
+	case DatabaseTypeSpreadsheet:
+		return PostgreSQLVisualizationPrompt // Use PostgreSQL prompt for spreadsheets
+	default:
+		return PostgreSQLVisualizationPrompt // Default to PostgreSQL
+	}
+}
+
 // Recommendations Prompt for all LLMs
 const RecommendationsPrompt = `You are NeoBase AI, a database assistant. Your task is to generate 60 diverse and practical question recommendations that users can ask about their database.
 

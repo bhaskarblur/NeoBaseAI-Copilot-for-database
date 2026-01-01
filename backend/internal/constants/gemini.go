@@ -2,11 +2,88 @@ package constants
 
 import "github.com/google/generative-ai-go/genai"
 
-const (
-	GeminiModel               = "gemini-2.0-flash"
-	GeminiTemperature         = 1
-	GeminiMaxCompletionTokens = 30000
-)
+var GeminiLLMModels = []LLMModel{
+	{
+		ID:                  "gemini-3-pro-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3 Pro (Most Intelligent)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 100000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Best model in the world for multimodal understanding with state-of-the-art reasoning and agentic capabilities",
+	},
+	{
+		ID:                  "gemini-3-flash-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3 Flash (Frontier Speed)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 100000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Most intelligent model built for speed, combining frontier intelligence with superior search and grounding",
+	},
+	// Gemini 2.5 Series (Advanced)
+	{
+		ID:                  "gemini-2.5-pro",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 2.5 Pro (Advanced Reasoning)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 100000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "State-of-the-art thinking model capable of reasoning over complex problems in code, math, and STEM",
+	},
+	{
+		ID:                  "gemini-2.5-flash",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 2.5 Flash (Best Price-Performance)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 100000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Best model for price-performance with well-rounded capabilities, ideal for large-scale processing and agentic tasks",
+	},
+	{
+		ID:                  "gemini-2.5-flash-lite",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 2.5 Flash-Lite (Ultra-Fast)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 50000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Fastest flash model optimized for cost-efficiency and high throughput on repetitive tasks",
+	},
+	// Gemini 2.0 Series (Previous Workhorse)
+	{
+		ID:                  "gemini-2.0-flash",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 2.0 Flash (Workhorse)",
+		IsEnabled:           true,
+		Default:             ptrBool(true),
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 30000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Second generation workhorse model with 1M token context window for large document processing",
+	},
+	{
+		ID:                  "gemini-2.0-flash-lite",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 2.0 Flash-Lite (Previous Fast)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 20000,
+		Temperature:         1,
+		InputTokenLimit:     1000000,
+		Description:         "Second generation small workhorse model with 1M token context, lightweight version",
+	},
+}
 
 // Initial LLM Response Schema for Gemini
 var GeminiLLMResponseSchema = &genai.Schema{

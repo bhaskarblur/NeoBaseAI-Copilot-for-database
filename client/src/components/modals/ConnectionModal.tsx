@@ -131,6 +131,11 @@ export default function ConnectionModal({
       ? initialData.settings.non_tech_mode 
       : false
   );
+  const [autoGenerateVisualization, setAutoGenerateVisualization] = useState<boolean>(
+    initialData?.settings.auto_generate_visualization !== undefined 
+      ? initialData.settings.auto_generate_visualization 
+      : false
+  );
   // Refs for MongoDB URI inputs
   const mongoUriInputRef = useRef<HTMLInputElement>(null);
   const mongoUriSshInputRef = useRef<HTMLInputElement>(null);
@@ -406,7 +411,8 @@ export default function ConnectionModal({
       const result = await onEdit(undefined, {
         auto_execute_query: autoExecuteQuery,
         share_data_with_ai: shareWithAI,
-        non_tech_mode: nonTechMode
+        non_tech_mode: nonTechMode,
+        auto_generate_visualization: autoGenerateVisualization
       });
       
       if (result?.success) {
@@ -415,6 +421,7 @@ export default function ConnectionModal({
           setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
           setShareWithAI(result.updatedChat.settings.share_data_with_ai);
           setNonTechMode(result.updatedChat.settings.non_tech_mode);
+          setAutoGenerateVisualization(result.updatedChat.settings.auto_generate_visualization);
           setCurrentChatData(result.updatedChat);
         }
         
@@ -658,7 +665,8 @@ export default function ConnectionModal({
         const result = await onEdit?.(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
           share_data_with_ai: shareWithAI,
-          non_tech_mode: nonTechMode 
+          non_tech_mode: nonTechMode,
+          auto_generate_visualization: autoGenerateVisualization
         });
         console.log("edit result in connection modal", result);
         if (result?.success) {
@@ -779,7 +787,8 @@ export default function ConnectionModal({
         const result = await onSubmit(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
           share_data_with_ai: shareWithAI,
-          non_tech_mode: nonTechMode 
+          non_tech_mode: nonTechMode,
+          auto_generate_visualization: autoGenerateVisualization
         });
         console.log("submit result in connection modal", result);
         if (result?.success) {
@@ -1256,7 +1265,6 @@ DATABASE_PASSWORD=`; // Mask password
                 formData={formData}
                 handleChange={handleChange}
                 isEditMode={!!initialData}
-                chatId={initialData?.id || newChatId}
                 onRefreshData={() => setShowRefreshSchema(true)}
                 onGoogleAuthChange={(authData) => {
                   setFormData(prev => ({ 
@@ -1332,9 +1340,11 @@ DATABASE_PASSWORD=`; // Mask password
             autoExecuteQuery={autoExecuteQuery}
             shareWithAI={shareWithAI}
             nonTechMode={nonTechMode}
+            autoGenerateVisualization={autoGenerateVisualization}
             setAutoExecuteQuery={setAutoExecuteQuery}
             setShareWithAI={setShareWithAI}
             setNonTechMode={setNonTechMode}
+            setAutoGenerateVisualization={setAutoGenerateVisualization}
           />
         );
       default:

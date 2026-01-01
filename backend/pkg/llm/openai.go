@@ -242,6 +242,76 @@ func (c *OpenAIClient) GenerateRecommendations(ctx context.Context, messages []*
 	return resp.Choices[0].Message.Content, nil
 }
 
+// GenerateVisualization generates a visualization configuration for query results
+// This method uses a dedicated visualization system prompt and enforces JSON response format
+func (c *OpenAIClient) GenerateVisualization(ctx context.Context, systemPrompt string, visualizationPrompt string, dataRequest string, modelID ...string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	model := c.model
+	if len(modelID) > 0 && modelID[0] != "" {
+		model = modelID[0]
+		log.Printf("OpenAI GenerateVisualization -> Using selected model: %s", model)
+	}
+
+	// Create messages for visualization request
+	messages := make([]openai.ChatCompletionMessage, 0)
+
+	// Add system message with visualization prompt
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+
+	// Add visualization prompt
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: visualizationPrompt,
+	})
+
+	// Add data request
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: dataRequest,
+	})
+
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Call OpenAI API with JSON response format enforcement
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model:       model,
+		Messages:    messages,
+		MaxTokens:   c.maxCompletionTokens,
+		Temperature: float32(c.temperature),
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	})
+	if err != nil {
+		log.Printf("GenerateVisualization -> OpenAI API error: %v", err)
+		return "", fmt.Errorf("OpenAI API error: %v", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from OpenAI")
+	}
+
+	responseText := resp.Choices[0].Message.Content
+	log.Printf("OPENAI -> GenerateVisualization -> responseText: %s", responseText)
+
+	// Validate JSON response
+	var visualizationResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(responseText), &visualizationResponse); err != nil {
+		log.Printf("Error: OpenAI visualization response is not valid JSON: %v", err)
+		return "", fmt.Errorf("invalid JSON response from OpenAI: %v", err)
+	}
+
+	return responseText, nil
+}
+
 func (c *OpenAIClient) GetModelInfo() ModelInfo {
 	return ModelInfo{
 		Name:                c.model,

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Chat } from '../types/chat';
 import { Lock, Unlock, Shield } from 'lucide-react';
 

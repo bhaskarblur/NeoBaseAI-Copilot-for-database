@@ -83,21 +83,21 @@ func (s *emailService) isConfigurationMissing() bool {
 
 	// Check SMTP user for default values
 	for _, defaultValue := range defaultValues {
-		if strings.ToLower(s.smtpUser) == strings.ToLower(defaultValue) {
+		if strings.EqualFold(s.smtpUser, defaultValue) {
 			return true
 		}
 	}
 
 	// Check SMTP password for default values
 	for _, defaultValue := range defaultValues {
-		if strings.ToLower(s.smtpPassword) == strings.ToLower(defaultValue) {
+		if strings.EqualFold(s.smtpPassword, defaultValue) {
 			return true
 		}
 	}
 
 	// Check if from email is still a placeholder
 	for _, defaultValue := range defaultValues {
-		if strings.ToLower(s.fromEmail) == strings.ToLower(defaultValue) {
+		if strings.EqualFold(s.fromEmail, defaultValue) {
 			return true
 		}
 	}

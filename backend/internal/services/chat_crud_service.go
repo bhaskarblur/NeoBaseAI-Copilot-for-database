@@ -77,20 +77,30 @@ type ChatService interface {
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
 	GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error)
+
+	// Visualization operations
+	GenerateVisualizationForQueryResults(ctx context.Context, userID, chatID string, chat *models.Chat, selectedLLMModel, userQuestion string, executedQueries []interface{}, queryResults []map[string]interface{}, isExplicitRequest bool) (*dtos.VisualizationResponse, error)
+	GenerateVisualizationForMessage(ctx context.Context, userID, chatID, messageID, queryID string, selectedLLMModel string) (*dtos.VisualizationResponse, error) // New: Fetch message data and generate visualization
+	SaveVisualizationToMessage(ctx context.Context, messageID, chatID, userID string, visualization *dtos.VisualizationResponse, queryID string) (string, error)
+	GetVisualizationForMessage(ctx context.Context, messageID string) (*dtos.VisualizationResponse, error)
+	GetVisualizationForQuery(ctx context.Context, queryID string) (*dtos.VisualizationResponse, error)                           // Get visualization by query ID (per-query visualization)
+	GetVisualizationData(ctx context.Context, userID, chatID, messageID, queryID string, limit, offset int) (interface{}, error) // Lazy-load visualization data on demand
+	ExecuteChartQuery(ctx context.Context, userID, chatID string, chartConfig *dtos.ChartConfiguration, limit int) ([]map[string]interface{}, error)
 }
 
 type chatService struct {
-	chatRepo        repositories.ChatRepository
-	llmRepo         repositories.LLMMessageRepository
-	dbManager       *dbmanager.Manager
-	llmClient       llm.Client
-	llmManager      *llm.Manager // Added to support multiple LLM providers
-	streamChans     map[string]chan dtos.StreamResponse
-	streamHandler   StreamHandler
-	activeProcesses map[string]context.CancelFunc // key: streamID
-	processesMu     sync.RWMutex
-	crypto          *utils.AESGCMCrypto
-	redisRepo       redis.IRedisRepositories
+	chatRepo          repositories.ChatRepository
+	llmRepo           repositories.LLMMessageRepository
+	visualizationRepo repositories.IVisualizationRepository
+	dbManager         *dbmanager.Manager
+	llmClient         llm.Client
+	llmManager        *llm.Manager // Added to support multiple LLM providers
+	streamChans       map[string]chan dtos.StreamResponse
+	streamHandler     StreamHandler
+	activeProcesses   map[string]context.CancelFunc // key: streamID
+	processesMu       sync.RWMutex
+	crypto            *utils.AESGCMCrypto
+	redisRepo         redis.IRedisRepositories
 }
 
 func isValidDBType(dbType string) bool {
@@ -145,6 +155,7 @@ func NewChatService(
 	llmClient llm.Client,
 	llmManager *llm.Manager,
 	redisRepo redis.IRedisRepositories,
+	visualizationRepo repositories.IVisualizationRepository,
 ) ChatService {
 	// Initialize crypto instance
 	crypto, err := utils.NewFromConfig()
@@ -154,15 +165,16 @@ func NewChatService(
 	}
 
 	return &chatService{
-		chatRepo:        chatRepo,
-		llmRepo:         llmRepo,
-		dbManager:       dbManager,
-		llmClient:       llmClient,
-		llmManager:      llmManager,
-		streamChans:     make(map[string]chan dtos.StreamResponse),
-		activeProcesses: make(map[string]context.CancelFunc),
-		crypto:          crypto,
-		redisRepo:       redisRepo,
+		chatRepo:          chatRepo,
+		llmRepo:           llmRepo,
+		visualizationRepo: visualizationRepo,
+		dbManager:         dbManager,
+		llmClient:         llmClient,
+		llmManager:        llmManager,
+		streamChans:       make(map[string]chan dtos.StreamResponse),
+		activeProcesses:   make(map[string]context.CancelFunc),
+		crypto:            crypto,
+		redisRepo:         redisRepo,
 	}
 }
 
@@ -313,8 +325,11 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	if req.Settings.NonTechMode != nil {
 		settings.NonTechMode = *req.Settings.NonTechMode
 	}
-	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
-		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode)
+	if req.Settings.AutoGenerateVisualization != nil {
+		settings.AutoGenerateVisualization = *req.Settings.AutoGenerateVisualization
+	}
+	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v, AutoGenerateVisualization=%v",
+		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode, settings.AutoGenerateVisualization)
 	// Create chat with connection
 	chat := models.NewChat(userObjID, connection, settings)
 	if err := s.chatRepo.Create(chat); err != nil {
@@ -565,6 +580,10 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 		if req.Settings.NonTechMode != nil {
 			log.Printf("ChatService -> Update -> NonTechMode: %v", *req.Settings.NonTechMode)
 			chat.Settings.NonTechMode = *req.Settings.NonTechMode
+		}
+		if req.Settings.AutoGenerateVisualization != nil {
+			log.Printf("ChatService -> Update -> AutoGenerateVisualization: %v", *req.Settings.AutoGenerateVisualization)
+			chat.Settings.AutoGenerateVisualization = *req.Settings.AutoGenerateVisualization
 		}
 	}
 
@@ -1766,9 +1785,10 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:           chat.UpdatedAt.Format(time.RFC3339),
 		Settings: dtos.ChatSettingsResponse{
-			AutoExecuteQuery: chat.Settings.AutoExecuteQuery,
-			ShareDataWithAI:  chat.Settings.ShareDataWithAI,
-			NonTechMode:      chat.Settings.NonTechMode,
+			AutoExecuteQuery:          chat.Settings.AutoExecuteQuery,
+			ShareDataWithAI:           chat.Settings.ShareDataWithAI,
+			NonTechMode:               chat.Settings.NonTechMode,
+			AutoGenerateVisualization: chat.Settings.AutoGenerateVisualization,
 		},
 		PreferredLLMModel: chat.PreferredLLMModel,
 	}
@@ -1787,7 +1807,7 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		pinnedAt = &pinnedAtStr
 	}
 
-	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult)
+	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult, s.visualizationRepo, context.Background())
 	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
 
 	// Get the display name for the LLM model if available

@@ -1,15 +1,17 @@
 package dtos
 
 type CreateChatSettings struct {
-	AutoExecuteQuery *bool `json:"auto_execute_query"`
-	ShareDataWithAI  *bool `json:"share_data_with_ai"`
-	NonTechMode      *bool `json:"non_tech_mode"`
+	AutoExecuteQuery          *bool `json:"auto_execute_query"`
+	ShareDataWithAI           *bool `json:"share_data_with_ai"`
+	NonTechMode               *bool `json:"non_tech_mode"`
+	AutoGenerateVisualization *bool `json:"auto_generate_visualization"`
 }
 
 type ChatSettingsResponse struct {
-	AutoExecuteQuery bool `json:"auto_execute_query"`
-	ShareDataWithAI  bool `json:"share_data_with_ai"`
-	NonTechMode      bool `json:"non_tech_mode"`
+	AutoExecuteQuery          bool `json:"auto_execute_query"`
+	ShareDataWithAI           bool `json:"share_data_with_ai"`
+	NonTechMode               bool `json:"non_tech_mode"`
+	AutoGenerateVisualization bool `json:"auto_generate_visualization"`
 }
 type CreateConnectionRequest struct {
 	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet google_sheets"`

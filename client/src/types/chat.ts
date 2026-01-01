@@ -109,6 +109,7 @@ export interface ChatSettings {
     auto_execute_query: boolean;
     share_data_with_ai: boolean;
     non_tech_mode: boolean;
+    auto_generate_visualization: boolean; // Auto-generate chart visualizations for compatible queries (default: false)
     selected_llm_model?: string; // LLM model selected for this chat (e.g., "gpt-4o", "gemini-2.0-flash")
 }
 

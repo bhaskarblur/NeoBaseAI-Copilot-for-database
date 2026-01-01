@@ -68,7 +68,8 @@ const chatService = {
             const payload: any = { connection: connection ? connectionToSend : undefined, settings: {
                 auto_execute_query: settings?.auto_execute_query,
                 share_data_with_ai: settings?.share_data_with_ai,
-                non_tech_mode: settings?.non_tech_mode
+                non_tech_mode: settings?.non_tech_mode,
+                auto_generate_visualization: settings?.auto_generate_visualization
             } };
             
             const response = await axios.patch<CreateChatResponse>(
@@ -564,6 +565,53 @@ const chatService = {
         } catch (error: any) {
             console.error('Get pinned messages error:', error);
             throw new Error(error.response?.data?.error || 'Failed to get pinned messages');
+        }
+    },
+
+    async generateVisualization(chatId: string, messageId: string, queryId: string): Promise<any> {
+        try {
+            const response = await axios.post(
+                `${API_URL}/chats/${chatId}/messages/${messageId}/visualizations`,
+                {
+                    query_id: queryId
+                },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Generate visualization error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to generate visualization');
+        }
+    },
+
+    async getVisualizationData(chatId: string, messageId: string, queryId: string, limit: number = 500, offset: number = 0): Promise<any> {
+        try {
+            const response = await axios.post(
+                `${API_URL}/chats/${chatId}/visualization-data`,
+                {
+                    message_id: messageId,
+                    query_id: queryId,
+                    limit,
+                    offset
+                },
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            return response.data;
+        } catch (error: any) {
+            console.error('Get visualization data error:', error);
+            throw new Error(error.response?.data?.error || 'Failed to load visualization data');
         }
     }
 };

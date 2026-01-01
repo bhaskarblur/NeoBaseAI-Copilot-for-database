@@ -1,6 +1,7 @@
 package dtos
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"neobase-ai/internal/models"
@@ -56,8 +57,22 @@ type Query struct {
 	RollbackQuery          *string                `json:"rollback_query,omitempty"`
 	RollbackDependentQuery *string                `json:"rollback_dependent_query,omitempty"`
 	Pagination             *Pagination            `json:"pagination,omitempty"`
+	Visualization          *VisualizationData     `json:"visualization,omitempty"` // Visualization state for this query
 	IsEdited               bool                   `json:"is_edited"`
 	ActionAt               *string                `json:"action_at,omitempty"` // The timestamp when the action was taken
+}
+
+// VisualizationData contains the visualization state for a query
+type VisualizationData struct {
+	ID                 string                 `json:"id"`
+	CanVisualize       bool                   `json:"can_visualize"`
+	Reason             *string                `json:"reason,omitempty"`
+	Error              *string                `json:"error,omitempty"`
+	ChartType          *string                `json:"chart_type,omitempty"`
+	Title              *string                `json:"title,omitempty"`
+	Description        *string                `json:"description,omitempty"`
+	ChartConfiguration map[string]interface{} `json:"chart_configuration,omitempty"` // Full chart config JSON parsed
+	GeneratedBy        *string                `json:"generated_by,omitempty"`
 }
 
 type Pagination struct {
@@ -84,11 +99,16 @@ type MessageListRequest struct {
 
 func ToQueryDto(queries *[]models.Query) *[]Query {
 	// Call the new version with no decryption function for backward compatibility
-	return ToQueryDtoWithDecryption(queries, nil)
+	return ToQueryDtoWithDecryption(queries, nil, nil, nil)
+}
+
+// VisualizationFetcher is an interface for fetching visualizations by query ID
+type VisualizationFetcher interface {
+	GetVisualizationByQueryID(ctx context.Context, queryID interface{}) (*models.MessageVisualization, error)
 }
 
 // ToQueryDtoWithDecryption converts model queries to DTO queries with optional decryption
-func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) string) *[]Query {
+func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) string, vizRepo VisualizationFetcher, ctx context.Context) *[]Query {
 	if queries == nil {
 		return nil
 	}
@@ -147,6 +167,55 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 			}
 		}
 		log.Printf("ToQueryDto -> final exampleResult: %v", exampleResult)
+
+		// Fetch visualization data if repository and context are provided
+		var visualizationData *VisualizationData
+		if vizRepo != nil && ctx != nil && query.VisualizationID != nil {
+			log.Printf("ToQueryDto -> Fetching visualization for query %s with visualization ID: %s", query.ID.Hex(), query.VisualizationID.Hex())
+			viz, err := vizRepo.GetVisualizationByQueryID(ctx, *query.VisualizationID)
+			if err == nil && viz != nil {
+				log.Printf("ToQueryDto -> Found visualization: canVisualize=%v, chartType=%s", viz.CanVisualize, viz.ChartType)
+				visualizationData = &VisualizationData{
+					ID:           viz.ID.Hex(),
+					CanVisualize: viz.CanVisualize,
+				}
+				if viz.Reason != "" {
+					visualizationData.Reason = &viz.Reason
+				}
+				if viz.Error != "" {
+					visualizationData.Error = &viz.Error
+				}
+				if viz.ChartType != "" {
+					visualizationData.ChartType = &viz.ChartType
+				}
+				if viz.Title != "" {
+					visualizationData.Title = &viz.Title
+				}
+				if viz.Description != "" {
+					visualizationData.Description = &viz.Description
+				}
+				if viz.GeneratedBy != "" {
+					visualizationData.GeneratedBy = &viz.GeneratedBy
+				}
+
+				// Parse and include the full chart configuration if available
+				if viz.ChartConfigJSON != "" {
+					var chartConfig map[string]interface{}
+					err := json.Unmarshal([]byte(viz.ChartConfigJSON), &chartConfig)
+					if err != nil {
+						log.Printf("ToQueryDto -> Warning: Failed to parse chart config for query %s: %v", query.ID.Hex(), err)
+					} else {
+						visualizationData.ChartConfiguration = chartConfig
+					}
+				}
+			} else if err != nil {
+				log.Printf("ToQueryDto -> Warning: Failed to fetch visualization for query %s: %v", query.ID.Hex(), err)
+			} else {
+				log.Printf("ToQueryDto -> No visualization found for query %s (viz=nil)", query.ID.Hex())
+			}
+		} else {
+			log.Printf("ToQueryDto -> Skipping visualization fetch for query %s (vizRepo=%v, ctx=%v, vizID=%v)", query.ID.Hex(), vizRepo != nil, ctx != nil, query.VisualizationID != nil)
+		}
 		queriesDto[i] = Query{
 			ID:                     query.ID.Hex(),
 			Query:                  query.Query,
@@ -165,6 +234,7 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 			RollbackQuery:          query.RollbackQuery,
 			RollbackDependentQuery: query.RollbackDependentQuery,
 			Pagination:             pagination,
+			Visualization:          visualizationData,
 			IsEdited:               query.IsEdited,
 			ActionAt:               query.ActionAt,
 		}
@@ -174,7 +244,6 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 
 // ToActionButtonDto converts model action buttons to DTO action buttons
 func ToActionButtonDto(actionButtons *[]models.ActionButton) *[]ActionButton {
-	log.Printf("ToActionButtonDto -> input actionButtons: %+v", actionButtons)
 	if actionButtons == nil {
 		return nil
 	}
@@ -188,6 +257,5 @@ func ToActionButtonDto(actionButtons *[]models.ActionButton) *[]ActionButton {
 			IsPrimary: button.IsPrimary,
 		}
 	}
-	log.Printf("ToActionButtonDto -> returning actionButtonsDto: %+v", actionButtonsDto)
 	return &actionButtonsDto
 }

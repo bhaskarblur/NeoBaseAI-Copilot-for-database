@@ -426,6 +426,115 @@ func (c *ClaudeClient) GenerateRecommendations(ctx context.Context, messages []*
 	return "", fmt.Errorf("no valid response content found")
 }
 
+// GenerateVisualization generates a visualization configuration for query results
+// This method uses a dedicated visualization system prompt and enforces JSON response format
+func (c *ClaudeClient) GenerateVisualization(ctx context.Context, systemPrompt string, visualizationPrompt string, dataRequest string, modelID ...string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	model := c.model
+	if len(modelID) > 0 && modelID[0] != "" {
+		model = modelID[0]
+		log.Printf("Claude GenerateVisualization -> Using selected model: %s", model)
+	}
+
+	// Build the messages for visualization
+	messages := make([]claudeMessage, 0)
+
+	// Add visualization prompt
+	messages = append(messages, claudeMessage{
+		Role: "user",
+		Content: []claudeMessageContent{
+			{
+				Type: "text",
+				Text: visualizationPrompt,
+			},
+		},
+	})
+
+	// Add data request
+	messages = append(messages, claudeMessage{
+		Role: "user",
+		Content: []claudeMessageContent{
+			{
+				Type: "text",
+				Text: dataRequest,
+			},
+		},
+	})
+
+	// Create request
+	req := claudeRequest{
+		Model:       model,
+		MaxTokens:   c.maxCompletionTokens,
+		Temperature: c.temperature,
+		System:      systemPrompt,
+		Messages:    messages,
+	}
+
+	// Prepare request body
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	// Make API request
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("content-type", "application/json")
+
+	// Send request
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %v", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("API returned status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var claudeResp claudeResponse
+	if err := json.Unmarshal(body, &claudeResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if len(claudeResp.Content) == 0 {
+		return "", fmt.Errorf("no content in response")
+	}
+
+	// Extract text response
+	for _, content := range claudeResp.Content {
+		if content.Type == "text" && content.Text != "" {
+			log.Printf("CLAUDE -> GenerateVisualization -> responseText: %s", content.Text)
+
+			// Validate JSON response
+			var visualizationResponse map[string]interface{}
+			if err := json.Unmarshal([]byte(content.Text), &visualizationResponse); err != nil {
+				log.Printf("Error: Claude visualization response is not valid JSON: %v", err)
+				return "", fmt.Errorf("invalid JSON response from Claude: %v", err)
+			}
+
+			return content.Text, nil
+		}
+	}
+
+	return "", fmt.Errorf("no valid text response found")
+}
+
 func (c *ClaudeClient) GetModelInfo() ModelInfo {
 	return ModelInfo{
 		Name:                c.model,

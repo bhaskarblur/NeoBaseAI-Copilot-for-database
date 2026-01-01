@@ -57,7 +57,7 @@ NeoBase requires the following services to function properly:
 - **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and legacy models
 - **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
 - **Anthropic Claude** (10 models) - Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
-- **Ollama** (32+ models) - Self-hosted open-source: DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, Gemma, Phi, and more
+- **Ollama** (30+ models) - Self-hosted open-source: DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, Gemma, Phi, and more
 
 #### Dynamic Model Selection
 
@@ -81,7 +81,7 @@ NeoBase uses a **simple configuration-based approach** to enable or disable AI p
 - `OPENAI_API_KEY` - Enables all 14 OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
 - `GEMINI_API_KEY` - Enables all 7 Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
 - `CLAUDE_API_KEY` - Enables all 10 Claude models (Opus 4.5, Sonnet 4, etc.)
-- `OLLAMA_BASE_URL` - Enables all 32+ Ollama models (default: http://localhost:11434)
+- `OLLAMA_BASE_URL` - Enables all 30+ Ollama models (default: http://localhost:11434)
 - `DEFAULT_LLM_MODEL` - Default model ID (optional, auto-selects if not set)
 
 **Requirements:**

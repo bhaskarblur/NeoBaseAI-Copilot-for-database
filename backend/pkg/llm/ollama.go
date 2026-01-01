@@ -345,6 +345,118 @@ func (c *OllamaClient) GenerateRecommendations(ctx context.Context, messages []*
 	return ollamaResp.Message.Content, nil
 }
 
+// GenerateVisualization generates a visualization configuration for query results
+// This method uses a dedicated visualization system prompt and enforces JSON response format
+func (c *OllamaClient) GenerateVisualization(ctx context.Context, systemPrompt string, visualizationPrompt string, dataRequest string, modelID ...string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	model := c.model
+	if len(modelID) > 0 && modelID[0] != "" {
+		model = modelID[0]
+		log.Printf("Ollama GenerateVisualization -> Using selected model: %s", model)
+	}
+
+	// Build the messages for visualization
+	messages := make([]ollamaMessage, 0)
+
+	// Add system prompt
+	messages = append(messages, ollamaMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+
+	// Add visualization prompt
+	messages = append(messages, ollamaMessage{
+		Role:    "user",
+		Content: visualizationPrompt,
+	})
+
+	// Add data request
+	messages = append(messages, ollamaMessage{
+		Role:    "user",
+		Content: dataRequest,
+	})
+
+	// Create request with JSON format enforcement
+	req := ollamaRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   false,
+		Options: ollamaOptions{
+			Temperature: c.temperature,
+			NumPredict:  c.maxCompletionTokens,
+		},
+		Format: "json",
+	}
+
+	// Prepare request body
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	log.Printf("Ollama GenerateVisualization -> Request: %s", string(reqBody))
+
+	// Make API request
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/api/chat", c.baseURL), bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Add timeout
+	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	httpReq = httpReq.WithContext(reqCtx)
+
+	// Send request
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %v", err)
+	}
+
+	// Check for errors
+	if resp.StatusCode != http.StatusOK {
+		var errResp ollamaErrorResponse
+		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != "" {
+			return "", fmt.Errorf("Ollama API error: %s", errResp.Error)
+		}
+		return "", fmt.Errorf("Ollama API error: status code %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var ollamaResp ollamaResponse
+	if err := json.Unmarshal(body, &ollamaResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if ollamaResp.Message.Content == "" {
+		return "", fmt.Errorf("no content in response")
+	}
+
+	responseText := ollamaResp.Message.Content
+	log.Printf("OLLAMA -> GenerateVisualization -> responseText: %s", responseText)
+
+	// Validate JSON response
+	var visualizationResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(responseText), &visualizationResponse); err != nil {
+		log.Printf("Error: Ollama visualization response is not valid JSON: %v", err)
+		return "", fmt.Errorf("invalid JSON response from Ollama: %v", err)
+	}
+
+	return responseText, nil
+}
+
 func (c *OllamaClient) GetModelInfo() ModelInfo {
 	return ModelInfo{
 		Name:                c.model,
