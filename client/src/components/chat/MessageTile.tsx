@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AlertCircle, ArrowLeft, ArrowRight, Braces, Clock, Copy, History, Loader, Pencil, Pin, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, BarChart3, Braces, Clock, Copy, Cpu, History, Loader, Pencil, PencilRuler, Pin, Play, RefreshCcw, Send, Table, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -12,6 +12,7 @@ import MarkdownRenderer from './MarkdownRenderer';
 import { formatActionAt } from '../../utils/message';
 import analyticsService from '../../services/analyticsService';
 import { highlightSearchText } from '../../utils/highlightSearch';
+import ChartRenderer from '../ChartRenderer';
 
 interface QueryState {
     isExecuting: boolean;
@@ -53,7 +54,7 @@ interface MessageTileProps {
     isSearchResult?: boolean;
     isCurrentSearchResult?: boolean;
     searchResultRefs?: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
-    buttonCallback?: (action: string) => void;
+    buttonCallback?: (action: string, label?: string) => void;
     userId?: string;
     userName?: string;
     onPinMessage?: (messageId: string, isPinned: boolean) => Promise<void>;
@@ -108,13 +109,11 @@ export default function MessageTile({
     userId,
     userName,
     searchQuery,
-    isSearchResult,
-    isCurrentSearchResult,
     searchResultRefs,
     onPinMessage,
 }: MessageTileProps) {
     const { streamId } = useStream();
-    const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json'>>({});
+    const [viewModes, setViewModes] = useState<Record<string, 'table' | 'json' | 'visualization'>>({});;
     const [showCriticalConfirm, setShowCriticalConfirm] = useState(false);
     const [queryToExecute, setQueryToExecute] = useState<string | null>(null);
     const [rollbackState, setRollbackState] = useState<{
@@ -122,8 +121,8 @@ export default function MessageTile({
         queryId: string | null;
     }>({ show: false, queryId: null });
     const [streamingQueryIndex, setStreamingQueryIndex] = useState<number>(-1);
-    const [isDescriptionStreaming, setIsDescriptionStreaming] = useState(false);
-    const [isQueryStreaming, setIsQueryStreaming] = useState(false);
+    const [isDescriptionStreaming] = useState(false);
+    const [isQueryStreaming] = useState(false);
     const [currentDescription, setCurrentDescription] = useState('');
     const [currentQuery, setCurrentQuery] = useState('');
     const abortControllerRef = useRef<Record<string, AbortController>>({});
@@ -139,6 +138,57 @@ export default function MessageTile({
     const expandedNodesRef = useRef<Record<string, boolean>>({});
     const [minimizedResults, setMinimizedResults] = useState<Record<string, boolean>>({});
     const [expandedCells, setExpandedCells] = useState<Record<string, boolean>>({});
+    // Visualization state tracking per query
+    const [visualizationStates, setVisualizationStates] = useState<Record<string, {
+        loading: boolean;
+        error: string | null;
+        isGenerating: boolean;
+        notSupported?: boolean;
+    }>>({});
+    const [visualizations, setVisualizations] = useState<Record<string, any>>({});
+    // Track visualization data loading state (for lazy-loading visualization data)
+    const [visualizationDataLoading, setVisualizationDataLoading] = useState<Record<string, boolean>>({});
+    const [visualizationDataError, setVisualizationDataError] = useState<Record<string, string>>({});
+
+    // Extract visualization data from message queries when message is received
+    useEffect(() => {
+        if (message.queries && message.queries.length > 0) {
+            const newVisualizations: Record<string, any> = {};
+            message.queries.forEach((query: any) => {
+                if (query.visualization) {
+                    if (query.visualization.can_visualize) {
+                        // Store the visualization data for successful visualizations
+                        newVisualizations[query.id] = {
+                            can_visualize: query.visualization.can_visualize,
+                            reason: query.visualization.reason,
+                            chart_type: query.visualization.chart_type,
+                            title: query.visualization.title,
+                            chart_configuration: query.visualization.chart_configuration,
+                            chart_data: query.visualization.chart_data
+                        };
+                        
+                        // Mark visualization as generated
+                        setVisualizationStates(prev => ({
+                            ...prev,
+                            [query.id]: { loading: false, error: null, isGenerating: false }
+                        }));
+                    } else if (query.visualization.can_visualize === false) {
+                        // Handle visualization not supported case
+                        const reason = query.visualization.reason || 'Visualization not supported for this data';
+                        setVisualizationStates(prev => ({
+                            ...prev,
+                            [query.id]: { loading: false, error: reason, isGenerating: false, notSupported: true }
+                        }));
+                    }
+                }
+            });
+            
+            // Only update visualizations if we found any
+            if (Object.keys(newVisualizations).length > 0) {
+                setVisualizations(prev => ({ ...prev, ...newVisualizations }));
+            }
+        }
+    }, [message.queries]);
 
     useEffect(() => {
         try {
@@ -612,6 +662,130 @@ export default function MessageTile({
         }
     };
 
+    const handleGenerateVisualization = async (queryId: string) => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query) return;
+
+        // Set loading state
+        setVisualizationStates(prev => ({
+            ...prev,
+            [queryId]: { loading: false, error: null, isGenerating: true }
+        }));
+
+        try {
+            const response = await chatService.generateVisualization(
+                chatId,
+                message.id,
+                queryId
+            );
+
+            console.log('Visualization response:', response);
+            
+            if (response?.success && response?.data) {
+                // Check if visualization is not supported for this data
+                if (response.data.can_visualize === false) {
+                    const reason = response.data.reason || 'This query result cannot be visualized. The query result may not be suitable for visualization.';
+                    console.log('Cannot visualize:', reason);
+                    setVisualizationStates(prev => ({
+                        ...prev,
+                        [queryId]: { loading: false, error: reason, isGenerating: false, notSupported: true }
+                    }));
+                    // toast.error('Cannot generate visualization for this query');
+                    return;
+                }
+
+                // Validate that we have the required data
+                if (!response.data.chart_data || response.data.chart_data.length === 0) {
+                    console.error('No chart data received:', response.data);
+                    setVisualizationStates(prev => ({
+                        ...prev,
+                        [queryId]: { loading: false, error: 'No data available for visualization. The query may not have returned any results.', isGenerating: false }
+                    }));
+                    // toast.error('No data available for visualization');
+                    return;
+                }
+                
+                console.log('Chart data:', response.data.chart_data);
+                console.log('Chart config:', response.data.chart_configuration);
+                
+                // Save visualization to state
+                setVisualizations(prev => ({
+                    ...prev,
+                    [queryId]: response.data
+                }));
+                setVisualizationStates(prev => ({
+                    ...prev,
+                    [queryId]: { loading: false, error: null, isGenerating: false }
+                }));
+                
+                toast('Visualization generated successfully!', {
+                    ...toastStyle,
+                    icon: '📊',
+                });
+            } else {
+                const errorMessage = response?.data?.reason || 'Failed to generate visualization for this query, please try again.';
+                setVisualizationStates(prev => ({
+                    ...prev,
+                    [queryId]: { loading: false, error: errorMessage, isGenerating: false }
+                }));
+                toast.error(`Couldn't generate visualization: ${errorMessage}`);
+            }
+        } catch (error: any) {
+            console.error('Visualization generation error:', error);
+            const errorMessage = error.message || 'Failed to generate visualization for this query, please try again.';
+            setVisualizationStates(prev => ({
+                ...prev,
+                [queryId]: { loading: false, error: errorMessage, isGenerating: false }
+            }));
+            toast.error(`Visualization error: ${errorMessage}`);
+        }
+    };
+
+    // Lazy-load visualization data on demand
+    const handleLoadVisualizationData = async (queryId: string) => {
+        const query = message.queries?.find(q => q.id === queryId);
+        if (!query || !query.visualization) return;
+
+        // Set loading state
+        setVisualizationDataLoading(prev => ({ ...prev, [queryId]: true }));
+        setVisualizationDataError(prev => ({ ...prev, [queryId]: '' }));
+
+        try {
+            const response = await chatService.getVisualizationData(
+                chatId,
+                message.id,
+                queryId
+            );
+
+            console.log('Visualization data response:', response);
+
+            if (response?.success && response?.data) {
+                // Update visualization with loaded data
+                setVisualizations(prev => ({
+                    ...prev,
+                    [queryId]: {
+                        ...prev[queryId],
+                        chart_data: response.data.chart_data,
+                        total_records: response.data.total_records,
+                        returned_count: response.data.returned_count
+                    }
+                }));
+                
+                // Switch to visualization view
+                setViewModes(prev => ({ ...prev, [queryId]: 'visualization' }));
+            } else {
+                const errorMessage = response?.data?.reason || 'Failed to load visualization data';
+                setVisualizationDataError(prev => ({ ...prev, [queryId]: errorMessage }));
+            }
+        } catch (error: any) {
+            console.error('Visualization data loading error:', error);
+            const errorMessage = error.message || 'Failed to load visualization data';
+            setVisualizationDataError(prev => ({ ...prev, [queryId]: errorMessage }));
+        } finally {
+            setVisualizationDataLoading(prev => ({ ...prev, [queryId]: false }));
+        }
+    };
+
     // Format date string in a user-friendly way
     const formatDateString = (dateStr: string, useFriendlyFormat: boolean): string => {
         if (!useFriendlyFormat) return dateStr; // Return raw ISO format
@@ -991,7 +1165,28 @@ export default function MessageTile({
             return <div className="text-gray-500">{displayMessage}</div>;
         }
 
-        const columns = Object.keys(data[0]);
+        // Collect all unique columns from all rows, preserving order from first row
+        const columnSet = new Set<string>();
+        const columnOrder: string[] = [];
+        
+        // First, add columns from the first row in order
+        const firstRowColumns = Object.keys(data[0]);
+        firstRowColumns.forEach(col => {
+            columnSet.add(col);
+            columnOrder.push(col);
+        });
+        
+        // Then, add any columns from subsequent rows that weren't in the first row
+        for (let i = 1; i < data.length; i++) {
+            Object.keys(data[i]).forEach(col => {
+                if (!columnSet.has(col)) {
+                    columnSet.add(col);
+                    columnOrder.push(col);
+                }
+            });
+        }
+        
+        const columns = columnOrder;
         
         // Detect date columns
         const dateColumnList = columns.filter(column => {
@@ -1741,6 +1936,28 @@ export default function MessageTile({
                                                     <Braces className="w-4 h-4" />
                                                 </button>
                                                 <div className="w-px h-4 bg-gray-700 mx-2" />
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        
+                                                        // Track view mode toggle
+                                                        if (userId && userName) {
+                                                            analyticsService.trackResultViewToggle(chatId, query.id, 'visualization', userId, userName);
+                                                        }
+                                                        
+                                                        setViewModes(prev => ({ ...prev, [query.id]: 'visualization' }));
+                                                        setTimeout(() => {
+                                                            window.scrollTo(window.scrollX, window.scrollY);
+                                                        }, 0);
+                                                    }}
+                                                    className={`p-1 md:p-2 rounded ${(viewModes[query.id] || 'table') === 'visualization' ? 'bg-gray-700' : 'hover:bg-gray-800'} hover-tooltip-messagetile`}
+                                                    data-tooltip="Visualization view"
+                                                    title="Visualization view"
+                                                >
+                                                    <BarChart3 className="w-4 h-4" />
+                                                </button>
+                                                <div className="w-px h-4 bg-gray-700 mx-2" />
                                                 
                                                 {/* Download Dropdown */}
                                                 <div className="relative download-dropdown-container">
@@ -1812,6 +2029,27 @@ export default function MessageTile({
                                                                 >
                                                                     Export as JSON
                                                                 </button>
+                                                                {visualizations[query.id] && (
+                                                                    <>
+                                                                        <div className="border-t border-gray-700 my-1"></div>
+                                                                        <button 
+                                                                            onClick={(e) => {
+                                                                                e.preventDefault();
+                                                                                e.stopPropagation();
+                                                                                handleExportVisualization(query.id);
+                                                                                setOpenDownloadMenu(null);
+                                                                            }}
+                                                                            className="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700 flex items-center gap-2"
+                                                                        >
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                                                <line x1="18" y1="20" x2="18" y2="10"></line>
+                                                                                <line x1="12" y1="20" x2="12" y2="4"></line>
+                                                                                <line x1="6" y1="20" x2="6" y2="14"></line>
+                                                                            </svg>
+                                                                            Export as Visualization
+                                                                        </button>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     )}
@@ -1930,7 +2168,7 @@ export default function MessageTile({
                                                                     )
                                                                 )}
                                                             </div>
-                                                        ) : (
+                                                        ) : (viewModes[query.id] || 'table') === 'json' ? (
                                                             <div className="w-full">
                                                                 {shouldShowExampleResult ? (
                                                                     resultToShow ? (
@@ -1946,6 +2184,97 @@ export default function MessageTile({
                                                                     ) : (
                                                                         <div className="text-gray-500">{message.non_tech_mode ? "No Data found" : "No data to display"}</div>
                                                                     )
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="w-full">
+                                                                {visualizationStates[query.id]?.isGenerating ? (
+                                                                    <div className="flex flex-row items-center justify-center py-12 gap-3">
+                                                                        <Loader className="w-6 h-6 animate-spin text-gray-400" />
+                                                                        <p className="text-gray-400">Generating visualization...</p>
+                                                                    </div>
+                                                                ) : visualizationStates[query.id]?.error ? (
+                                                                    visualizationStates[query.id]?.notSupported ? (
+                                                                        <div className="bg-gray-800/50 rounded-lg p-8 text-center border border-gray-700">
+                                                                            <div className="flex justify-center mb-4">
+                                                                                <AlertCircle className="w-8 h-8 text-gray-400" />
+                                                                            </div>
+                                                                            <div className="text-white font-semibold mb-2 text-base">Visualization Not Supported</div>
+                                                                            <p className="text-gray-400 text-sm mb-4">{visualizationStates[query.id].error}</p>
+                                                                            {/* <button
+                                                                                onClick={() => handleGenerateVisualization(query.id)}
+                                                                                className="px-4 py-2 bg-gray-600 text-white font-semibold rounded hover:bg-gray-500 transition-colors text-sm"
+                                                                            >
+                                                                                <RefreshCcw className="w-4 h-4 inline-block mr-2" />
+                                                                                Try Again
+                                                                            </button> */}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="bg-neo-error/10 rounded-lg p-8 text-center">
+                                                                            <div className="text-neo-error font-semibold mb-3">Couldn't generate visualization</div>
+                                                                            <p className="text-gray-400 mb-6">{visualizationStates[query.id].error}</p>
+                                                                            <button
+                                                                                onClick={() => handleGenerateVisualization(query.id)}
+                                                                                className="px-4 py-2 bg-white text-gray-900 font-semibold rounded hover:bg-gray-200 transition-colors"
+                                                                            >
+                                                                                <RefreshCcw className="w-4 h-4 inline-block mr-2" />
+                                                                                Try Again
+                                                                            </button>
+                                                                        </div>
+                                                                    )
+                                                                ) : visualizations[query.id]?.chart_data && visualizations[query.id].chart_data.length > 0 ? (
+                                                                    <div className="w-full" data-query-id={query.id}>
+                                                                        <ChartRenderer 
+                                                                            config={visualizations[query.id].chart_configuration}
+                                                                            data={visualizations[query.id].chart_data}
+                                                                            onRetry={() => handleGenerateVisualization(query.id)}
+                                                                            onRegenerate={() => handleGenerateVisualization(query.id)}
+                                                                        />
+                                                                    </div>
+                                                                ) : query.visualization && query.visualization.can_visualize && !visualizations[query.id]?.chart_data ? (
+                                                                    // Visualization ready but data not loaded - show "Load Visualization" state
+                                                                    <div className="bg-green-900/20 rounded-lg p-8 text-center border border-green-700/40">
+                                                                        <div className="mb-6">
+                                                                            <BarChart3 className="w-8 h-8 text-green-400 mx-auto mb-4" />
+                                                                            <p className="text-white text-base font-semibold mb-2">Visualization Ready</p>
+                                                                            <p className="text-gray-400 text-sm">Click the button below to load the visualization</p>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => handleLoadVisualizationData(query.id)}
+                                                                            disabled={visualizationDataLoading[query.id]}
+                                                                            className="px-4 py-2 bg-green-600 text-white font-semibold rounded hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        >
+                                                                            {visualizationDataLoading[query.id] ? (
+                                                                                <>
+                                                                                    <Loader className="w-4 h-4 inline-block mr-2 animate-spin" />
+                                                                                    Loading...
+                                                                                </>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <PencilRuler className="w-4 h-4 inline-block mr-2" />
+                                                                                    Load Visualization
+                                                                                </>
+                                                                            )}
+                                                                        </button>
+                                                                        {visualizationDataError[query.id] && (
+                                                                            <div className="text-red-400 text-xs mt-3">{visualizationDataError[query.id]}</div>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="bg-blue-900/20 rounded-lg p-8 text-center border border-blue-700/40">
+                                                                        <div className="mb-6">
+                                                                            <PencilRuler className="w-8 h-8 text-blue-400 mx-auto mb-4" />
+                                                                            <p className="text-white text-base font-semibold mb-2">Visualize Your Query Results</p>
+                                                                            <p className="text-gray-400 text-sm">AI will analyze your data and generate the <br></br>most suitable visualization</p>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => handleGenerateVisualization(query.id)}
+                                                                            className="px-4 py-2 bg-blue-600 text-white font-semibold rounded hover:bg-blue-700 transition-colors"
+                                                                        >
+                                                                            <PencilRuler className="w-4 h-4 inline-block mr-2" />
+                                                                            Generate Visualization
+                                                                        </button>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         )}
@@ -2119,6 +2448,52 @@ export default function MessageTile({
         }
     };
 
+    const handleExportVisualization = async (queryId: string) => {
+        try {
+            // Find the visualization container element
+            const visualizationElement = document.querySelector(`[data-query-id="${queryId}"] .recharts-wrapper`);
+            
+            if (!visualizationElement) {
+                toast.error('Visualization not found', toastStyle);
+                return;
+            }
+
+            // Import html-to-image dynamically
+            const { toPng } = await import('html-to-image');
+            
+            // Show loading toast
+            toast.loading('Exporting visualization...', toastStyle);
+
+            // Convert to PNG with high quality
+            const dataUrl = await toPng(visualizationElement as HTMLElement, {
+                quality: 1.0,
+                pixelRatio: 2, // 2x scale for better quality
+                backgroundColor: '#1f2937', // Match the dark background
+            });
+
+            // Create download link
+            const link = document.createElement('a');
+            link.download = `visualization-query-${queryId}-${new Date().toISOString().split('T')[0]}.png`;
+            link.href = dataUrl;
+            link.click();
+
+            // Track visualization export
+            if (userId && userName) {
+                analyticsService.trackDataExport(chatId, queryId, 'png-visualization', 1, userId, userName);
+            }
+
+            toast.dismiss();
+            toast.success('Visualization exported successfully!', {
+                ...toastStyle,
+                icon: '📊',
+            });
+        } catch (error) {
+            console.error('Error exporting visualization:', error);
+            toast.dismiss();
+            toast.error('Failed to export visualization', toastStyle);
+        }
+    };
+
     return (
         <div 
             className={`
@@ -2232,10 +2607,12 @@ export default function MessageTile({
                     <div className="
             absolute 
             left-0 
+            right-0
             -bottom-9
             md:-bottom-10 
             flex 
             gap-1
+            items-center
             z-[5]
           ">
                         <button
@@ -2280,6 +2657,8 @@ export default function MessageTile({
                         >
                             <Pin className={`w-4 h-4 rotate-45 ${message.is_pinned ? 'text-black fill-black' : 'text-gray-800'}`} />
                         </button>
+                        
+                        {/* Copy and Pin icons only - model name is shown in message bubble */}
                     </div>
                 )}
                 <div className={`
@@ -2364,16 +2743,20 @@ export default function MessageTile({
                              (
                                 <div className={message.loading_steps ? 'animate-fade-in' : ''}>
                                  <div className='flex flex-col gap-1'>
-                                    {message.type === 'user' ? (
-                                        <p className='text-lg whitespace-pre-wrap break-words'>
-                                            {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
-                                        </p>) :
-                                    (   <MarkdownRenderer 
-                                            markdown={removeDuplicateContent(message.content)}
-                                            searchQuery={searchQuery}
-                                        />
-                                    )
-                                    }
+                                    <div className="flex items-flex-start justify-between gap-3">
+                                        <div className="flex-1">
+                                            {message.type === 'user' ? (
+                                                <p className='text-lg whitespace-pre-wrap break-words'>
+                                                    {searchQuery ? highlightSearchText(removeDuplicateContent(message.content), searchQuery) : removeDuplicateContent(message.content)}
+                                                </p>) :
+                                            (   <MarkdownRenderer 
+                                                    markdown={removeDuplicateContent(message.content)}
+                                                    searchQuery={searchQuery}
+                                                />
+                                            )
+                                            }
+                                        </div>
+                                    </div>
                                     {message.is_edited && message.type === 'user' && (
                                         <span className="text-xs text-gray-600 italic">
                                             (edited)
@@ -2405,7 +2788,7 @@ export default function MessageTile({
                                                     key={button.id}
                                                     onClick={() => {
                                                         if (buttonCallback) {
-                                                            buttonCallback(button.action);
+                                                            buttonCallback(button.action, button.label);
                                                         } else {
                                                             console.log(`Action button clicked: ${button.action}`);
                                                         }
@@ -2422,7 +2805,7 @@ export default function MessageTile({
                                         <div className="mt-4 group/tooltip">
                                             <div className="text-sm text-gray-700 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-1">
                                                 <span className="inline-flex items-center w-full sm:w-auto">
-                                                    <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                    <svg className="w-4 h-4 mr-1 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                     </svg>
                                                     This response was generated
@@ -2437,7 +2820,7 @@ export default function MessageTile({
                                                         </span>
                                                         <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover/tooltip:visible group-hover/tooltip:opacity-100 transition-all duration-200 w-64 z-50 pointer-events-none">
                                                             {message.non_tech_mode 
-                                                                ? 'Non-Technical Mode: Generates simple, natural language queries that are easy to understand. Perfect for users who want to interact with data without knowing database syntax.'
+                                                                ? 'Non-Technical Mode: Generates simple, natural language queries that are easy to understand. Perfect for users who want to interact with data without knowing database commands.'
                                                                 : 'Technical Mode: Generates raw database queries with full syntax. Ideal for developers and technical users who want direct control over database operations.'
                                                             }
                                                             <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
@@ -2463,7 +2846,14 @@ export default function MessageTile({
                                             </div>
                                         </div>
                                     )}
-                        
+                                    {message.type === 'assistant' && message.llm_model_name && (
+                                        <div className="flex flex-row gap-1.5 mt-2 items-center">
+                                        <Cpu className='w-4 h-4 text-gray-700'/>
+                                            <span className="text-sm text-gray-700 whitespace-nowrap flex-shrink-0">
+                                                {message.llm_model_name}
+                                            </span>
+                                        </div>
+                                        )}
                                 </div>
                             )}
                         </div>

@@ -17,7 +17,9 @@ type UserRepository interface {
 	FindByUsername(username string) (*models.User, error)
 	FindByEmail(email string) (*models.User, error)
 	FindByUsernameOrEmail(usernameOrEmail string) (*models.User, error)
+	FindByGoogleID(googleID string) (*models.User, error)
 	Create(user *models.User) error
+	Update(userID string, user *models.User) error
 	CreateUserSignUpSecret(secret string) (*models.UserSignupSecret, error)
 	ValidateUserSignupSecret(secret string) bool
 	DeleteUserSignupSecret(secret string) error
@@ -171,4 +173,40 @@ func (r *userRepository) DeletePasswordResetOTP(email string) error {
 	key := fmt.Sprintf("password_reset_otp:%s", email)
 	ctx := context.Background()
 	return r.redisRepo.Del(key, ctx)
+}
+
+// FindByGoogleID finds a user by their Google ID
+func (r *userRepository) FindByGoogleID(googleID string) (*models.User, error) {
+	var user models.User
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"google_id": googleID}
+	err := r.userCollection.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // User not found is not an error
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+// Update updates a user document
+func (r *userRepository) Update(userID string, user *models.User) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	objectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %v", err)
+	}
+
+	user.UpdatedAt = time.Now()
+
+	filter := bson.M{"_id": objectID}
+	update := bson.M{"$set": user}
+
+	_, err = r.userCollection.UpdateOne(ctx, filter, update)
+	return err
 }

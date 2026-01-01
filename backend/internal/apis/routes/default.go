@@ -32,7 +32,9 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	// Setup all route groups
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
+	SetupVisualizationRoutes(router)
 	SetupWaitlistRoutes(router)
 	SetupUploadRoutes(router)
 	SetupGoogleOAuthRoutes(router)
+	SetupLLMModelsRoutes(router)
 }

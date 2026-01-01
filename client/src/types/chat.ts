@@ -1,6 +1,12 @@
 // Create a new file for chat types
 export type SSLMode = 'disable' | 'require' | 'verify-ca' | 'verify-full';
 
+// SSH Authentication Method Enum
+export enum SSHAuthMethod {
+    PublicKey = 'publickey',
+    Password = 'password',
+}
+
 export interface FileUpload {
     id: string;
     filename: string;
@@ -43,8 +49,11 @@ export interface Connection {
     ssh_host?: string;
     ssh_port?: string;
     ssh_username?: string;
+    ssh_auth_method?: SSHAuthMethod; // Use enum for type safety
     ssh_private_key?: string;
+    ssh_private_key_url?: string; // URL to fetch private key from
     ssh_passphrase?: string;
+    ssh_password?: string; // For password-based SSH auth
     // Spreadsheet specific fields
     file_uploads?: FileUpload[];
     schema_name?: string; // Schema name in the CSV PostgreSQL database
@@ -60,6 +69,7 @@ export interface Chat {
     user_id: string;
     connection: Connection;
     selected_collections?: string; // "ALL" or comma-separated table names
+    preferred_llm_model?: string; // User's preferred LLM model for this chat
     settings: ChatSettings;
     created_at: string;
     updated_at: string;
@@ -99,4 +109,41 @@ export interface ChatSettings {
     auto_execute_query: boolean;
     share_data_with_ai: boolean;
     non_tech_mode: boolean;
+    auto_generate_visualization: boolean; // Auto-generate chart visualizations for compatible queries (default: false)
+    selected_llm_model?: string; // LLM model selected for this chat (e.g., "gpt-4o", "gemini-2.0-flash")
+}
+
+// LLM Model Types
+export interface LLMModel {
+    id: string;
+    provider: string;
+    displayName: string;
+    isEnabled: boolean;
+    maxCompletionTokens: number;
+    temperature: number;
+    inputTokenLimit: number;
+    description: string;
+}
+
+export interface CategorizedLLMModels {
+    [provider: string]: LLMModel[];
+}
+
+export interface SupportedModelsResponse {
+    success: boolean;
+    data: {
+        models: LLMModel[];
+        count: number;
+    };
+}
+
+export interface ModelsByProviderResponse {
+    success: boolean;
+    data: {
+        provider: string;
+        models: LLMModel[];
+        count: number;
+    };
+    error?: string;
+    message?: string;
 }

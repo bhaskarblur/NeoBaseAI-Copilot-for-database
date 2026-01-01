@@ -138,7 +138,7 @@ export default function ForgotPasswordForm({ onSwitchToLogin, onSwitchToResetPas
                             />
                         </div>
                         {errors.email && touched.email && (
-                            <div className="flex items-center gap-1 mt-1 text-neo-error text-sm">
+                            <div className="flex items-center gap-1 mt-2 text-neo-error text-sm">
                                 <AlertCircle className="w-4 h-4" />
                                 <span>{errors.email}</span>
                             </div>
@@ -160,7 +160,7 @@ export default function ForgotPasswordForm({ onSwitchToLogin, onSwitchToResetPas
                         )}
                     </button>
 
-                    <p className="text-gray-500 text-sm mt-4 text-center">
+                    {/* <p className="text-gray-500 text-sm mt-4 text-center">
                         We only support forgot passwords for new users with email, old users may contact us at{' '}
                         <a
                             href="mailto:neobaseai@gmail.com"
@@ -168,9 +168,9 @@ export default function ForgotPasswordForm({ onSwitchToLogin, onSwitchToResetPas
                         >
                             neobaseai@gmail.com
                         </a>
-                    </p>
+                    </p> */}
 
-                    <div className="my-2" />
+                    <div className="my-0" />
 
                     <button
                         type="button"

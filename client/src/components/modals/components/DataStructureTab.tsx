@@ -665,7 +665,7 @@ export default function DataStructureTab({
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
         <div className="text-center text-gray-600 max-w-md">
-          <p className="font-medium">Loading data structure...</p>
+          <p className="font-medium">Loading knowledge base...</p>
           <p className="text-sm mt-2">
             Fetching table schemas, column information, and data statistics from your database.
           </p>
@@ -677,7 +677,7 @@ export default function DataStructureTab({
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Data Structure</h3>
+        <h3 className="text-lg font-semibold">Knowledge Base Tables</h3>
         {/* Commented for now, will be added back later */}
         {/* <Tooltip content="Refresh table data">
           <button
@@ -696,7 +696,7 @@ export default function DataStructureTab({
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
             <div>
-              <h4 className="font-medium text-red-800">Failed to Load Data Structure</h4>
+              <h4 className="font-medium text-red-800">Failed to Load Knowledge Base</h4>
               <p className="text-sm text-red-700 mt-1">{error}</p>
               <button
                 onClick={() => {
@@ -714,7 +714,7 @@ export default function DataStructureTab({
 
       {tables.length === 0 && !error ? (
         <div className="text-center py-8 text-gray-500">
-          No tables found. Upload CSV/Excel files or sync Google Sheets to see data structure.
+          No tables found. Upload CSV/Excel files or sync Google Sheets to see knowledge base.
         </div>
       ) : tables.length > 0 ? (
         <div className="space-y-4">
@@ -744,14 +744,14 @@ export default function DataStructureTab({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => handleDownloadClick(e, table.name)}
-                    className="p-2 hover:bg-gray-200 rounded transition-colors"
+                    className="p-1.5 py-0.5 hover:bg-gray-200 rounded transition-colors"
                     title="Download table data"
                   >
                     <Download className="w-4 w-4" />
                   </button>
                   <button
                     onClick={() => setDeleteConfirmation({ show: true, tableName: table.name })}
-                    className="p-2 hover:bg-red-100 text-red-600 rounded transition-colors"
+                    className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors"
                     title="Delete table"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -764,18 +764,18 @@ export default function DataStructureTab({
                 <div className="border-t-2 border-gray-200">
                   {/* Data Preview */}
                   <div className="p-4">
-                    <div className="flex justify-between items-center mb-3">
-                      <h5 className="font-medium">Data Preview</h5>
-                      <div className="flex items-center gap-2">
+                    <div className="flex justify-start items-center -mb-3">
+                      {/* <h5 className="font-medium text-sm text-gray-700">Preview</h5> */}
+                      <div className={`flex items-center gap-2 ${selectedRows[table.name]?.size > 0 ? 'mb-2' : ''}`}>
                         {selectedRows[table.name]?.size > 0 && (
                           <>
                             <span className="text-sm text-gray-500 mr-2">
-                              ({selectedRows[table.name].size} selected)
+                              {selectedRows[table.name].size} selected
                             </span>
                             <button
                               onClick={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                setDownloadMenu({ show: true, tableName: table.name, x: rect.left, y: rect.bottom + 5 });
+                                setDownloadMenu({ show: true, tableName: table.name, x: rect.left, y: rect.bottom + 4 });
                               }}
                               className="p-1.5 hover:bg-gray-200 rounded transition-colors"
                               title="Download selected rows"
@@ -802,32 +802,32 @@ export default function DataStructureTab({
                       )}
                       <table className="w-full border-collapse">
                         <thead>
-                          <tr className="border-b-2 border-gray-200 bg-gray-100">
-                            <th className="p-2 text-left bg-gray-100">
+                          <tr className="border-b-2 border-gray-300">
+                            <th className="p-2 text-left">
                               <input
                                 type="checkbox"
                                 checked={selectedRows[table.name]?.size === table.previewData.length}
                                 onChange={() => handleSelectAllRows(table.name, table.previewData)}
-                                className="rounded border-gray-300"
+                                className="rounded border-gray-300 mt-2"
                               />
                             </th>
                             {table.columns.map((col) => (
-                              <th key={col.name} className="p-4 text-left font-medium text-sm bg-gray-100">
+                              <th key={col.name} className="p-4 text-left font-semibold text-sm">
                                 {col.name}
                               </th>
                             ))}
-                            <th className="p-2 text-left bg-gray-100">Actions</th>
+                            <th className="p-2 text-sm text-left">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
                           {table.previewData.length > 0 ? table.previewData.map((row, rowIndex) => (
-                            <tr key={rowIndex} className="border-b hover:bg-gray-50 group">
+                            <tr key={rowIndex} className="border-b hover:bg-gray-200 group">
                               <td className="p-2">
                                 <input
                                   type="checkbox"
                                   checked={selectedRows[table.name]?.has(rowIndex) || false}
                                   onChange={() => handleRowSelection(table.name, rowIndex)}
-                                  className="rounded border-gray-300"
+                                  className="rounded border-gray-300 mt-2"
                                 />
                               </td>
                               {table.columns.map((col) => (

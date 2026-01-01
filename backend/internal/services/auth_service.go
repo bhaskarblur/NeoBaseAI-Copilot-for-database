@@ -10,6 +10,7 @@ import (
 	"neobase-ai/internal/repositories"
 	"neobase-ai/internal/utils"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,9 @@ type AuthService interface {
 	Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint, error)
 	Login(req *dtos.LoginRequest) (*dtos.AuthResponse, uint, error)
 	GenerateUserSignupSecret(req *dtos.UserSignupSecretRequest) (*models.UserSignupSecret, uint, error)
+	ValidateSignupSecret(secret string) (bool, error)
+	GoogleOAuthLogin(req *dtos.GoogleOAuthRequest) (*dtos.AuthResponse, uint, error)
+	GoogleOAuthSignup(req *dtos.GoogleOAuthRequest) (*dtos.AuthResponse, uint, error)
 	RefreshToken(refreshToken string) (*dtos.RefreshTokenResponse, uint32, error)
 	Logout(refreshToken string, accessToken string) (uint32, error)
 	GetUser(userID string) (*models.User, uint, error)
@@ -26,19 +30,21 @@ type AuthService interface {
 }
 
 type authService struct {
-	chatService  ChatService
-	userRepo     repositories.UserRepository
-	jwtService   utils.JWTService
-	tokenRepo    repositories.TokenRepository
-	emailService EmailService
+	chatService        ChatService
+	userRepo           repositories.UserRepository
+	jwtService         utils.JWTService
+	tokenRepo          repositories.TokenRepository
+	emailService       EmailService
+	googleOAuthService GoogleOAuthService
 }
 
-func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTService, tokenRepo repositories.TokenRepository, emailService EmailService) AuthService {
+func NewAuthService(userRepo repositories.UserRepository, jwtService utils.JWTService, tokenRepo repositories.TokenRepository, emailService EmailService, googleOAuthService GoogleOAuthService) AuthService {
 	return &authService{
-		userRepo:     userRepo,
-		jwtService:   jwtService,
-		tokenRepo:    tokenRepo,
-		emailService: emailService,
+		userRepo:           userRepo,
+		jwtService:         jwtService,
+		tokenRepo:          tokenRepo,
+		emailService:       emailService,
+		googleOAuthService: googleOAuthService,
 	}
 }
 
@@ -136,14 +142,14 @@ func (s *authService) Signup(req *dtos.SignupRequest) (*dtos.AuthResponse, uint,
 			Connection: dtos.CreateConnectionRequest{
 				Type:     config.Env.ExampleDatabaseType,
 				Host:     config.Env.ExampleDatabaseHost,
-				Port:     utils.ToStringPtr(config.Env.ExampleDatabasePort),
+				Port:     utils.StringPtr(config.Env.ExampleDatabasePort),
 				Database: config.Env.ExampleDatabaseName,
 				Username: config.Env.ExampleDatabaseUsername,
-				Password: utils.ToStringPtr(config.Env.ExampleDatabasePassword),
+				Password: utils.StringPtr(config.Env.ExampleDatabasePassword),
 			},
 			Settings: dtos.CreateChatSettings{
-				AutoExecuteQuery: utils.ToBoolPtr(true),
-				ShareDataWithAI:  utils.ToBoolPtr(false), // Disable sharing data with AI by default.
+				AutoExecuteQuery: utils.TruePtr(),
+				ShareDataWithAI:  utils.FalsePtr(), // Disable sharing data with AI by default.
 			},
 		})
 		if err != nil {
@@ -380,4 +386,291 @@ func (s *authService) ResetPassword(req *dtos.ResetPasswordRequest) (uint, error
 	}
 
 	return http.StatusOK, nil
+}
+
+// ValidateSignupSecret validates if a signup secret is valid
+func (s *authService) ValidateSignupSecret(secret string) (bool, error) {
+	if secret == "" {
+		return false, errors.New("signup secret is required")
+	}
+	return s.userRepo.ValidateUserSignupSecret(secret), nil
+}
+
+// GoogleOAuthLogin handles login via Google OAuth - user must exist
+func (s *authService) GoogleOAuthLogin(req *dtos.GoogleOAuthRequest) (*dtos.AuthResponse, uint, error) {
+	// If purpose is spreadsheet, just exchange code for tokens (no user auth)
+	if req.Purpose == "spreadsheet" {
+		// Exchange code for tokens
+		tokenResp, err := s.googleOAuthService.ExchangeCodeForToken(req.Code, req.RedirectURI)
+		if err != nil {
+			log.Printf("Failed to exchange Google OAuth code for spreadsheet: %v", err)
+			return nil, http.StatusBadRequest, fmt.Errorf("failed to authenticate with Google: %v", err)
+		}
+
+		// Get user info from Google
+		userInfo, err := s.googleOAuthService.GetUserInfo(tokenResp.AccessToken)
+		if err != nil {
+			log.Printf("Failed to get Google user info: %v", err)
+			return nil, http.StatusBadRequest, fmt.Errorf("failed to get user information from Google: %v", err)
+		}
+
+		// For spreadsheet OAuth, return tokens with user email
+		// We'll return these in the RefreshToken field as a workaround since AuthResponse doesn't have all fields
+		// The frontend will parse the response appropriately
+		return &dtos.AuthResponse{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			User: models.User{
+				Email: userInfo.Email,
+			},
+		}, http.StatusOK, nil
+	}
+
+	// Exchange code for tokens
+	tokenResp, err := s.googleOAuthService.ExchangeCodeForToken(req.Code, req.RedirectURI)
+	if err != nil {
+		log.Printf("Failed to exchange Google OAuth code: %v", err)
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to authenticate with Google: %v", err)
+	}
+
+	// Get user info from Google
+	userInfo, err := s.googleOAuthService.GetUserInfo(tokenResp.AccessToken)
+	if err != nil {
+		log.Printf("Failed to get Google user info: %v", err)
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to get user information from Google: %v", err)
+	}
+
+	if !userInfo.VerifiedEmail {
+		return nil, http.StatusBadRequest, errors.New("Google email is not verified")
+	}
+
+	// Check if user exists by Google ID
+	existingUser, err := s.userRepo.FindByGoogleID(userInfo.ID)
+	if err != nil {
+		log.Printf("Error checking for existing Google user: %v", err)
+		// Continue, might not be a Google user yet
+	}
+
+	// If user doesn't exist by Google ID, check by email
+	if existingUser == nil {
+		existingUser, err = s.userRepo.FindByEmail(userInfo.Email)
+		if err != nil {
+			log.Printf("Error checking for existing email user: %v", err)
+		}
+	}
+
+	// User must exist for login
+	if existingUser == nil {
+		return nil, http.StatusUnauthorized, errors.New("No account found with this email. Please sign up first")
+	}
+
+	authUser := existingUser
+
+	// Update Google tokens
+	expiresAt := time.Now().Unix() + int64(tokenResp.ExpiresIn)
+	authUser.GoogleAccessToken = &tokenResp.AccessToken
+	authUser.GoogleTokenExpiry = &expiresAt
+	if tokenResp.RefreshToken != "" {
+		authUser.GoogleRefreshToken = &tokenResp.RefreshToken
+	}
+	authUser.UpdatedAt = time.Now()
+
+	// Ensure Google ID is set
+	if authUser.GoogleID == nil || *authUser.GoogleID == "" {
+		authUser.GoogleID = &userInfo.ID
+	}
+
+	// Update user in database
+	if err := s.userRepo.Update(authUser.ID.Hex(), authUser); err != nil {
+		log.Printf("Failed to update user Google tokens: %v", err)
+		// Continue anyway, tokens are not critical for login
+	}
+
+	log.Printf("Google OAuth: User logged in successfully - Email: %s", authUser.Email)
+
+	// Generate JWT tokens
+	accessToken, err := s.jwtService.GenerateToken(authUser.ID.Hex())
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate access token: %v", err)
+	}
+
+	jwtRefreshToken, err := s.jwtService.GenerateRefreshToken(authUser.ID.Hex())
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate refresh token: %v", err)
+	}
+
+	err = s.tokenRepo.StoreRefreshToken(authUser.ID.Hex(), *jwtRefreshToken)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to store refresh token: %v", err)
+	}
+
+	return &dtos.AuthResponse{
+		AccessToken:  *accessToken,
+		RefreshToken: *jwtRefreshToken,
+		User:         *authUser,
+	}, http.StatusOK, nil
+}
+
+// GoogleOAuthSignup handles signup via Google OAuth - user must NOT exist
+func (s *authService) GoogleOAuthSignup(req *dtos.GoogleOAuthRequest) (*dtos.AuthResponse, uint, error) {
+	// Exchange code for tokens
+	tokenResp, err := s.googleOAuthService.ExchangeCodeForToken(req.Code, req.RedirectURI)
+	if err != nil {
+		log.Printf("Failed to exchange Google OAuth code: %v", err)
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to authenticate with Google: %v", err)
+	}
+
+	// Get user info from Google
+	userInfo, err := s.googleOAuthService.GetUserInfo(tokenResp.AccessToken)
+	if err != nil {
+		log.Printf("Failed to get Google user info: %v", err)
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to get user information from Google: %v", err)
+	}
+
+	if !userInfo.VerifiedEmail {
+		return nil, http.StatusBadRequest, errors.New("Google email is not verified")
+	}
+
+	// Check if user exists by Google ID
+	existingUser, err := s.userRepo.FindByGoogleID(userInfo.ID)
+	if err != nil {
+		log.Printf("Error checking for existing Google user: %v", err)
+		// Continue, might be a new user
+	}
+
+	// If user doesn't exist by Google ID, check by email
+	if existingUser == nil {
+		existingUser, err = s.userRepo.FindByEmail(userInfo.Email)
+		if err != nil {
+			log.Printf("Error checking for existing email user: %v", err)
+		}
+	}
+
+	// User must NOT exist for signup
+	if existingUser != nil {
+		return nil, http.StatusBadRequest, errors.New("An account with this email already exists. Please log in instead")
+	}
+
+	// Validate signup secret in production
+	if config.Env.Environment != "DEVELOPMENT" {
+		if req.UserSignupSecret == nil || *req.UserSignupSecret == "" {
+			return nil, http.StatusBadRequest, errors.New("signup secret is required for new users in production")
+		}
+
+		validSecret := s.userRepo.ValidateUserSignupSecret(*req.UserSignupSecret)
+		if !validSecret {
+			return nil, http.StatusUnauthorized, errors.New("invalid user signup secret")
+		}
+	}
+
+	// Extract username from email (before @) or use name
+	username := userInfo.Email
+	if atIndex := strings.Index(userInfo.Email, "@"); atIndex > 0 {
+		username = userInfo.Email[:atIndex]
+	}
+	if userInfo.Name != "" {
+		// Replace spaces with underscores for username
+		username = strings.ReplaceAll(userInfo.Name, " ", "_")
+	}
+
+	// Ensure username is unique
+	baseUsername := username
+	counter := 1
+	for {
+		existingByUsername, _ := s.userRepo.FindByUsername(username)
+		if existingByUsername == nil {
+			break
+		}
+		username = fmt.Sprintf("%s_%d", baseUsername, counter)
+		counter++
+	}
+
+	expiresAt := time.Now().Unix() + int64(tokenResp.ExpiresIn)
+	refreshToken := tokenResp.RefreshToken
+
+	// Create new user
+	authUser := &models.User{
+		Username:           username,
+		Email:              userInfo.Email,
+		Password:           "", // No password for Google OAuth users
+		AuthType:           "google",
+		GoogleID:           &userInfo.ID,
+		GoogleAccessToken:  &tokenResp.AccessToken,
+		GoogleRefreshToken: &refreshToken,
+		GoogleTokenExpiry:  &expiresAt,
+		Base: models.Base{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+
+	if err := s.userRepo.Create(authUser); err != nil {
+		log.Printf("Failed to create Google OAuth user: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create user account: %v", err)
+	}
+
+	// Send welcome email (async, don't block signup process)
+	go func() {
+		err := s.emailService.SendWelcomeEmail(authUser.Email, authUser.Username)
+		if err != nil {
+			log.Printf("⚠️  Failed to send welcome email to %s: %v", authUser.Email, err)
+		}
+	}()
+
+	// Delete signup secret in production
+	if config.Env.Environment != "DEVELOPMENT" && req.UserSignupSecret != nil {
+		go func() {
+			err := s.userRepo.DeleteUserSignupSecret(*req.UserSignupSecret)
+			if err != nil {
+				log.Printf("Failed to delete user signup secret: %v", err)
+			}
+		}()
+	}
+
+	// Create default chat in development mode
+	if config.Env.Environment == "DEVELOPMENT" {
+		chat, _, err := s.chatService.CreateWithoutConnectionPing(authUser.ID.Hex(), &dtos.CreateChatRequest{
+			Connection: dtos.CreateConnectionRequest{
+				Type:     config.Env.ExampleDatabaseType,
+				Host:     config.Env.ExampleDatabaseHost,
+				Port:     utils.StringPtr(config.Env.ExampleDatabasePort),
+				Database: config.Env.ExampleDatabaseName,
+				Username: config.Env.ExampleDatabaseUsername,
+				Password: utils.StringPtr(config.Env.ExampleDatabasePassword),
+			},
+			Settings: dtos.CreateChatSettings{
+				AutoExecuteQuery: utils.TruePtr(),
+				ShareDataWithAI:  utils.FalsePtr(),
+			},
+		})
+		if err != nil {
+			log.Printf("Failed to create default chat for Google OAuth user: %v", err)
+		} else if chat != nil {
+			log.Printf("Default chat created for Google OAuth user: %s", chat.ID)
+		}
+	}
+
+	log.Printf("Google OAuth: New user signed up successfully - Email: %s, Username: %s", authUser.Email, authUser.Username)
+
+	// Generate JWT tokens
+	accessToken, err := s.jwtService.GenerateToken(authUser.ID.Hex())
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate access token: %v", err)
+	}
+
+	jwtRefreshToken, err := s.jwtService.GenerateRefreshToken(authUser.ID.Hex())
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate refresh token: %v", err)
+	}
+
+	err = s.tokenRepo.StoreRefreshToken(authUser.ID.Hex(), *jwtRefreshToken)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to store refresh token: %v", err)
+	}
+
+	return &dtos.AuthResponse{
+		AccessToken:  *accessToken,
+		RefreshToken: *jwtRefreshToken,
+		User:         *authUser,
+	}, http.StatusOK, nil
 }

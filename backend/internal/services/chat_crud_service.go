@@ -39,7 +39,7 @@ type ChatService interface {
 	Delete(userID, chatID string) (uint32, error)
 	GetByID(userID, chatID string) (*dtos.ChatResponse, uint32, error)
 	List(userID string, page, pageSize int) (*dtos.ChatListResponse, uint32, error)
-	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error)
+	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string, llmModel string) (*dtos.MessageResponse, uint16, error)
 	UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
 	Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error)
@@ -77,19 +77,30 @@ type ChatService interface {
 	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error)
 	GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error)
+
+	// Visualization operations
+	GenerateVisualizationForQueryResults(ctx context.Context, userID, chatID string, chat *models.Chat, selectedLLMModel, userQuestion string, executedQueries []interface{}, queryResults []map[string]interface{}, isExplicitRequest bool) (*dtos.VisualizationResponse, error)
+	GenerateVisualizationForMessage(ctx context.Context, userID, chatID, messageID, queryID string, selectedLLMModel string) (*dtos.VisualizationResponse, error) // New: Fetch message data and generate visualization
+	SaveVisualizationToMessage(ctx context.Context, messageID, chatID, userID string, visualization *dtos.VisualizationResponse, queryID string) (string, error)
+	GetVisualizationForMessage(ctx context.Context, messageID string) (*dtos.VisualizationResponse, error)
+	GetVisualizationForQuery(ctx context.Context, queryID string) (*dtos.VisualizationResponse, error)                           // Get visualization by query ID (per-query visualization)
+	GetVisualizationData(ctx context.Context, userID, chatID, messageID, queryID string, limit, offset int) (interface{}, error) // Lazy-load visualization data on demand
+	ExecuteChartQuery(ctx context.Context, userID, chatID string, chartConfig *dtos.ChartConfiguration, limit int) ([]map[string]interface{}, error)
 }
 
 type chatService struct {
-	chatRepo        repositories.ChatRepository
-	llmRepo         repositories.LLMMessageRepository
-	dbManager       *dbmanager.Manager
-	llmClient       llm.Client
-	streamChans     map[string]chan dtos.StreamResponse
-	streamHandler   StreamHandler
-	activeProcesses map[string]context.CancelFunc // key: streamID
-	processesMu     sync.RWMutex
-	crypto          *utils.AESGCMCrypto
-	redisRepo       redis.IRedisRepositories
+	chatRepo          repositories.ChatRepository
+	llmRepo           repositories.LLMMessageRepository
+	visualizationRepo repositories.IVisualizationRepository
+	dbManager         *dbmanager.Manager
+	llmClient         llm.Client
+	llmManager        *llm.Manager // Added to support multiple LLM providers
+	streamChans       map[string]chan dtos.StreamResponse
+	streamHandler     StreamHandler
+	activeProcesses   map[string]context.CancelFunc // key: streamID
+	processesMu       sync.RWMutex
+	crypto            *utils.AESGCMCrypto
+	redisRepo         redis.IRedisRepositories
 }
 
 func isValidDBType(dbType string) bool {
@@ -142,7 +153,9 @@ func NewChatService(
 	llmRepo repositories.LLMMessageRepository,
 	dbManager *dbmanager.Manager,
 	llmClient llm.Client,
+	llmManager *llm.Manager,
 	redisRepo redis.IRedisRepositories,
+	visualizationRepo repositories.IVisualizationRepository,
 ) ChatService {
 	// Initialize crypto instance
 	crypto, err := utils.NewFromConfig()
@@ -152,14 +165,16 @@ func NewChatService(
 	}
 
 	return &chatService{
-		chatRepo:        chatRepo,
-		llmRepo:         llmRepo,
-		dbManager:       dbManager,
-		llmClient:       llmClient,
-		streamChans:     make(map[string]chan dtos.StreamResponse),
-		activeProcesses: make(map[string]context.CancelFunc),
-		crypto:          crypto,
-		redisRepo:       redisRepo,
+		chatRepo:          chatRepo,
+		llmRepo:           llmRepo,
+		visualizationRepo: visualizationRepo,
+		dbManager:         dbManager,
+		llmClient:         llmClient,
+		llmManager:        llmManager,
+		streamChans:       make(map[string]chan dtos.StreamResponse),
+		activeProcesses:   make(map[string]context.CancelFunc),
+		crypto:            crypto,
+		redisRepo:         redisRepo,
 	}
 }
 
@@ -310,8 +325,11 @@ func (s *chatService) Create(userID string, req *dtos.CreateChatRequest) (*dtos.
 	if req.Settings.NonTechMode != nil {
 		settings.NonTechMode = *req.Settings.NonTechMode
 	}
-	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
-		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode)
+	if req.Settings.AutoGenerateVisualization != nil {
+		settings.AutoGenerateVisualization = *req.Settings.AutoGenerateVisualization
+	}
+	log.Printf("ChatService -> Create -> Creating chat with settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v, AutoGenerateVisualization=%v",
+		settings.AutoExecuteQuery, settings.ShareDataWithAI, settings.NonTechMode, settings.AutoGenerateVisualization)
 	// Create chat with connection
 	chat := models.NewChat(userObjID, connection, settings)
 	if err := s.chatRepo.Create(chat); err != nil {
@@ -563,6 +581,16 @@ func (s *chatService) Update(userID, chatID string, req *dtos.UpdateChatRequest)
 			log.Printf("ChatService -> Update -> NonTechMode: %v", *req.Settings.NonTechMode)
 			chat.Settings.NonTechMode = *req.Settings.NonTechMode
 		}
+		if req.Settings.AutoGenerateVisualization != nil {
+			log.Printf("ChatService -> Update -> AutoGenerateVisualization: %v", *req.Settings.AutoGenerateVisualization)
+			chat.Settings.AutoGenerateVisualization = *req.Settings.AutoGenerateVisualization
+		}
+	}
+
+	// Update preferred LLM model if provided
+	if req.PreferredLLMModel != nil {
+		log.Printf("ChatService -> Update -> PreferredLLMModel: %s", *req.PreferredLLMModel)
+		chat.PreferredLLMModel = req.PreferredLLMModel
 	}
 
 	// Update the chat
@@ -692,7 +720,7 @@ func (s *chatService) List(userID string, page, pageSize int) (*dtos.ChatListRes
 }
 
 // Create a new message
-func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string) (*dtos.MessageResponse, uint16, error) {
+func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string, llmModel string) (*dtos.MessageResponse, uint16, error) {
 	// Validate chat exists and user has access
 	chatObjID, err := primitive.ObjectIDFromHex(chatID)
 	if err != nil {
@@ -707,6 +735,11 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 	}
 
+	// Validate and use selected LLM model if provided
+	if llmModel != "" && !constants.IsValidModel(llmModel) {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid LLM model: %s", llmModel)
+	}
+
 	// Create and save the user message first
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
@@ -719,6 +752,9 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 		ChatID:  chatObjID,
 		Content: content,
 		Type:    string(constants.MessageTypeUser),
+	}
+	if llmModel != "" {
+		msg.LLMModel = &llmModel // Store the selected LLM model with the user message
 	}
 
 	if err := s.chatRepo.CreateMessage(msg); err != nil {
@@ -746,6 +782,67 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	}
 
 	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.Settings.AutoExecuteQuery)
+
+	// Check if schema is ready before processing LLM response
+	// If schema is not ready, return a system message asking user to refresh schema
+	// Updated IsSchemaReady now checks both in-memory cache AND Redis (works for all DB types)
+	if !s.dbManager.GetSchemaManager().IsSchemaReady(ctx, chatID) {
+		log.Printf("ChatService -> CreateMessage -> Schema not ready for chatID: %s, returning schema refresh message", chatID)
+
+		// Create a system message telling user to refresh schema
+		systemMsg := &models.Message{
+			Base:          models.NewBase(),
+			UserID:        userObjID,
+			ChatID:        chatObjID,
+			UserMessageId: &msg.ID,
+			Content:       "Your Knowledge Base requires to be refreshed for latest knowledge, please refresh it to get accurate insights & analytics and then send a new message.",
+			Type:          string(constants.MessageTypeAssistant),
+			ActionButtons: &[]models.ActionButton{
+				{
+					Label:     "Refresh Knowledge Base",
+					Action:    "refresh_schema",
+					IsPrimary: true,
+				},
+			},
+		}
+
+		// Ensure system message has a created_at that is ALWAYS after user message for correct ordering
+		// Add 2 second offset to guarantee system message appears after user message in sorted results
+		systemMsg.CreatedAt = msg.CreatedAt.Add(2 * time.Second)
+		systemMsg.UpdatedAt = systemMsg.CreatedAt
+
+		if err := s.chatRepo.CreateMessage(systemMsg); err != nil {
+			log.Printf("ChatService -> CreateMessage -> Error saving system message: %v", err)
+			// Still return success to user, but log the error
+		}
+
+		// Send system message via SSE after a 1-second delay to allow frontend to create temporary streaming message first
+		// This prevents race condition where system message arrives before temp message is created
+		go func() {
+			time.Sleep(1 * time.Second)
+			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+				Event: "system-message",
+				Data: map[string]interface{}{
+					"chat_id":        chatID,
+					"message_id":     systemMsg.ID.Hex(),
+					"content":        systemMsg.Content,
+					"type":           systemMsg.Type,
+					"action_buttons": dtos.ToActionButtonDto(systemMsg.ActionButtons),
+					"created_at":     systemMsg.CreatedAt.Format(time.RFC3339),
+				},
+			})
+		}()
+
+		// Return user message response (schema not ready yet)
+		return &dtos.MessageResponse{
+			ID:        msg.ID.Hex(),
+			ChatID:    chatID,
+			Content:   content,
+			Type:      string(constants.MessageTypeUser),
+			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
+		}, http.StatusOK, nil
+	}
+
 	// If auto execute query is true, we need to process LLM response & run query automatically
 	if chat.Settings.AutoExecuteQuery {
 		if err := s.processLLMResponseAndRunQuery(ctx, userID, chatID, msg.ID.Hex(), streamID); err != nil {
@@ -1413,7 +1510,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 			(*message.Queries)[i].Query = query
 			(*message.Queries)[i].IsEdited = true
 			if (*message.Queries)[i].Pagination != nil && (*message.Queries)[i].Pagination.PaginatedQuery != nil {
-				(*message.Queries)[i].Pagination.PaginatedQuery = utils.ToStringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
+				(*message.Queries)[i].Pagination.PaginatedQuery = utils.StringPtr(strings.Replace(*(*message.Queries)[i].Pagination.PaginatedQuery, originalQuery, query, 1))
 			}
 		}
 	}
@@ -1450,7 +1547,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					if qMap["pagination"] != nil {
 						if qMap["pagination"].(map[string]interface{})["paginated_query"] != nil {
 							currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
 						}
 					}
 					queriesVal[i] = qMap
@@ -1470,7 +1567,7 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 					qMap["is_executed"] = false
 					if qMap["pagination"] != nil {
 						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.ToStringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
+						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
 					}
 					queriesVal[i] = qMap
 					break
@@ -1656,8 +1753,8 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 	// Decrypt connection details for the response
 	utils.DecryptConnection(&connectionCopy)
 
-	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v",
-		chat.ID.Hex(), chat.Settings.NonTechMode)
+	log.Printf("ChatService -> buildChatResponse -> Building response for chat %s with NonTechMode=%v, PreferredLLMModel=%v",
+		chat.ID.Hex(), chat.Settings.NonTechMode, chat.PreferredLLMModel)
 
 	// Handle username for spreadsheet connections which might not have it
 	var username string
@@ -1688,10 +1785,12 @@ func (s *chatService) buildChatResponse(chat *models.Chat) *dtos.ChatResponse {
 		CreatedAt:           chat.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:           chat.UpdatedAt.Format(time.RFC3339),
 		Settings: dtos.ChatSettingsResponse{
-			AutoExecuteQuery: chat.Settings.AutoExecuteQuery,
-			ShareDataWithAI:  chat.Settings.ShareDataWithAI,
-			NonTechMode:      chat.Settings.NonTechMode,
+			AutoExecuteQuery:          chat.Settings.AutoExecuteQuery,
+			ShareDataWithAI:           chat.Settings.ShareDataWithAI,
+			NonTechMode:               chat.Settings.NonTechMode,
+			AutoGenerateVisualization: chat.Settings.AutoGenerateVisualization,
 		},
+		PreferredLLMModel: chat.PreferredLLMModel,
 	}
 }
 
@@ -1708,8 +1807,15 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		pinnedAt = &pinnedAtStr
 	}
 
-	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult)
+	queriesDto := dtos.ToQueryDtoWithDecryption(msg.Queries, s.decryptQueryResult, s.visualizationRepo, context.Background())
 	actionButtonsDto := dtos.ToActionButtonDto(msg.ActionButtons)
+
+	// Get the display name for the LLM model if available
+	var llmModelName *string
+	if msg.LLMModel != nil {
+		displayName := s.getModelDisplayName(*msg.LLMModel)
+		llmModelName = &displayName
+	}
 
 	return &dtos.MessageResponse{
 		ID:            msg.ID.Hex(),
@@ -1723,6 +1829,8 @@ func (s *chatService) buildMessageResponse(msg *models.Message) *dtos.MessageRes
 		NonTechMode:   msg.NonTechMode,
 		IsPinned:      msg.IsPinned,
 		PinnedAt:      pinnedAt,
+		LLMModel:      msg.LLMModel,
+		LLMModelName:  llmModelName,
 		CreatedAt:     msg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     msg.UpdatedAt.Format(time.RFC3339),
 	}
@@ -1992,7 +2100,7 @@ func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID stri
 	if chat == nil {
 		return nil, http.StatusNotFound, fmt.Errorf("chat not found")
 	}
-	
+
 	// Verify ownership
 	if chat.UserID != userObjID {
 		return nil, http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
@@ -2018,4 +2126,25 @@ func (s *chatService) GetImportMetadata(ctx context.Context, userID, chatID stri
 	}
 
 	return metadata, http.StatusOK, nil
+}
+
+// getModelDisplayName returns the human-readable display name for a model ID
+// by looking it up in the SupportedLLMModels constant
+func (s *chatService) getModelDisplayName(modelID string) string {
+	// Search for the model in the supported models list
+	for _, model := range constants.SupportedLLMModels {
+		if model.ID == modelID {
+			return model.DisplayName
+		}
+	}
+
+	// Fallback: convert kebab-case to Title Case if model not found
+	// e.g., "gpt-4o" -> "Gpt 4o"
+	words := strings.Split(modelID, "-")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(string(word[0])) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }

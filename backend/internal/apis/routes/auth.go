@@ -22,6 +22,8 @@ func SetupAuthRoutes(router *gin.Engine) {
 		auth.POST("/generate-signup-secret", authHandler.GenerateUserSignupSecret)
 		auth.POST("/forgot-password", authHandler.ForgotPassword)
 		auth.POST("/reset-password", authHandler.ResetPassword)
+		auth.POST("/validate-signup-secret", authHandler.ValidateSignupSecret)
+		auth.POST("/google/callback", authHandler.GoogleOAuthCallback)
 	}
 
 	protected := router.Group("/api/auth")

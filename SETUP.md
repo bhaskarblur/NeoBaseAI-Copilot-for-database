@@ -54,10 +54,115 @@ NeoBase requires the following services to function properly:
 
 ### Supported LLM Clients
 
-- OpenAI (Any chat completion model)
-- Google Gemini (Any chat completion model)
-- Anthropic Claude (Planned)
-- Ollama (Planned)
+- **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and legacy models
+- **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
+- **Anthropic Claude** (10 models) - Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
+- **Ollama** (30+ models) - Self-hosted open-source: DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, Gemma, Phi, and more
+
+#### Dynamic Model Selection
+
+NeoBase supports **dynamic LLM model selection** - you can choose a different AI model for each message without restarting the application. The system automatically:
+- Filters available models based on configured API keys
+- Displays model capabilities (token limits, descriptions)
+- Allows per-message model selection via dropdown
+- Persists model choice in chat history
+- Routes each model to its correct provider (OpenAI, Gemini, Claude, or Ollama)
+
+#### Enabling/Disabling AI Providers
+
+NeoBase uses a **simple configuration-based approach** to enable or disable AI providers. Each provider is controlled by a single environment variable:
+
+**How it works:**
+1. **Set the environment variable** = Provider and all its models are enabled
+2. **Leave it empty or unset** = Provider and all its models are disabled
+3. **No code changes needed** - Just update your `.env` file
+
+**Environment Variables:**
+- `OPENAI_API_KEY` - Enables all 14 OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+- `GEMINI_API_KEY` - Enables all 7 Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+- `CLAUDE_API_KEY` - Enables all 10 Claude models (Opus 4.5, Sonnet 4, etc.)
+- `OLLAMA_BASE_URL` - Enables all 30+ Ollama models (default: http://localhost:11434)
+- `DEFAULT_LLM_MODEL` - Default model ID (optional, auto-selects if not set)
+
+**Requirements:**
+- At least one API key/URL is required for the application to function
+- You can enable multiple providers simultaneously (mix cloud and self-hosted)
+- Models appear in the UI only when their provider is configured
+
+**Examples:**
+```bash
+# Enable only OpenAI
+OPENAI_API_KEY=sk-proj-abc123...
+
+# Enable OpenAI + Claude (hybrid cloud)
+OPENAI_API_KEY=sk-proj-abc123...
+CLAUDE_API_KEY=sk-ant-xyz789...
+
+# Enable Ollama only (self-hosted, privacy-focused)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Enable all providers (maximum flexibility)
+OPENAI_API_KEY=sk-proj-abc123...
+GEMINI_API_KEY=AIza...
+CLAUDE_API_KEY=sk-ant-xyz789...
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+#### Disabling Individual Models (Code Level)
+
+If you want to disable specific models while keeping their provider enabled, edit `/backend/internal/constants/supported_models.go`:
+
+**How to disable a model:**
+1. Open `backend/internal/constants/supported_models.go`
+2. Find the model in the `SupportedLLMModels` array
+3. Change `IsEnabled: true` to `IsEnabled: false`
+4. Restart the backend
+
+**Example - Disable GPT-4o:**
+```go
+{
+    ID:                  "gpt-4o",
+    Provider:            OpenAI,
+    DisplayName:         "GPT-4o (Omni)",
+    IsEnabled:           false,  // Changed from true to false
+    MaxCompletionTokens: 16384,
+    Temperature:         1,
+    InputTokenLimit:     128000,
+    Description:         "Multimodal model for text and vision tasks",
+}
+```
+
+**Example - Disable all Ollama vision models:**
+```go
+// Disable LLaVA
+{
+    ID:                  "llava:latest",
+    IsEnabled:           false,  // Disabled
+    // ... rest of config
+}
+
+// Disable Llama 3.2 Vision
+{
+    ID:                  "llama3.2-vision:11b",
+    IsEnabled:           false,  // Disabled
+    // ... rest of config
+}
+```
+
+**When to use this:**
+- Restrict expensive models in production
+- Remove legacy/deprecated models
+- Limit model selection for specific use cases
+- Reduce UI clutter by hiding unused models
+
+**Note:** This requires code changes and backend restart. For enabling/disabling entire providers, use environment variables instead.
+
+**Enterprise & Self-Hosted Options:**
+- Use Claude Opus 4.5 - the world's best model for coding, agents, and computer use
+- Claude with your enterprise Anthropic license for advanced coding and reasoning
+- Self-host models with Ollama for complete data privacy and cost control
+- Mix cloud and self-hosted models based on your security and performance needs
+- Choose from 63 total models across 4 providers for maximum flexibility
 
 ## Setup Options
 
@@ -85,6 +190,8 @@ You can set up NeoBase in several ways:
    - `VITE_FRONTEND_BASE_URL` - Client URL with / (e.g., http://localhost:5173/)
    - `VITE_API_URL` - Backend URL with /api (e.g., http://localhost:3000/api)
    - `VITE_ENVIRONMENT` - DEVELOPMENT or PRODUCTION
+   - `VITE_GOOGLE_CLIENT_ID` - Google OAuth client ID (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+   - `VITE_GOOGLE_REDIRECT_URI` - Google OAuth redirect URI (must match Google Cloud Console, e.g., http://localhost:5173/auth/google/callback)
 
 4. Install dependencies:
 
@@ -118,6 +225,12 @@ You can set up NeoBase in several ways:
    ```
 3. Edit the `.env` file with your configuration (see `.env.example` for details)
 
+   **Important LLM Configuration:**
+   - `OPENAI_API_KEY` - Your OpenAI API key (enables 15 models)
+   - `GEMINI_API_KEY` - Your Google Gemini API key (enables 7 models)
+   - `DEFAULT_LLM_MODEL` - Default model ID (optional, automatically selects based on available keys)
+   - At least one API key is required for the application to function
+
    **Important Spreadsheet & Google Sheets Configuration:**
    - `SPREADSHEET_POSTGRES_HOST` - PostgreSQL host for spreadsheet data storage
    - `SPREADSHEET_POSTGRES_PORT` - PostgreSQL port (default: 5432)
@@ -126,9 +239,11 @@ You can set up NeoBase in several ways:
    - `SPREADSHEET_POSTGRES_PASSWORD` - PostgreSQL password
    - `SPREADSHEET_POSTGRES_SSL_MODE` - SSL mode (disable, require, verify-ca, verify-full)
    - `SPREADSHEET_DATA_ENCRYPTION_KEY` - 32-byte key for AES-GCM encryption of spreadsheet data
-   - `GOOGLE_CLIENT_ID` - Google OAuth client ID for Google Sheets integration
-   - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret for Google Sheets integration  
-   - `GOOGLE_REDIRECT_URL` - Google OAuth redirect URL (e.g., http://localhost:5173/auth/google/callback)
+
+   **Important Google OAuth Configuration (used for both authentication and Google Sheets integration):**
+   - `GOOGLE_CLIENT_ID` - Google OAuth client ID (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+   - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+   - `GOOGLE_REDIRECT_URL` - Google OAuth redirect URL (must match Google Cloud Console, e.g., http://localhost:5173/auth/google/callback)
 
 4. Install dependencies:
 
@@ -210,6 +325,88 @@ GOOGLE_REDIRECT_URL=http://localhost:5173/auth/google/callback
 4. Click "Connect" to initiate OAuth flow
 5. Authorize NeoBase to access your Google Sheets
 6. Enter the Google Sheets URL you want to connect to
+
+## Google OAuth Authentication Setup
+
+NeoBase supports Google OAuth2 authentication for user login and signup. This uses the same Google OAuth credentials configured for Google Sheets integration.
+
+### Prerequisites
+
+You need Google OAuth credentials set up. Follow the [Creating Google OAuth Credentials](#creating-google-oauth-credentials) section in the Google Sheets Integration Setup above to obtain your credentials.
+
+### Frontend Configuration
+
+Add these environment variables to your client `.env` file:
+
+```bash
+# Google OAuth Configuration for Authentication
+VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+VITE_GOOGLE_REDIRECT_URI=http://localhost:5173/auth/google/callback
+```
+
+**Important Notes**:
+- `VITE_GOOGLE_CLIENT_ID` must match the client ID from Google Cloud Console
+- `VITE_GOOGLE_REDIRECT_URI` must exactly match the redirect URI configured in Google Cloud Console
+- Update these to your production domain when deploying
+
+### Backend Configuration
+
+The backend uses the same Google OAuth credentials as Google Sheets (see [Google Sheets Integration Setup](#google-sheets-integration-setup)):
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URL=http://localhost:5173/auth/google/callback
+```
+
+### Authentication Flow
+
+**Signup with Google** (in Production):
+1. User clicks "Continue with Google" on signup form
+2. System shows signup secret input field
+3. User enters valid signup secret and validates it
+4. User is redirected to Google OAuth consent screen
+5. After authorization, account is created with Google credentials
+6. User receives welcome email and is logged in
+
+**Signup with Google** (in Development):
+1. User clicks "Continue with Google" on signup form
+2. User is immediately redirected to Google OAuth consent screen (no secret required)
+3. After authorization, account is created
+4. User receives welcome email and is logged in
+
+**Login with Google**:
+1. User clicks "Continue with Google" on login form
+2. User is redirected to Google OAuth consent screen
+3. After authorization, user is logged in to their existing account
+4. If email matches an email-password account, error is shown (cannot mix auth types)
+
+### Key Features
+
+- **Dual-Purpose OAuth**: Same Google credentials for authentication and Sheets integration
+- **Signup Secret Validation**: Production requires valid signup secret for new Google users (for security)
+- **Email Conflict Prevention**: Email-password users cannot login with Google (proper error message)
+- **Automatic Username Generation**: Creates unique usernames from Google profile data
+- **JWT Session Management**: Same token system as email-password authentication
+- **Welcome Email**: Sent automatically on successful signup
+- **Development Mode**: No signup secret required in development environment
+
+### Troubleshooting
+
+**"Invalid signup secret" error**:
+- Ensure you're using a valid signup secret generated by the admin
+- In production, secrets are validated against the backend
+- In development mode, signup secret is not required
+
+**"This email is already associated with email-password auth" error**:
+- The email you're trying to use with Google OAuth is already registered with password authentication
+- Use a different email or login with your password instead
+- This is intentional for security - you cannot mix authentication types
+
+**"Redirect URI mismatch" error from Google**:
+- Verify `VITE_GOOGLE_REDIRECT_URI` matches exactly what's configured in Google Cloud Console
+- Include the protocol (http:// or https://)
+- Update both frontend and Google Cloud Console for production domains
 
 ## Docker Compose Setup
 
@@ -294,8 +491,16 @@ For production deployment on a server:
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
-   - Add your OpenAI or Gemini API key
-   - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
+   - **Add at least one LLM API key:**
+     - `OPENAI_API_KEY` - For OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+     - `GEMINI_API_KEY` - For Google Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+   - Optionally set `DEFAULT_LLM_MODEL` to your preferred default model ID
+   - **Configure Google OAuth credentials** (for both authentication and Google Sheets integration):
+     - `GOOGLE_CLIENT_ID` - Google OAuth client ID (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+     - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+     - `GOOGLE_REDIRECT_URL` - Google OAuth redirect URL (must be your production domain, e.g., https://yourdomain.com/auth/google/callback)
+     - `VITE_GOOGLE_CLIENT_ID` - Frontend Google OAuth client ID (same as backend GOOGLE_CLIENT_ID)
+     - `VITE_GOOGLE_REDIRECT_URI` - Frontend Google OAuth redirect URI (must match GOOGLE_REDIRECT_URL)
 
 4. Create the network (first time only):
 
@@ -336,8 +541,16 @@ Just follow these steps:
    - Configure your front end hosted url/domain in `CORS_ALLOWED_ORIGIN` and `VITE_FRONTEND_BASE_URL`
    - Optionally configure `LANDING_PAGE_CORS_ALLOWED_ORIGIN` if you have a separate landing page domain
    - Set secure passwords for MongoDB and Redis
-   - Add your OpenAI or Gemini API key
-   - Configure Google OAuth credentials if you want Google Sheets integration (see [Google Sheets Setup](#google-sheets-integration-setup))
+   - **Add at least one LLM API key:**
+     - `OPENAI_API_KEY` - For OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+     - `GEMINI_API_KEY` - For Google Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
+   - Optionally set `DEFAULT_LLM_MODEL` to your preferred default model ID
+   - **Configure Google OAuth credentials** (for both authentication and Google Sheets integration):
+     - `GOOGLE_CLIENT_ID` - Google OAuth client ID (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+     - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret (see [Creating Google OAuth Credentials](#creating-google-oauth-credentials))
+     - `GOOGLE_REDIRECT_URL` - Google OAuth redirect URL (must be your production domain, e.g., https://yourdomain.com/auth/google/callback)
+     - `VITE_GOOGLE_CLIENT_ID` - Frontend Google OAuth client ID (same as backend GOOGLE_CLIENT_ID)
+     - `VITE_GOOGLE_REDIRECT_URI` - Frontend Google OAuth redirect URI (must match GOOGLE_REDIRECT_URL)
 
 1. Switch to the "Domains" tab and add two domains. E.g. to use the same host for backend and client:
 

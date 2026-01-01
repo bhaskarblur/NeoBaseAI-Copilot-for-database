@@ -5,9 +5,9 @@ Thank you to all the people who have contributed to NeoBase!
 ## Core Team
 
 Add core team members here with their GitHub profiles and roles -->
-- [Bhaskar Kaura](https://github.com/bhaskarblur) - Founder & Developer
-- [Ankit Srivastava](https://github.com/ankit-apk) - Founder & Developer
-- [Denis Perov](https://github.com/imajus) - Contributor
+- [Bhaskar Kaura](https://github.com/bhaskarblur) - Founder & Maintainer
+- [Ankit Srivastava](https://github.com/ankit-apk) - Founder & Maintainer
+- [Denis Perov](https://github.com/imajus) - Early Contributor
 
 
 ## Contributors
@@ -15,6 +15,10 @@ Add core team members here with their GitHub profiles and roles -->
 <a href="https://github.com/bhaskarblur/neobase-ai-dba/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=bhaskarblur/neobase-ai-dba" />
 </a>
+
+## Join Our Community
+
+Connect with us on [Discord](https://discord.gg/VT9NRub86D) to discuss NeoBase, share ideas, ask questions, and collaborate with the community!
 
 ## How to Contribute
 

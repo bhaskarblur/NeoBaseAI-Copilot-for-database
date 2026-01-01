@@ -10,6 +10,8 @@ import {
   MoreVertical,
   PanelLeft,
   PanelLeftClose,
+  PanelRight,
+  PanelRightClose,
   Pencil,
   Plus,
   Trash2,
@@ -655,13 +657,13 @@ export default function Sidebar({
 
         <button
           onClick={handleToggleExpand}
-          className="absolute top-1/2 -translate-y-1/2 -right-4 p-2 bg-white hover:bg-neo-gray rounded-lg transition-colors border-2 border-black"
+          className={`absolute top-1/2 -translate-y-1/2 ${!isExpanded ? '-right-6 md:-right-5' : '-right-5'} p-2 bg-white hover:bg-neo-gray rounded-lg transition-colors border-2 border-black`}
           title={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
         >
           {isExpanded ? (
             <PanelLeftClose className="w-5 h-5" />
           ) : (
-            <PanelLeft className="w-5 h-5" />
+            <PanelRightClose className="w-5 h-5" />
           )}
         </button>
       </div>
@@ -706,8 +708,8 @@ export default function Sidebar({
         <div 
           className="fixed w-48 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100] connection-dropdown-menu"
           style={{
-            top: `${menuPosition.top}px`,
-            left: `${menuPosition.left}px`,
+            top: `${menuPosition.top + (window.innerWidth < 768 ? 48 : 0)}px`,
+            left: `${menuPosition.left - (window.innerWidth < 768 ? 110 : 0)}px`,
             transform: 'none'
           }}
           onClick={(e) => e.stopPropagation()}
@@ -721,7 +723,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
             >
               <Link className="w-4 h-4 mr-2 text-black" />
               Copy Link
@@ -736,7 +738,7 @@ export default function Sidebar({
                 setOpenConnectionMenu(null);
                 setMenuPosition(null);
               }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
             >
               <Pencil className="w-4 h-4 mr-2 text-black" />
               Edit Connection

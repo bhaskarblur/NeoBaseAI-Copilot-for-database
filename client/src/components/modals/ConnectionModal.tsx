@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Chat, ChatSettings, Connection, TableInfo, FileUpload } from '../../types/chat';
+import { Chat, ChatSettings, Connection, TableInfo, FileUpload, SSHAuthMethod } from '../../types/chat';
 import chatService from '../../services/chatService';
 import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab, GoogleSheetsTab } from './components';
 import ConfirmationModal from './ConfirmationModal';
@@ -100,8 +100,11 @@ export default function ConnectionModal({
     ssh_host: initialData?.connection.ssh_host || '',
     ssh_port: initialData?.connection.ssh_port || '22',
     ssh_username: initialData?.connection.ssh_username || '',
+    ssh_auth_method: initialData?.connection.ssh_auth_method || SSHAuthMethod.PublicKey,
     ssh_private_key: initialData?.connection.ssh_private_key || '',
+    ssh_private_key_url: initialData?.connection.ssh_private_key_url || '',
     ssh_passphrase: initialData?.connection.ssh_passphrase || '',
+    ssh_password: initialData?.connection.ssh_password || '',
     is_example_db: false,
     // Google Sheets specific fields
     google_sheet_id: initialData?.connection.google_sheet_id || '',
@@ -126,6 +129,11 @@ export default function ConnectionModal({
   const [nonTechMode, setNonTechMode] = useState<boolean>(
     initialData?.settings.non_tech_mode !== undefined 
       ? initialData.settings.non_tech_mode 
+      : false
+  );
+  const [autoGenerateVisualization, setAutoGenerateVisualization] = useState<boolean>(
+    initialData?.settings.auto_generate_visualization !== undefined 
+      ? initialData.settings.auto_generate_visualization 
       : false
   );
   // Refs for MongoDB URI inputs
@@ -372,8 +380,8 @@ export default function ConnectionModal({
         }
         break;
       case 'ssh_private_key':
-        if (value.ssh_enabled && !value.ssh_private_key?.trim()) {
-          return 'SSH Private Key is required';
+        if (value.ssh_enabled && value.ssh_auth_method === SSHAuthMethod.PublicKey && !value.ssh_private_key?.trim()) {
+          return 'SSH Private Key is required for public key authentication';
         }
         break;
       default:
@@ -403,7 +411,8 @@ export default function ConnectionModal({
       const result = await onEdit(undefined, {
         auto_execute_query: autoExecuteQuery,
         share_data_with_ai: shareWithAI,
-        non_tech_mode: nonTechMode
+        non_tech_mode: nonTechMode,
+        auto_generate_visualization: autoGenerateVisualization
       });
       
       if (result?.success) {
@@ -412,6 +421,7 @@ export default function ConnectionModal({
           setAutoExecuteQuery(result.updatedChat.settings.auto_execute_query);
           setShareWithAI(result.updatedChat.settings.share_data_with_ai);
           setNonTechMode(result.updatedChat.settings.non_tech_mode);
+          setAutoGenerateVisualization(result.updatedChat.settings.auto_generate_visualization);
           setCurrentChatData(result.updatedChat);
         }
         
@@ -487,7 +497,7 @@ export default function ConnectionModal({
         return;
       }
     } else {
-      // Always validate these fields for database connections
+      // Always validate these fields for database connections (both basic and SSH)
       ['host', 'port', 'database', 'username'].forEach(field => {
         const error = validateField(field, updatedFormData);
         if (error) {
@@ -513,13 +523,25 @@ export default function ConnectionModal({
 
     // Validate SSH fields if SSH tab is active
     if (connectionType === 'ssh') {
-      ['ssh_host', 'ssh_port', 'ssh_username', 'ssh_private_key'].forEach(field => {
+      // Always validate these SSH fields
+      ['ssh_host', 'ssh_port', 'ssh_username'].forEach(field => {
         const error = validateField(field, updatedFormData);
         if (error) {
           newErrors[field as keyof FormErrors] = error;
           hasErrors = true;
         }
       });
+      
+      // Validate auth method specific fields
+      if (updatedFormData.ssh_auth_method === SSHAuthMethod.PublicKey) {
+        // For public key auth, validate private key field
+        const error = validateField('ssh_private_key', updatedFormData);
+        if (error) {
+          newErrors.ssh_private_key = error;
+          hasErrors = true;
+        }
+      }
+      // For password auth, no additional validation needed - password is optional and can be set in the tab
     }
 
     setErrors(newErrors);
@@ -591,7 +613,7 @@ export default function ConnectionModal({
             }
           }
           
-          setSuccessMessage("Files uploaded successfully. Loading data structure...");
+          setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
           
           // Wait a bit for the backend to process the files
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -643,7 +665,8 @@ export default function ConnectionModal({
         const result = await onEdit?.(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
           share_data_with_ai: shareWithAI,
-          non_tech_mode: nonTechMode 
+          non_tech_mode: nonTechMode,
+          auto_generate_visualization: autoGenerateVisualization
         });
         console.log("edit result in connection modal", result);
         if (result?.success) {
@@ -706,7 +729,7 @@ export default function ConnectionModal({
                 }
               }
               
-              setSuccessMessage("Files uploaded successfully. Loading data structure...");
+              setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
               
               // Clear the uploaded files from the state
               setFileUploads([]);
@@ -764,7 +787,8 @@ export default function ConnectionModal({
         const result = await onSubmit(updatedFormData, { 
           auto_execute_query: autoExecuteQuery, 
           share_data_with_ai: shareWithAI,
-          non_tech_mode: nonTechMode 
+          non_tech_mode: nonTechMode,
+          auto_generate_visualization: autoGenerateVisualization
         });
         console.log("submit result in connection modal", result);
         if (result?.success) {
@@ -841,7 +865,7 @@ export default function ConnectionModal({
                     }
                   }
                   
-                  setSuccessMessage("Files uploaded successfully. Loading data structure...");
+                  setSuccessMessage("Files uploaded successfully. Loading Knowledge Base Tables...");
                 } else if (updatedFormData.type === 'google_sheets') {
                   setSuccessMessage("Syncing Google Sheets data...");
                 }
@@ -890,7 +914,7 @@ export default function ConnectionModal({
               
               console.log('Connection created. Now you can select tables to include in your schema.');
               setSuccessMessage(updatedFormData.type === 'spreadsheet' 
-                ? "Files uploaded successfully. Review your data structure."
+                ? "Files uploaded successfully. Review your Knowledge Base Tables."
                 : "Connection created successfully. Select tables to include in your schema.");
             } catch (error: any) {
               console.error('Failed to load tables for new connection:', error);
@@ -1084,7 +1108,7 @@ DATABASE_PASSWORD=`; // Mask password
     
     // For spreadsheet/Google Sheets connections, just close the modal since data is already saved
     if (formData.type === 'spreadsheet' || formData.type === 'google_sheets') {
-      setSuccessMessage("Data structure saved successfully");
+      setSuccessMessage("Knowledge Base saved successfully");
       // Give the success message time to show before closing
       setTimeout(() => {
         onClose(currentChatData);
@@ -1115,7 +1139,7 @@ DATABASE_PASSWORD=`; // Mask password
         await onUpdateSelectedCollections(chatId, formattedSelection);
         
         // Show success message - will auto-dismiss after 3 seconds
-        setSuccessMessage("Schema selection updated successfully");
+        setSuccessMessage("Knowledge Base Tables updated successfully");
         
         // If this is a new connection (no initialData), close the modal after updating schema
         if (!initialData && showingNewlyCreatedSchema) {
@@ -1241,7 +1265,6 @@ DATABASE_PASSWORD=`; // Mask password
                 formData={formData}
                 handleChange={handleChange}
                 isEditMode={!!initialData}
-                chatId={initialData?.id || newChatId}
                 onRefreshData={() => setShowRefreshSchema(true)}
                 onGoogleAuthChange={(authData) => {
                   setFormData(prev => ({ 
@@ -1317,9 +1340,11 @@ DATABASE_PASSWORD=`; // Mask password
             autoExecuteQuery={autoExecuteQuery}
             shareWithAI={shareWithAI}
             nonTechMode={nonTechMode}
+            autoGenerateVisualization={autoGenerateVisualization}
             setAutoExecuteQuery={setAutoExecuteQuery}
             setShareWithAI={setShareWithAI}
             setNonTechMode={setNonTechMode}
+            setAutoGenerateVisualization={setAutoGenerateVisualization}
           />
         );
       default:
@@ -1377,7 +1402,7 @@ DATABASE_PASSWORD=`; // Mask password
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Data Structure' : 'Schema'}</span>
+                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Knowledge Base' : 'Knowledge Base'}</span>
               </div>
             </button>
           )}
@@ -1458,14 +1483,14 @@ DATABASE_PASSWORD=`; // Mask password
                 <span>
                   {!initialData 
                     ? (showingNewlyCreatedSchema && activeTab === 'schema') 
-                      ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Save Structure' : 'Save Schema') 
+                      ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Save Knowledge' : 'Save Knowledge') 
                       : (showingNewlyCreatedSchema && activeTab === 'connection' && formData.type === 'spreadsheet')
                         ? 'Upload Files'
                         : 'Create' 
                     : activeTab === 'settings' 
                       ? 'Update Settings' 
                       : activeTab === 'schema' 
-                        ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Update Structure' : 'Update Schema') 
+                        ? ((formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Update Knowledge' : 'Update Knowledge') 
                         : (showingNewlyCreatedSchema && formData.type === 'spreadsheet' && fileUploads.length > 0)
                           ? 'Upload Files'
                           : 'Update Connection'}
@@ -1491,7 +1516,7 @@ DATABASE_PASSWORD=`; // Mask password
       <ConfirmationModal
         icon={<RefreshCcw className="w-6 h-6 text-black" />}
         themeColor="black"
-        title="Refresh Knowledge/Data"
+        title="Refresh Knowledge Base"
         buttonText="Refresh"
         message="This action will refetch the data from Google Sheets and update the knowledge base. This may take a few minutes depending on the size of the sheet."
         onConfirm={handleRefreshSchema}

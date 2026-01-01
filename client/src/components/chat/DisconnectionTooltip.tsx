@@ -55,7 +55,7 @@ export default function DisconnectionTooltip({ isVisible, onClose }: Disconnecti
                         You're Disconnected
                     </p>
                     <p className="text-sm text-gray-600 mt-1">
-                        Click the reconnect button above to reconnect to the database.
+                        Click the reconnect button above to reconnect to the data source.
                     </p>
                 </div>
                 

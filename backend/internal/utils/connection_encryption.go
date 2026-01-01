@@ -109,6 +109,39 @@ func EncryptConnection(conn *models.Connection) error {
 		}
 	}
 
+	// Encrypt SSH authentication fields if present
+	if conn.SSHPrivateKey != nil {
+		if encryptedKey, err := encrypt(*conn.SSHPrivateKey, key); err == nil {
+			*conn.SSHPrivateKey = encryptedKey
+		} else {
+			return fmt.Errorf("failed to encrypt SSH private key: %v", err)
+		}
+	}
+
+	if conn.SSHPassword != nil {
+		if encryptedPassword, err := encrypt(*conn.SSHPassword, key); err == nil {
+			*conn.SSHPassword = encryptedPassword
+		} else {
+			return fmt.Errorf("failed to encrypt SSH password: %v", err)
+		}
+	}
+
+	if conn.SSHPassphrase != nil {
+		if encryptedPassphrase, err := encrypt(*conn.SSHPassphrase, key); err == nil {
+			*conn.SSHPassphrase = encryptedPassphrase
+		} else {
+			return fmt.Errorf("failed to encrypt SSH passphrase: %v", err)
+		}
+	}
+
+	if conn.SSHPrivateKeyURL != nil {
+		if encryptedURL, err := encrypt(*conn.SSHPrivateKeyURL, key); err == nil {
+			*conn.SSHPrivateKeyURL = encryptedURL
+		} else {
+			return fmt.Errorf("failed to encrypt SSH private key URL: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -206,6 +239,39 @@ func DecryptConnection(conn *models.Connection) {
 			*conn.GoogleRefreshToken = decryptedToken
 		} else {
 			log.Printf("Warning: Failed to decrypt Google refresh token, using as-is: %v", err)
+		}
+	}
+
+	// Decrypt SSH authentication fields if present
+	if conn.SSHPrivateKey != nil {
+		if decryptedKey, err := decrypt(*conn.SSHPrivateKey, key); err == nil {
+			*conn.SSHPrivateKey = decryptedKey
+		} else {
+			log.Printf("Warning: Failed to decrypt SSH private key, using as-is: %v", err)
+		}
+	}
+
+	if conn.SSHPassword != nil {
+		if decryptedPassword, err := decrypt(*conn.SSHPassword, key); err == nil {
+			*conn.SSHPassword = decryptedPassword
+		} else {
+			log.Printf("Warning: Failed to decrypt SSH password, using as-is: %v", err)
+		}
+	}
+
+	if conn.SSHPassphrase != nil {
+		if decryptedPassphrase, err := decrypt(*conn.SSHPassphrase, key); err == nil {
+			*conn.SSHPassphrase = decryptedPassphrase
+		} else {
+			log.Printf("Warning: Failed to decrypt SSH passphrase, using as-is: %v", err)
+		}
+	}
+
+	if conn.SSHPrivateKeyURL != nil {
+		if decryptedURL, err := decrypt(*conn.SSHPrivateKeyURL, key); err == nil {
+			*conn.SSHPrivateKeyURL = decryptedURL
+		} else {
+			log.Printf("Warning: Failed to decrypt SSH private key URL, using as-is: %v", err)
 		}
 	}
 }

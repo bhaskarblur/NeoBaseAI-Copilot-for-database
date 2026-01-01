@@ -311,7 +311,7 @@ func (h *ChatHandler) CreateMessage(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 
-	response, statusCode, err := h.chatService.CreateMessage(c.Request.Context(), userID, chatID, req.StreamID, req.Content)
+	response, statusCode, err := h.chatService.CreateMessage(c.Request.Context(), userID, chatID, req.StreamID, req.Content, req.LLMModel)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{

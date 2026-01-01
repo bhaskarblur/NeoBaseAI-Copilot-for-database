@@ -35,21 +35,21 @@ func GenerateConfigKey(config map[string]interface{}) string {
 			typeStr = t
 		}
 	}
-	
+
 	hostStr := ""
 	if config["host"] != nil {
 		if h, ok := config["host"].(string); ok {
 			hostStr = h
 		}
 	}
-	
+
 	databaseStr := ""
 	if config["database"] != nil {
 		if d, ok := config["database"].(string); ok {
 			databaseStr = d
 		}
 	}
-	
+
 	// Create a unique key based on connection details
 	key := fmt.Sprintf("%s:%s:%s:%s:%s",
 		typeStr,
@@ -99,6 +99,9 @@ func FetchCertificateFromURL(url string) (string, error) {
 
 // PrepareCertificatesFromURLs fetches certificates from URLs and returns their local paths
 func PrepareCertificatesFromURLs(sslCertURL, sslKeyURL, sslRootCertURL string) (certPath, keyPath, rootCertPath string, tempFiles []string, err error) {
+	// Initialize tempFiles slice
+	tempFiles = []string{}
+
 	// Fetch client certificate if URL provided
 	if sslCertURL != "" {
 		certPath, err = FetchCertificateFromURL(sslCertURL)

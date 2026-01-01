@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 import { Boxes } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
@@ -54,6 +54,7 @@ function AppContent() {
   const [isSelectingConnection, setIsSelectingConnection] = useState(false);
   const [recoRefreshToken, setRecoRefreshToken] = useState(0);
   // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
+  const streamingMessageTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
 
   
   // Debug useEffect for isSSEReconnecting state changes
@@ -192,29 +193,27 @@ function AppContent() {
   const handleLogin = async (data: LoginFormData) => {
     try {
       const response = await authService.login(data);
-      if (response.success) {
-        const userData = {
-          id: response.data.user.id,
-          username: response.data.user.username,
-          created_at: response.data.user.created_at
-        };
-        
-        setUser(userData);
-        setIsAuthenticated(true);
-        setSuccessMessage(`Welcome back, ${userData.username}!`);
-        
-        // Track login in analytics
-        try {
-          analyticsService.trackLogin(userData.id, userData.username);
-          analyticsService.identifyUser(
-            userData.id,
-            userData.username,
-            userData.created_at
-          );
-          console.log('Login tracked in analytics');
-        } catch (error) {
-          console.error('Failed to track login in analytics:', error);
-        }
+      const userData = {
+        id: response.user.id,
+        username: response.user.username,
+        created_at: response.user.created_at
+      };
+      
+      setUser(userData);
+      setIsAuthenticated(true);
+      setSuccessMessage(`Welcome back, ${userData.username}!`);
+      
+      // Track login in analytics
+      try {
+        analyticsService.trackLogin(userData.id, userData.username);
+        analyticsService.identifyUser(
+          userData.id,
+          userData.username,
+          userData.created_at
+        );
+        console.log('Login tracked in analytics');
+      } catch (error) {
+        console.error('Failed to track login in analytics:', error);
       }
     } catch (error: any) {
       console.error("Login error:", error);
@@ -228,9 +227,9 @@ function AppContent() {
       console.log("handleSignup response", response);
       
       const userData = {
-        id: response.data.user.id,
-        username: response.data.user.username,
-        created_at: response.data.user.created_at
+        id: response.user.id,
+        username: response.user.username,
+        created_at: response.user.created_at
       };
       
       setIsAuthenticated(true);
@@ -422,7 +421,7 @@ function AppContent() {
             handleConnectionStatusChange(id, true, 'edit-connection');
           } catch (error) {
             console.error('Error during reconnection:', error);
-            toast.error('Failed to reconnect to database. Please try reconnecting manually.', {
+            toast.error('Failed to reconnect to data source. Please try reconnecting manually.', {
               style: {
                 background: '#000',
                 color: '#fff',
@@ -433,7 +432,7 @@ function AppContent() {
           }
         } else if (credentialsChanged) {
           // If credentials changed but no streamId, show a notification
-          toast.error('Connection details updated. Please reconnect to the database.', {
+          toast.error('Connection details updated. Please reconnect to the data source.', {
             style: {
               background: '#000',
               color: '#fff',
@@ -487,12 +486,16 @@ function AppContent() {
     // Prevent multiple simultaneous selections
     if (isSelectingConnection) {
       console.log('Already selecting a connection, skipping...');
-      return;
+      // return;
     }
     
     console.log('handleSelectConnection happened in app.tsx', { id });
+    if (id === selectedConnection?.id) {
+      console.log('This connection already selected, skipping...');
+      return;
+    }
     const currentConnection = selectedConnection;
-    const connection = chats.find(c => c.id === id);
+    let connection = chats.find(c => c.id === id);
     if (connection) {
       console.log('connection found', { connection });
       
@@ -501,6 +504,15 @@ function AppContent() {
       // Clear messages immediately when switching chats
       if (currentConnection?.id !== connection.id) {
         setMessages([]);
+      }
+      
+      // Fetch full chat details to include preferred_llm_model
+      try {
+        connection = await chatService.getChat(id);
+        console.log('Fetched full chat details with preferred_llm_model:', connection.preferred_llm_model);
+      } catch (error) {
+        console.error('Failed to fetch full chat details, using cached version:', error);
+        // Fall back to cached chat from chats array
       }
       
       // Set the connection immediately for smooth transition
@@ -870,12 +882,13 @@ function AppContent() {
     console.log('new stream id', streamId);
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, llmModel?: string) => {
     if (!selectedConnection?.id || !streamId || isMessageSending) return;
 
     try {
       setIsMessageSending(true);
       console.log('handleSendMessage -> content', content);
+      console.log('handleSendMessage -> llmModel', llmModel);
       console.log('handleSendMessage -> streamId', streamId);
 
       // Check if the eventSource is open
@@ -891,7 +904,7 @@ function AppContent() {
 
       // Wait for 100 ms for the eventSource to be open
       await new Promise(resolve => setTimeout(resolve, 100));
-      const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content);
+      const response = await chatService.sendMessage(selectedConnection.id, 'temp', streamId, content, llmModel);
 
       // Update the chat updated_at field of the selected connection
       if (selectedConnection) {
@@ -929,6 +942,49 @@ function AppContent() {
         // Add temp message to the end
         setMessages(prev => [...prev, tempMsg]);
         setTemporaryMessage(tempMsg);
+
+        // Set a 10-second timeout for streaming message response
+        // This handles cases where backend stream is not found or no steps are received
+        if (streamId) {
+          if (streamingMessageTimeouts.current[streamId]) {
+            clearTimeout(streamingMessageTimeouts.current[streamId]);
+          }
+          streamingMessageTimeouts.current[streamId] = setTimeout(() => {
+            console.log('handleSendMessage -> timeout triggered for streamId:', streamId);
+            setMessages(prev => {
+              const streamingMsg = prev.find(msg => msg.is_streaming);
+              if (!streamingMsg) return prev;
+              
+              // Check if step count is less than 2 (only initial step - means no updates received)
+              const stepCount = streamingMsg.loading_steps?.length || 0;
+              if (stepCount < 2) {
+                console.log('handleSendMessage -> timeout: no steps received, creating timeout response');
+                
+                // Create timeout response message
+                const timeoutMsg: Message = {
+                  ...streamingMsg,
+                  is_streaming: false,
+                  is_loading: false,
+                  loading_steps: [],
+                  content: 'There seems to be a timeout in processing your message, please try again.',
+                  type: 'assistant',
+                  action_buttons: [{
+                    id: 'try-again-btn',
+                    label: 'Try Again',
+                    action: 'try_again',
+                    isPrimary: true
+                  }]
+                };
+                
+                return prev.map(msg => 
+                  msg.id === streamingMsg.id ? timeoutMsg : msg
+                );
+              }
+              return prev;
+            });
+            setTemporaryMessage(null);
+          }, 10000); // 10 second timeout
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -963,14 +1019,50 @@ function AppContent() {
               handleConnectionStatusChange(selectedConnection.id, false, 'app-sse-connection');
             }
             break;
+          case 'system-message':
+            console.log('system-message -> response', response);
+            // Handle system messages (like schema refresh required)
+            if (response.data) {
+              const systemMsg: Message = {
+                id: response.data.message_id,
+                type: 'assistant', // Set type as assistant so it updates streaming message
+                content: response.data.content,
+                action_buttons: response.data.action_buttons || [],
+                queries: [],
+                is_loading: false,
+                loading_steps: [],
+                is_streaming: false,
+                created_at: response.data.created_at || new Date().toISOString()
+              };
+              
+              // Add system message to the messages list (will replace streaming message)
+              setMessages(prev => {
+                // Remove any temporary/streaming messages first
+                const withoutTemp = prev.filter(msg => !msg.is_streaming);
+                return [...withoutTemp, systemMsg];
+              });
+              
+              // Clear temporary message state
+              setTemporaryMessage(null);
+            }
+            break;
           case 'ai-response-step':
             // Set default of 500 ms delay for first step
             await new Promise(resolve => setTimeout(resolve, 500));
 
+            // Clear timeout on first step received - stream is working
+            if (streamId && streamingMessageTimeouts.current[streamId]) {
+              clearTimeout(streamingMessageTimeouts.current[streamId]);
+              delete streamingMessageTimeouts.current[streamId];
+              console.log('ai-response-step -> timeout cleared, stream is responding');
+            }
+
             if (!temporaryMessage ) {
                 console.log('ai-response-step -> creating new temp message');
+                // Note: timeout is now set in handleSendMessage when temp message is created
             } else {
                 console.log('ai-response-step -> updating existing temp message');
+                
                 // Update the existing message with new step
                 setMessages(prev => {
                   // Find the most recent streaming message
@@ -1045,7 +1137,9 @@ function AppContent() {
                         user_message_id: response.data.user_message_id,
                         updated_at: new Date().toISOString(),
                         action_at: response.data.action_at,
-                        non_tech_mode: response.data.non_tech_mode
+                        non_tech_mode: response.data.non_tech_mode,
+                        llm_model: response.data.llm_model, // Store the LLM model ID
+                        llm_model_name: response.data.llm_model_name // Store the LLM model display name
                       };
                     }
                     return msg;
@@ -1092,7 +1186,9 @@ function AppContent() {
                   created_at: new Date().toISOString(),
                   user_message_id: response.data.user_message_id,
                   action_at: response.data.action_at,
-                  non_tech_mode: response.data.non_tech_mode
+                  non_tech_mode: response.data.non_tech_mode,
+                  llm_model: response.data.llm_model, // Store the LLM model ID
+                  llm_model_name: response.data.llm_model_name // Store the LLM model display name
                 };
 
                 // Add the new message to the array
@@ -1138,14 +1234,22 @@ function AppContent() {
             // Show error message instead of temporary message
             setMessages(prev => {
               const withoutTemp = prev.filter(msg => !msg.is_streaming);
+              // Extract error data and LLM model info
+              const errorData = typeof response.data === 'object' ? response.data : { error: response.data };
+              const errorMessage = errorData.error || response.data;
+              const llmModel = errorData.llm_model;
+              const llmModelName = errorData.llm_model_name;
+              
               return [{
                 id: `error-${Date.now()}`,
                 type: 'assistant',
-                content: `${typeof response.data === 'object' ? response.data.error : response.data}`, // Handle both string and object errors
+                content: `${errorMessage}`,
                 queries: [],
                 is_loading: false,
                 loading_steps: [],
                 is_streaming: false,
+                llm_model: llmModel,
+                llm_model_name: llmModelName,
                 created_at: new Date().toISOString()
               }, ...withoutTemp];
             });
@@ -1290,6 +1394,49 @@ function AppContent() {
           };
           setMessages(prev => [...prev, tempMsg]);
           setTemporaryMessage(tempMsg);
+
+          // Set a 10-second timeout for streaming message response
+          // This handles cases where backend stream is not found or no steps are received
+          if (streamId) {
+            if (streamingMessageTimeouts.current[streamId]) {
+              clearTimeout(streamingMessageTimeouts.current[streamId]);
+            }
+            streamingMessageTimeouts.current[streamId] = setTimeout(() => {
+              console.log('handleEditMessage -> timeout triggered for streamId:', streamId);
+              setMessages(prev => {
+                const streamingMsg = prev.find(msg => msg.is_streaming);
+                if (!streamingMsg) return prev;
+                
+                // Check if step count is less than 2 (only initial step - means no updates received)
+                const stepCount = streamingMsg.loading_steps?.length || 0;
+                if (stepCount < 2) {
+                  console.log('handleEditMessage -> timeout: no steps received, creating timeout response');
+                  
+                  // Create timeout response message
+                  const timeoutMsg: Message = {
+                    ...streamingMsg,
+                    is_streaming: false,
+                    is_loading: false,
+                    loading_steps: [],
+                    content: 'There was a timeout in processing your message, please try again.',
+                    type: 'assistant',
+                    action_buttons: [{
+                      id: 'try-again-btn',
+                      label: 'Try Again',
+                      action: 'try_again',
+                      isPrimary: true
+                    }]
+                  };
+                  
+                  return prev.map(msg => 
+                    msg.id === streamingMsg.id ? timeoutMsg : msg
+                  );
+                }
+                return prev;
+              });
+              setTemporaryMessage(null);
+            }, 10000); // 10 second timeout
+          }
         }
       }
     } catch (error) {
@@ -1431,7 +1578,7 @@ function AppContent() {
   return (
     <div className="flex flex-col md:flex-row bg-[#FFDB58]/10 min-h-screen">
       {/* Mobile header with StarUsButton */}
-      <div className="fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-between px-4">
+      <div className={`${!isSidebarExpanded && selectedConnection ? 'hidden' : 'fixed'} md:fixed top-0 left-0 right-0 h-16 bg-white border-b-4 border-black md:hidden z-50 flex items-center justify-between px-4`}>
         <div className="flex items-center gap-2">
           <Boxes className="w-8 h-8" />
           <h1 className="text-2xl font-bold">NeoBase</h1>

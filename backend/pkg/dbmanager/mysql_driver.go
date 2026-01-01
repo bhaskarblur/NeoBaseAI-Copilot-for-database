@@ -33,17 +33,71 @@ func NewMySQLDriver() DatabaseDriver {
 func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var dsn string
 	var tempFiles []string
+	var sshTunnel *SSHTunnel
+	var connectHost string
+
+	// Establish SSH tunnel if configured
+	if config.SSHEnabled && config.SSHHost != nil && config.SSHPort != nil && config.SSHUsername != nil {
+		log.Printf("MySQLDriver -> Connect -> Establishing SSH tunnel for MySQL connection")
+
+		// Determine SSH auth method
+		authMethod := SSHAuthMethodPublicKey // Default
+		if config.SSHAuthMethod != nil {
+			authMethod = ToSSHAuthMethod(*config.SSHAuthMethod)
+		}
+
+		var tunnel *SSHTunnel
+		var err error
+
+		if authMethod == SSHAuthMethodPassword && config.SSHPassword != nil {
+			// Use password-based authentication
+			tunnel, err = CreateSSHTunnelWithPassword(*config.SSHHost, *config.SSHPort, *config.SSHUsername, *config.SSHPassword)
+		} else {
+			// Use public key authentication
+			privateKey := ""
+			if config.SSHPrivateKey != nil {
+				privateKey = *config.SSHPrivateKey
+			} else if config.SSHPrivateKeyURL != nil {
+				// Load private key from URL
+				var err error
+				privateKey, err = LoadPrivateKeyFromURL(*config.SSHPrivateKeyURL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load SSH private key from URL: %v", err)
+				}
+			}
+
+			if privateKey == "" {
+				return nil, fmt.Errorf("SSH private key is required for public key authentication")
+			}
+
+			tunnel, err = CreateSSHTunnel(*config.SSHHost, *config.SSHPort, *config.SSHUsername, privateKey, getValue(config.SSHPassphrase))
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH tunnel: %v", err)
+		}
+
+		sshTunnel = tunnel
+		connectHost = "localhost" // When using SSH tunnel, connect through localhost
+		defer func() {
+			if err != nil {
+				sshTunnel.Close()
+			}
+		}()
+	} else {
+		connectHost = config.Host
+	}
 
 	// Base connection parameters
 	if config.Password != nil {
 		dsn = fmt.Sprintf(
 			"%s:%s@tcp(%s:%s)/%s",
-			*config.Username, *config.Password, config.Host, *config.Port, config.Database,
+			*config.Username, *config.Password, connectHost, *config.Port, config.Database,
 		)
 	} else {
 		dsn = fmt.Sprintf(
 			"%s@tcp(%s:%s)/%s",
-			*config.Username, config.Host, *config.Port, config.Database,
+			*config.Username, connectHost, *config.Port, config.Database,
 		)
 	}
 
@@ -101,6 +155,9 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 					for _, file := range tempFiles {
 						os.Remove(file)
 					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
+					}
 					return nil, fmt.Errorf("failed to load client certificates: %v", err)
 				}
 				tlsConfig.Certificates = []tls.Certificate{cert}
@@ -115,12 +172,18 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 					for _, file := range tempFiles {
 						os.Remove(file)
 					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
+					}
 					return nil, fmt.Errorf("failed to read CA certificate: %v", err)
 				}
 				if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
 					// Clean up temporary files
 					for _, file := range tempFiles {
 						os.Remove(file)
+					}
+					if sshTunnel != nil {
+						sshTunnel.Close()
 					}
 					return nil, fmt.Errorf("failed to append CA certificate")
 				}
@@ -141,6 +204,9 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		// Clean up temporary files
 		for _, file := range tempFiles {
 			os.Remove(file)
+		}
+		if sshTunnel != nil {
+			sshTunnel.Close()
 		}
 		return nil, err
 	}
@@ -190,6 +256,15 @@ func (d *MySQLDriver) Connect(config ConnectionConfig) (*Connection, error) {
 
 // Disconnect closes a MySQL database connection
 func (d *MySQLDriver) Disconnect(conn *Connection) error {
+	// Close SSH tunnel if present
+	if conn.SSHTunnel != nil {
+		if sshTunnel, ok := conn.SSHTunnel.(*SSHTunnel); ok {
+			if err := sshTunnel.Close(); err != nil {
+				log.Printf("MySQLDriver -> Disconnect -> Warning: Failed to close SSH tunnel: %v", err)
+			}
+		}
+	}
+
 	// Get the underlying SQL DB
 	sqlDB, err := conn.DB.DB()
 	if err != nil {
@@ -429,4 +504,3 @@ func (d *MySQLDriver) FetchExampleRecords(ctx context.Context, db DBExecutor, ta
 	// Get example records
 	return fetcher.FetchExampleRecords(ctx, db, table, limit)
 }
-

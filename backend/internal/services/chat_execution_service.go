@@ -83,6 +83,23 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	log.Printf("ChatService -> Execute -> Chat settings: AutoExecuteQuery=%v, ShareDataWithAI=%v, NonTechMode=%v",
 		chat.Settings.AutoExecuteQuery, chat.Settings.ShareDataWithAI, chat.Settings.NonTechMode)
 
+	// Get the user message to retrieve the selected LLM model
+	userMessage, err := s.chatRepo.FindMessageByID(userMessageObjID)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return nil, fmt.Errorf("failed to fetch user message: %v", err)
+	}
+
+	var selectedLLMModel string
+
+	// Initialize selectedLLMModel, will be finalized after fetching messages
+	// For new messages, use the model from the user message (if set)
+	if userMessage != nil && !userMessage.IsEdited && userMessage.LLMModel != nil && *userMessage.LLMModel != "" {
+		// New message: use the model from the user message
+		selectedLLMModel = *userMessage.LLMModel
+		log.Printf("processLLMResponse -> Selected LLM Model from user message: %s", selectedLLMModel)
+	}
+
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
@@ -90,10 +107,20 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		// Let's create a new connection
 		_, err := s.ConnectDB(ctx, userID, chatID, streamID)
 		if err != nil {
+			// Get model display name for error response
+			var llmModelName *string
+			if selectedLLMModel != "" {
+				displayName := s.getModelDisplayName(selectedLLMModel)
+				llmModelName = &displayName
+			}
 			// Send a error event to the client
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  "Error: " + err.Error(),
+				Data: map[string]interface{}{
+					"error":          "Error: " + err.Error(),
+					"llm_model":      selectedLLMModel,
+					"llm_model_name": llmModelName,
+				},
 			})
 			return nil, err
 		}
@@ -113,6 +140,85 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		filteredMessages = append(filteredMessages, msg)
 		if msg.MessageID == userMessageObjID {
 			break
+		}
+	}
+
+	// Now finalize model selection for edited messages
+	// Priority: 1) Chat's preferred model, 2) Last assistant message's model, 3) Default LLM model for the provider
+	if userMessage != nil && userMessage.IsEdited && selectedLLMModel == "" {
+		// Edited message: Priority 1) Chat's preferred model, 2) Last assistant message's model, 3) Default LLM model for the provider
+
+		// Priority 1: Check chat's preferred model first
+		if chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+			selectedLLMModel = *chat.PreferredLLMModel
+			log.Printf("processLLMResponse -> Edited message: Using chat's preferred model: %s", selectedLLMModel)
+		} else {
+			// Priority 2: Check last assistant message's model
+			lastAssistantModel := ""
+			if len(filteredMessages) > 0 {
+				// Find the last assistant message (looking backwards from the end)
+				for i := len(filteredMessages) - 1; i >= 0; i-- {
+					if filteredMessages[i].Role == string(constants.MessageTypeAssistant) {
+						if filteredMessages[i].Content != nil {
+							// Content is already map[string]interface{}
+							if modelID, exists := filteredMessages[i].Content["llm_model_id"]; exists && modelID != "" {
+								lastAssistantModel = modelID.(string)
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if lastAssistantModel != "" {
+				// Validate that the last assistant model is still enabled and valid
+				if constants.IsValidModel(lastAssistantModel) {
+					selectedLLMModel = lastAssistantModel
+					log.Printf("processLLMResponse -> Edited message: Using last assistant message's model: %s", selectedLLMModel)
+				} else {
+					log.Printf("processLLMResponse -> Last assistant model %s is no longer available, falling back to provider default", lastAssistantModel)
+				}
+			}
+
+			// If last assistant model is not available, try provider defaults
+			if selectedLLMModel == "" {
+				// Priority 3: Get default LLM model for the provider (in provider priority order)
+				// Try providers in order: OpenAI -> Gemini -> Claude -> Ollama
+				providers := []string{constants.OpenAI, constants.Gemini, constants.Claude, constants.Ollama}
+				for _, provider := range providers {
+					if defaultModel := constants.GetDefaultModelForProvider(provider); defaultModel != nil && defaultModel.IsEnabled {
+						selectedLLMModel = defaultModel.ID
+						log.Printf("processLLMResponse -> Edited message: Using default model for provider: %s (%s)", selectedLLMModel, defaultModel.Provider)
+						break
+					}
+				}
+			}
+		}
+
+		// Update the user message with the selected model
+		if userMessage.LLMModel == nil || *userMessage.LLMModel != selectedLLMModel {
+			userMessage.LLMModel = &selectedLLMModel
+			userMessageID := userMessage.ID
+			if err := s.chatRepo.UpdateMessage(userMessageID, userMessage); err != nil {
+				log.Printf("Warning: Failed to update user message with new model: %v", err)
+			}
+		}
+	}
+
+	// Handle fallback if still no model selected
+	if selectedLLMModel == "" {
+		// Use default LLM model for the provider (in provider priority order)
+		// Try providers in order: OpenAI -> Gemini -> Claude -> Ollama
+		providers := []string{constants.OpenAI, constants.Gemini, constants.Claude, constants.Ollama}
+		for _, provider := range providers {
+			if defaultModel := constants.GetDefaultModelForProvider(provider); defaultModel != nil && defaultModel.IsEnabled {
+				// Validate that the model is properly configured
+				if constants.IsValidModel(defaultModel.ID) {
+					selectedLLMModel = defaultModel.ID
+					log.Printf("processLLMResponse -> No model selected, using default model for provider: %s (%s)", selectedLLMModel, defaultModel.Provider)
+					break
+				}
+			}
 		}
 	}
 
@@ -153,13 +259,38 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		return nil, fmt.Errorf("operation cancelled")
 	}
 
+	// Get the correct LLM client based on the selected model's provider
+	llmClient := s.llmClient
+	if s.llmManager != nil && selectedLLMModel != "" {
+		selectedModel := constants.GetLLMModel(selectedLLMModel)
+		if selectedModel != nil {
+			providerClient, err := s.llmManager.GetClient(selectedModel.Provider)
+			if err != nil {
+				log.Printf("Warning: Failed to get LLM client for provider '%s': %v, will use default client", selectedModel.Provider, err)
+			} else {
+				llmClient = providerClient
+				log.Printf("processLLMResponse -> Using LLM client for provider: %s", selectedModel.Provider)
+			}
+		}
+	}
+
 	// Generate LLM response
-	response, err := s.llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode)
+	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
 	if err != nil {
 		if !synchronous || allowSSEUpdates {
+			// Get model display name for error response
+			var llmModelName *string
+			if selectedLLMModel != "" {
+				displayName := s.getModelDisplayName(selectedLLMModel)
+				llmModelName = &displayName
+			}
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
-				Data:  map[string]string{"error": "Error: " + err.Error()},
+				Data: map[string]interface{}{
+					"error":          "Error: " + err.Error(),
+					"llm_model":      selectedLLMModel,
+					"llm_model_name": llmModelName,
+				},
 			})
 		}
 		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
@@ -181,9 +312,19 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	var jsonResponse map[string]interface{}
 	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		// Get model display name for error response
+		var llmModelName *string
+		if selectedLLMModel != "" {
+			displayName := s.getModelDisplayName(selectedLLMModel)
+			llmModelName = &displayName
+		}
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response-error",
-			Data:  map[string]string{"error": "Error: " + err.Error()},
+			Data: map[string]interface{}{
+				"error":          "Error: " + err.Error(),
+				"llm_model":      selectedLLMModel,
+				"llm_model_name": llmModelName,
+			},
 		})
 	}
 
@@ -195,11 +336,16 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			log.Printf("processLLMResponse -> queryMap: %v", queryMap)
 			if queryMap["exampleResult"] != nil {
 				log.Printf("processLLMResponse -> queryMap[\"exampleResult\"]: %v", queryMap["exampleResult"])
-				result, _ := json.Marshal(queryMap["exampleResult"].([]interface{}))
-				resultStr := string(result)
+				// Use pooled buffer instead of allocating new one
+				buf := utils.GetJSONBuffer()
+				encoder := json.NewEncoder(buf)
+				encoder.SetEscapeHTML(false)
+				_ = encoder.Encode(queryMap["exampleResult"].([]interface{}))
+				resultStr := buf.String()
+				utils.PutJSONBuffer(buf)
 				// Encrypt the example result before storage
 				encryptedResult := s.encryptQueryResult(resultStr)
-				exampleResult = utils.ToStringPtr(encryptedResult)
+				exampleResult = utils.StringPtr(encryptedResult)
 				log.Printf("processLLMResponse -> saving exampleResult (encrypted): %v", *exampleResult)
 			} else {
 				exampleResult = nil
@@ -208,7 +354,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 			var rollbackDependentQuery *string
 			if queryMap["rollbackDependentQuery"] != nil {
-				rollbackDependentQuery = utils.ToStringPtr(queryMap["rollbackDependentQuery"].(string))
+				rollbackDependentQuery = utils.StringPtr(queryMap["rollbackDependentQuery"].(string))
 			} else {
 				rollbackDependentQuery = nil
 			}
@@ -239,30 +385,30 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			pagination := &models.Pagination{}
 			if queryMap["pagination"] != nil {
 				if queryMap["pagination"].(map[string]interface{})["paginatedQuery"] != nil {
-					pagination.PaginatedQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
+					pagination.PaginatedQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
 					log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
 				}
 				if queryMap["pagination"].(map[string]interface{})["countQuery"] != nil {
-					pagination.CountQuery = utils.ToStringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
+					pagination.CountQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
 					log.Printf("processLLMResponse -> pagination.CountQuery: %v", *pagination.CountQuery)
 				}
 			}
 			var tables *string
 			if queryMap["tables"] != nil {
-				tables = utils.ToStringPtr(queryMap["tables"].(string))
+				tables = utils.StringPtr(queryMap["tables"].(string))
 			}
 
 			if queryMap["collections"] != nil {
-				tables = utils.ToStringPtr(queryMap["collections"].(string))
+				tables = utils.StringPtr(queryMap["collections"].(string))
 			}
 			var queryType *string
 			if queryMap["queryType"] != nil {
-				queryType = utils.ToStringPtr(queryMap["queryType"].(string))
+				queryType = utils.StringPtr(queryMap["queryType"].(string))
 			}
 
 			var rollbackQuery *string
 			if queryMap["rollbackQuery"] != nil {
-				rollbackQuery = utils.ToStringPtr(queryMap["rollbackQuery"].(string))
+				rollbackQuery = utils.StringPtr(queryMap["rollbackQuery"].(string))
 			}
 
 			// Create the query object
@@ -303,11 +449,15 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 				// Store metadata as JSON if we have any
 				if len(metadata) > 0 {
-					metadataJSON, err := json.Marshal(metadata)
-					if err == nil {
-						metadataStr := string(metadataJSON)
-						query.Metadata = &metadataStr
+					// Use pooled buffer for JSON encoding
+					buf := utils.GetJSONBuffer()
+					encoder := json.NewEncoder(buf)
+					encoder.SetEscapeHTML(false)
+					if err := encoder.Encode(metadata); err == nil {
+						metadataStr := buf.String()
+						query.Metadata = utils.StringPtr(metadataStr)
 					}
+					utils.PutJSONBuffer(buf)
 				}
 			}
 
@@ -376,6 +526,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		existingMessage.Queries = queriesPtr // Now correctly typed as *[]models.Query
 		existingMessage.ActionButtons = actionButtonsPtr
 		existingMessage.IsEdited = true
+		if selectedLLMModel != "" {
+			existingMessage.LLMModel = &selectedLLMModel // Update with the LLM model used
+		}
 
 		// Update the message in the database
 		if err := s.chatRepo.UpdateMessage(existingMessage.ID, existingMessage); err != nil {
@@ -402,16 +555,23 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 		if !synchronous {
 			// Send final response
+			var llmModelName *string
+			if existingMessage.LLMModel != nil {
+				displayName := s.getModelDisplayName(*existingMessage.LLMModel)
+				llmModelName = &displayName
+			}
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response",
 				Data: &dtos.MessageResponse{
 					ID:            existingMessage.ID.Hex(),
 					ChatID:        existingMessage.ChatID.Hex(),
 					Content:       existingMessage.Content,
-					UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
+					UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
+					Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 					ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 					Type:          existingMessage.Type,
+					LLMModel:      existingMessage.LLMModel,
+					LLMModelName:  llmModelName,
 					CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 					UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
 					IsEdited:      existingMessage.IsEdited,
@@ -419,14 +579,23 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			})
 		}
 
+		// Compute LLM model name for the synchronous response
+		var llmModelNameForResponse *string
+		if existingMessage.LLMModel != nil {
+			displayName := s.getModelDisplayName(*existingMessage.LLMModel)
+			llmModelNameForResponse = &displayName
+		}
+
 		return &dtos.MessageResponse{
 			ID:            existingMessage.ID.Hex(),
 			ChatID:        existingMessage.ChatID.Hex(),
 			Content:       existingMessage.Content,
-			UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult),
+			UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
+			Queries:       dtos.ToQueryDtoWithDecryption(existingMessage.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 			ActionButtons: dtos.ToActionButtonDto(existingMessage.ActionButtons),
 			Type:          existingMessage.Type,
+			LLMModel:      existingMessage.LLMModel,
+			LLMModelName:  llmModelNameForResponse,
 			NonTechMode:   existingMessage.NonTechMode,
 			CreatedAt:     existingMessage.CreatedAt.Format(time.RFC3339),
 			UpdatedAt:     existingMessage.UpdatedAt.Format(time.RFC3339),
@@ -449,6 +618,9 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		IsEdited:      false,
 		UserMessageId: &userMessageObjID,         // Set the user message ID that this AI message is responding to
 		NonTechMode:   chat.Settings.NonTechMode, // Store the non-tech mode setting with the message
+	}
+	if selectedLLMModel != "" {
+		chatResponseMsg.LLMModel = &selectedLLMModel // Store which LLM model was used to generate this message
 	}
 
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
@@ -474,30 +646,44 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	if !synchronous {
 		// Send final response
+		var llmModelName *string
+		if chatResponseMsg.LLMModel != nil {
+			displayName := s.getModelDisplayName(*chatResponseMsg.LLMModel)
+			llmModelName = &displayName
+		}
 		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 			Event: "ai-response",
 			Data: &dtos.MessageResponse{
 				ID:            chatResponseMsg.ID.Hex(),
 				ChatID:        chatResponseMsg.ChatID.Hex(),
 				Content:       chatResponseMsg.Content,
-				UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
+				UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
+				Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 				ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 				Type:          chatResponseMsg.Type,
+				LLMModel:      chatResponseMsg.LLMModel,
+				LLMModelName:  llmModelName,
 				NonTechMode:   chatResponseMsg.NonTechMode,
 				CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
 			},
 		})
 	}
+	var llmModelName *string
+	if chatResponseMsg.LLMModel != nil {
+		displayName := s.getModelDisplayName(*chatResponseMsg.LLMModel)
+		llmModelName = &displayName
+	}
 	return &dtos.MessageResponse{
 		ID:            chatResponseMsg.ID.Hex(),
 		ChatID:        chatResponseMsg.ChatID.Hex(),
 		Content:       chatResponseMsg.Content,
-		UserMessageID: utils.ToStringPtr(userMessageObjID.Hex()),
-		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult),
+		UserMessageID: utils.StringPtr(userMessageObjID.Hex()),
+		Queries:       dtos.ToQueryDtoWithDecryption(chatResponseMsg.Queries, s.decryptQueryResult, s.visualizationRepo, ctx),
 		ActionButtons: dtos.ToActionButtonDto(chatResponseMsg.ActionButtons),
 		Type:          chatResponseMsg.Type,
+		LLMModel:      chatResponseMsg.LLMModel,
+		LLMModelName:  llmModelName,
 		NonTechMode:   chatResponseMsg.NonTechMode,
 		CreatedAt:     chatResponseMsg.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:     chatResponseMsg.UpdatedAt.Format(time.RFC3339),
@@ -809,10 +995,13 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 						log.Printf("ChatService -> ExecuteQuery -> Trying direct approach for format: map[results:[map[count:92]]]")
 
 						// Convert to JSON and back to ensure proper type handling
-						jsonBytes, err := json.Marshal(resultsRaw)
+						buf := utils.GetJSONBuffer()
+						encoder := json.NewEncoder(buf)
+						encoder.SetEscapeHTML(false)
+						err := encoder.Encode(resultsRaw)
 						if err == nil {
 							var resultsArray []map[string]interface{}
-							if err := json.Unmarshal(jsonBytes, &resultsArray); err == nil && len(resultsArray) > 0 {
+							if err := json.Unmarshal(buf.Bytes(), &resultsArray); err == nil && len(resultsArray) > 0 {
 								if countVal, ok := resultsArray[0]["count"]; ok {
 									// Try to convert to int
 									switch v := countVal.(type) {
@@ -838,6 +1027,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								}
 							}
 						}
+						utils.PutJSONBuffer(buf) // Return buffer to pool
 					}
 				}
 			} // Close the resultMap check
@@ -900,7 +1090,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 							Message: queryErr.Message,
 							Details: queryErr.Details,
 						}
-						(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+						(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 						break
 					}
 				}
@@ -964,7 +1154,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"message": queryErr.Message,
 										"details": queryErr.Details,
 									}
-									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								}
 								queries[i] = queryMap
 							} else {
@@ -988,7 +1178,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 										"details": queryErr.Details,
 									}
 									queriesVal[i] = queryMap
-									queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								}
 							} else {
 								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
@@ -1030,12 +1220,15 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
 
 	// Convert Result to JSON string first
-	resultJSON, err := json.Marshal(result.Result)
-	if err != nil {
+	buf := utils.GetJSONBuffer()
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(result.Result); err != nil {
 		log.Printf("ChatService -> ExecuteQuery -> Error marshalling result: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal result: %v", err)
 	}
-	resultJSONStr := string(resultJSON)
+	resultJSON := buf.Bytes()
+	resultJSONStr := buf.String()
 	log.Printf("ChatService -> ExecuteQuery -> resultJSON: %+v", resultJSONStr)
 
 	var formattedResultJSON interface{}
@@ -1053,6 +1246,8 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		}
 	}
 
+	utils.PutJSONBuffer(buf) // Return buffer to pool
+
 	log.Printf("ChatService -> ExecuteQuery -> resultListFormatting: %+v", resultListFormatting)
 	log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
 	if len(resultListFormatting) > 0 {
@@ -1063,13 +1258,16 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			formattedResultJSON = resultListFormatting[:50] // Cap the result to 50 records
 
 			// Cap the result to 50 records
-			cappedResults, err := json.Marshal(resultListFormatting[:50])
-			if err != nil {
+			cappedBuf := utils.GetJSONBuffer()
+			encoder := json.NewEncoder(cappedBuf)
+			encoder.SetEscapeHTML(false)
+			if err := encoder.Encode(resultListFormatting[:50]); err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error marshaling capped results: %v", err)
 			} else {
-				resultJSONStr = string(cappedResults)
+				resultJSONStr = cappedBuf.String()
 				result.Result = resultListFormatting[:50]
 			}
+			utils.PutJSONBuffer(cappedBuf)
 		}
 	} else if resultMapFormatting != nil && resultMapFormatting["results"] != nil && len(resultMapFormatting["results"].([]interface{})) > 0 {
 		log.Printf("ChatService -> ExecuteQuery -> resultMapFormatting: %+v", resultMapFormatting)
@@ -1105,7 +1303,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	// Encrypt the execution result before storage
 	encryptedResult := s.encryptQueryResult(resultJSONStr)
 	query.ExecutionResult = &encryptedResult
-	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+	query.ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 	if totalRecordsCount != nil {
 		if query.Pagination == nil {
 			query.Pagination = &models.Pagination{}
@@ -1131,7 +1329,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 					(*msg.Queries)[i].IsRolledBack = false
 					(*msg.Queries)[i].IsExecuted = true
 					(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
-					(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+					(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 					if totalRecordsCount != nil {
 						if (*msg.Queries)[i].Pagination == nil {
 							(*msg.Queries)[i].Pagination = &models.Pagination{}
@@ -1212,7 +1410,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
 									// Get the encrypted result from the message and decrypt it for LLM
@@ -1226,8 +1424,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 									}
 									// Fallback: Convert current result to JSON if encrypted result not found
 									if resultForLLM == "" {
-										resultJSONBytes, _ := json.Marshal(result.Result)
-										resultForLLM = string(resultJSONBytes)
+										buf := utils.GetJSONBuffer()
+										encoder := json.NewEncoder(buf)
+										encoder.SetEscapeHTML(false)
+										_ = encoder.Encode(result.Result)
+										resultForLLM = buf.String()
+										utils.PutJSONBuffer(buf)
 									}
 									queryMap["executionResult"] = map[string]interface{}{
 										"result": resultForLLM,
@@ -1262,7 +1464,7 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 								queryMap["isExecuted"] = true
 								queryMap["isRolledBack"] = false
 								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 								// If share data with AI is true, then we need to share the result with AI
 								if chat.Settings.ShareDataWithAI {
 									// Get the encrypted result from the message and decrypt it for LLM
@@ -1276,8 +1478,12 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 									}
 									// Fallback: Convert current result to JSON if encrypted result not found
 									if resultForLLM == "" {
-										resultJSONBytes, _ := json.Marshal(result.Result)
-										resultForLLM = string(resultJSONBytes)
+										buf := utils.GetJSONBuffer()
+										encoder := json.NewEncoder(buf)
+										encoder.SetEscapeHTML(false)
+										_ = encoder.Encode(result.Result)
+										resultForLLM = buf.String()
+										utils.PutJSONBuffer(buf)
 									}
 									queryMap["executionResult"] = map[string]interface{}{
 										"result": resultForLLM,
@@ -1489,8 +1695,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		contextBuilder.WriteString(fmt.Sprintf("\nQuery id: %s\n", query.ID.Hex())) // This will help LLM to understand the context of the query to be rolled back
 		contextBuilder.WriteString(fmt.Sprintf("\nOriginal query: %s\n", query.Query))
 		// Convert Result to JSON string
-		dependentResultJSONBytes, _ := json.Marshal(dependentResult.Result)
-		dependentResultJSONStr := string(dependentResultJSONBytes)
+		buf := utils.GetJSONBuffer()
+		encoder := json.NewEncoder(buf)
+		encoder.SetEscapeHTML(false)
+		_ = encoder.Encode(dependentResult.Result)
+		dependentResultJSONStr := buf.String()
+		utils.PutJSONBuffer(buf)
 		contextBuilder.WriteString(fmt.Sprintf("Dependent query result: %s\n", dependentResultJSONStr))
 		contextBuilder.WriteString("\nPlease generate a rollback query that will undo the effects of the original query.")
 
@@ -1511,6 +1721,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			llmMessages,               // Pass the LLM messages array
 			conn.Config.Type,          // Pass the database type
 			chat.Settings.NonTechMode, // Pass the non-tech mode setting
+			query.LLMModel,            // Pass the selected LLM model
 		)
 		if err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate rollback query: %v", err)
@@ -1771,7 +1982,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	// We're using same execution time for the rollback as the original query
 	query.IsRolledBack = true
 	query.ExecutionTime = &result.ExecutionTime
-	query.ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+	query.ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 	if result.Error != nil {
 		query.Error = &models.QueryError{
 			Code:    result.Error.Code,
@@ -1790,12 +2001,16 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				(*msg.Queries)[i].IsExecuted = true
 				(*msg.Queries)[i].ExecutionTime = &result.ExecutionTime
 				// Convert Result to JSON string
-				resultJSONBytes, _ := json.Marshal(result.Result)
-				resultJSONStr := string(resultJSONBytes)
+				buf := utils.GetJSONBuffer()
+				encoder := json.NewEncoder(buf)
+				encoder.SetEscapeHTML(false)
+				_ = encoder.Encode(result.Result)
+				resultJSONStr := buf.String()
+				utils.PutJSONBuffer(buf)
 				// Encrypt the execution result before storage
 				encryptedResult := s.encryptQueryResult(resultJSONStr)
 				(*msg.Queries)[i].ExecutionResult = &encryptedResult
-				(*msg.Queries)[i].ActionAt = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+				(*msg.Queries)[i].ActionAt = utils.StringPtr(time.Now().Format(time.RFC3339))
 				if result.Error != nil {
 					(*msg.Queries)[i].Error = &models.QueryError{
 						Code:    result.Error.Code,
@@ -1846,7 +2061,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
 								// Get the encrypted result from the message and decrypt it for LLM
@@ -1860,8 +2075,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 								}
 								// Fallback: Convert current result to JSON if encrypted result not found
 								if resultForLLM == "" {
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultForLLM = string(resultJSONBytes)
+									buf := utils.GetJSONBuffer()
+									encoder := json.NewEncoder(buf)
+									encoder.SetEscapeHTML(false)
+									_ = encoder.Encode(result.Result)
+									resultForLLM = buf.String()
+									utils.PutJSONBuffer(buf)
 								}
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": resultForLLM,
@@ -1896,7 +2115,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 							queryMap["isExecuted"] = true
 							queryMap["isRolledBack"] = true
 							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.ToStringPtr(time.Now().Format(time.RFC3339))
+							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
 							// If share data with AI is true, then we need to share the result with AI
 							if chat.Settings.ShareDataWithAI {
 								// Get the encrypted result from the message and decrypt it for LLM
@@ -1910,8 +2129,12 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 								}
 								// Fallback: Convert current result to JSON if encrypted result not found
 								if resultForLLM == "" {
-									resultJSONBytes, _ := json.Marshal(result.Result)
-									resultForLLM = string(resultJSONBytes)
+									buf := utils.GetJSONBuffer()
+									encoder := json.NewEncoder(buf)
+									encoder.SetEscapeHTML(false)
+									_ = encoder.Encode(result.Result)
+									resultForLLM = buf.String()
+									utils.PutJSONBuffer(buf)
 								}
 								queryMap["executionResult"] = map[string]interface{}{
 									"result": resultForLLM,
@@ -2019,9 +2242,23 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("ProcessLLMResponseAndRunQuery -> recovered from panic: %v", r)
+				// Get LLM model info from the user message
+				var llmModel *string
+				var llmModelName *string
+				if userMsgObjID, err := primitive.ObjectIDFromHex(messageID); err == nil {
+					if userMsg, err := s.chatRepo.FindMessageByID(userMsgObjID); err == nil && userMsg != nil && userMsg.LLMModel != nil {
+						llmModel = userMsg.LLMModel
+						displayName := s.getModelDisplayName(*userMsg.LLMModel)
+						llmModelName = &displayName
+					}
+				}
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-error",
-					Data:  "Error: Failed to complete the request, seems like the database connection issue, try reconnecting the database.",
+					Data: map[string]interface{}{
+						"error":          "Error: Failed to complete the request, seems like the database connection issue, try reconnecting the database.",
+						"llm_model":      llmModel,
+						"llm_model_name": llmModelName,
+					},
 				})
 			}
 			log.Printf("ProcessLLMResponseAndRunQuery -> activeProcesses: %v", s.activeProcesses)
@@ -2029,6 +2266,18 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			delete(s.activeProcesses, streamID)
 			s.processesMu.Unlock()
 		}()
+
+		// Get chat settings for auto-visualization
+		chatObjID, chatErr := primitive.ObjectIDFromHex(chatID)
+		if chatErr != nil {
+			log.Printf("ProcessLLMResponseAndRunQuery -> Invalid chat ID: %v", chatErr)
+			return
+		}
+		chat, chatErr := s.chatRepo.FindByID(chatObjID)
+		if chatErr != nil {
+			log.Printf("ProcessLLMResponseAndRunQuery -> Error fetching chat: %v", chatErr)
+			return
+		}
 
 		msgResp, err := s.processLLMResponse(msgCtx, userID, chatID, messageID, streamID, true, true)
 		if err != nil {
@@ -2047,7 +2296,7 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 			if msgResp.Queries != nil {
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-step",
-					Data:  "Executing the needful operations now.",
+					Data:  "Combining & structuring the response",
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {
@@ -2096,6 +2345,89 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 						query.Error = executionResult.Error
 						if query.Pagination != nil && executionResult.TotalRecordsCount != nil {
 							query.Pagination.TotalRecordsCount = *executionResult.TotalRecordsCount
+						}
+
+						// AUTO-GENERATE VISUALIZATION if enabled and query succeeded
+						if chat.Settings.AutoGenerateVisualization && executionResult.Error == nil && executionResult.ExecutionResult != nil {
+							log.Printf("ProcessLLMResponseAndRunQuery -> Auto-generating visualization for query: %s", query.ID)
+
+							// Send SSE step update
+							s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+								Event: "ai-response-step",
+								Data:  "Generating visualization for the result",
+							})
+
+							// Generate visualization (synchronous to include in response)
+							vizCtx := context.Background()
+							// Use the same LLM model as the message
+							selectedModel := ""
+							if msgResp.LLMModel != nil {
+								selectedModel = *msgResp.LLMModel
+							}
+							visualization, vizErr := s.GenerateVisualizationForMessage(
+								vizCtx,
+								userID,
+								chatID,
+								msgResp.ID,
+								query.ID,
+								selectedModel,
+							)
+
+							if vizErr != nil {
+								log.Printf("ProcessLLMResponseAndRunQuery -> Error auto-generating visualization: %v", vizErr)
+							} else if visualization != nil {
+								log.Printf("ProcessLLMResponseAndRunQuery -> Auto-generated visualization: can_visualize=%v, visualization_id=%s", visualization.CanVisualize, visualization.VisualizationID)
+
+								// Construct VisualizationData for the response
+								vizData := &dtos.VisualizationData{
+									ID:           visualization.VisualizationID,
+									CanVisualize: visualization.CanVisualize,
+								}
+								if visualization.Reason != "" {
+									vizData.Reason = &visualization.Reason
+								}
+								if visualization.Error != "" {
+									vizData.Error = &visualization.Error
+								}
+								if visualization.ChartConfiguration != nil {
+									vizData.ChartType = &visualization.ChartConfiguration.ChartType
+									vizData.Title = &visualization.ChartConfiguration.Title
+									chartConfigJSON, _ := json.Marshal(visualization.ChartConfiguration)
+									var chartConfigMap map[string]interface{}
+									json.Unmarshal(chartConfigJSON, &chartConfigMap)
+									vizData.ChartConfiguration = chartConfigMap
+								}
+
+								// Update the query with visualization data for SSE response
+								query.Visualization = vizData
+
+								// Update the message in the database with the visualization ID on the query
+								// This ensures the visualization persists and is fetched in ListMessages API
+								if visualization.VisualizationID != "" {
+									msgObjID, _ := primitive.ObjectIDFromHex(msgResp.ID)
+									queryObjID, _ := primitive.ObjectIDFromHex(query.ID)
+									vizObjID, _ := primitive.ObjectIDFromHex(visualization.VisualizationID)
+
+									// Update the query in the message with visualization ID
+									updatedMsg, err := s.chatRepo.FindMessageByID(msgObjID)
+									if err == nil && updatedMsg != nil {
+										// Find and update the specific query in the message
+										for j, q := range *updatedMsg.Queries {
+											if q.ID == queryObjID {
+												(*updatedMsg.Queries)[j].VisualizationID = &vizObjID
+												// Save the updated message back to database
+												saveErr := s.chatRepo.UpdateMessage(msgObjID, updatedMsg)
+												if saveErr != nil {
+													log.Printf("ProcessLLMResponseAndRunQuery -> Error updating message with visualization ID: %v", saveErr)
+												} else {
+													log.Printf("ProcessLLMResponseAndRunQuery -> Query updated with visualization ID in database")
+												}
+												break
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 					tempQueries[i] = query
@@ -2179,9 +2511,24 @@ func (s *chatService) processMessage(_ context.Context, userID, chatID, messageI
 					}
 				}()
 
+				// Get LLM model info from the user message
+				var llmModel *string
+				var llmModelName *string
+				if userMsgObjID, msgErr := primitive.ObjectIDFromHex(messageID); msgErr == nil {
+					if userMsg, msgErr := s.chatRepo.FindMessageByID(userMsgObjID); msgErr == nil && userMsg != nil && userMsg.LLMModel != nil {
+						llmModel = userMsg.LLMModel
+						displayName := s.getModelDisplayName(*userMsg.LLMModel)
+						llmModelName = &displayName
+					}
+				}
+
 				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 					Event: "ai-response-error",
-					Data:  "Error: " + err.Error(),
+					Data: map[string]interface{}{
+						"error":          "Error: " + err.Error(),
+						"llm_model":      llmModel,
+						"llm_model_name": llmModelName,
+					},
 				})
 			}
 		}
@@ -2193,7 +2540,6 @@ func (s *chatService) processMessage(_ context.Context, userID, chatID, messageI
 // RefreshSchema refreshes the schema of the chat & stores the latest schema in the database
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error) {
 	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
-
 	// Increase the timeout for the initial context to 60 minutes
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
@@ -2202,11 +2548,16 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 	case <-ctx.Done():
 		return http.StatusOK, nil
 	default:
-		// Check if connection exists
+		// Check if connection exists, if not create one
 		_, exists := s.dbManager.GetConnectionInfo(chatID)
 		if !exists {
-			log.Printf("ChatService -> RefreshSchema -> Connection not found for chatID: %s", chatID)
-			return http.StatusNotFound, fmt.Errorf("connection not found")
+			log.Printf("ChatService -> RefreshSchema -> Connection not found for chatID: %s, attempting to create connection", chatID)
+			status, err := s.ConnectDB(ctx, userID, chatID, "") // Stream Id here is fine and can be empty, it won't affect anything in SSE communication
+			if err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Failed to create connection: %v", err)
+				return status, err
+			}
+			log.Printf("ChatService -> RefreshSchema -> Connection created successfully for chatID: %s", chatID)
 		}
 
 		// Get chat to get selected collections
@@ -2284,6 +2635,13 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
 			}
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+
+			// Clear cached recommendations since schema is being refreshed
+			if err := s.clearRecommendationsCache(context.Background(), chatID); err != nil {
+				log.Printf("ChatService -> RefreshSchema -> Warning: Failed to clear recommendations cache: %v", err)
+				// Don't return error as this is not critical to the operation
+			}
+
 			dataChan <- nil // Will be used to Synchronous refresh
 		}()
 
@@ -2328,8 +2686,13 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	}
 
 	// Convert Result to JSON string
-	resultJSONBytes, _ := json.Marshal(result.Result)
-	resultJSONStr := string(resultJSONBytes)
+	buf := utils.GetJSONBuffer()
+	encoder := json.NewEncoder(buf)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(result.Result)
+	resultJSONStr := buf.String()
+	resultJSONBytes := []byte(resultJSONStr)
+	utils.PutJSONBuffer(buf)
 
 	var formattedResultJSON interface{}
 	var resultListFormatting []interface{} = []interface{}{}
@@ -2570,11 +2933,85 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		llmMessages = []*models.LLMMessage{}
 	}
 
-	// Use the existing conversation context directly
-	contextMessages := llmMessages
+	// Condition 1: If LLM messages exist (including DB schema messages), use them as context
+	// Condition 2: If no messages exist, schema hasn't been loaded yet, skip generation
+	// Condition 3: Must have at least 1 system message (schema message) to ensure schema is present
+	if len(llmMessages) == 0 {
+		log.Printf("ChatService -> GetQueryRecommendations -> No LLM messages found (schema not ready), skipping recommendation generation")
+		return &dtos.QueryRecommendationsResponse{
+			Recommendations: []dtos.QueryRecommendation{},
+		}, http.StatusOK, nil
+	}
 
-	// Generate recommendations using LLM
-	response, err := s.llmClient.GenerateRecommendations(ctx, contextMessages, connInfo.Config.Type)
+	// Check for at least one system message (schema message)
+	hasSystemMessage := false
+	for _, msg := range llmMessages {
+		if msg.Role == string(constants.MessageTypeSystem) {
+			hasSystemMessage = true
+			break
+		}
+	}
+
+	if !hasSystemMessage {
+		log.Printf("ChatService -> GetQueryRecommendations -> No system message (schema) found in LLM messages, skipping recommendation generation")
+		return &dtos.QueryRecommendationsResponse{
+			Recommendations: []dtos.QueryRecommendation{},
+		}, http.StatusOK, nil
+	}
+
+	log.Printf("ChatService -> GetQueryRecommendations -> Found %d LLM messages, using conversation and schema context", len(llmMessages))
+
+	// Determine which LLM model to use for recommendations
+	// Priority: 1) Chat's preferred model, 2) Last assistant message's model, 3) Default model
+	selectedLLMModel := ""
+
+	// Check chat's preferred model first
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err == nil && chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+		selectedLLMModel = *chat.PreferredLLMModel
+		log.Printf("ChatService -> GetQueryRecommendations -> Using chat's preferred model: %s", selectedLLMModel)
+	} else {
+		// Fallback to the last assistant message's model (what LLM model was used for the conversation)
+		chatMessages, _, err := s.chatRepo.FindLatestMessageByChat(chatObjID, 20, 1) // Get up to 20 recent messages
+		if err == nil && len(chatMessages) > 0 {
+			// Find the last assistant/AI message
+			for _, msg := range chatMessages {
+				if msg.Type == string(constants.MessageTypeAssistant) && msg.LLMModel != nil && *msg.LLMModel != "" {
+					selectedLLMModel = *msg.LLMModel
+					log.Printf("ChatService -> GetQueryRecommendations -> Using last assistant message's model: %s", selectedLLMModel)
+					break
+				}
+			}
+		}
+	}
+
+	// If still no model selected, use first available model from any provider
+	if selectedLLMModel == "" {
+		defaultModel := constants.GetFirstAvailableModel()
+		if defaultModel != nil {
+			selectedLLMModel = defaultModel.ID
+			log.Printf("ChatService -> GetQueryRecommendations -> Using first available model: %s (%s)", selectedLLMModel, defaultModel.Provider)
+		}
+	}
+
+	// Get the correct LLM client based on the selected model's provider
+	llmClient := s.llmClient
+	if s.llmManager != nil && selectedLLMModel != "" {
+		selectedModel := constants.GetLLMModel(selectedLLMModel)
+		if selectedModel != nil {
+			providerClient, err := s.llmManager.GetClient(selectedModel.Provider)
+			if err != nil {
+				log.Printf("Warning: Failed to get LLM client for provider '%s': %v, using default client", selectedModel.Provider, err)
+			} else {
+				llmClient = providerClient
+				log.Printf("ChatService -> GetQueryRecommendations -> Using LLM client for provider: %s (model: %s)",
+					selectedModel.Provider, selectedModel.DisplayName)
+			}
+		}
+	}
+
+	// Generate recommendations using the selected LLM client and model
+	response, err := llmClient.GenerateRecommendations(ctx, llmMessages, connInfo.Config.Type)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to generate recommendations: %v", err)
 	}
@@ -2717,4 +3154,17 @@ func (s *chatService) secureRandomInt(max int) (int, error) {
 	}
 
 	return int(n.Int64()), nil
+}
+
+// clearRecommendationsCache clears the cached query recommendations for a chat
+func (s *chatService) clearRecommendationsCache(ctx context.Context, chatID string) error {
+	cacheKey := fmt.Sprintf("recommendations:%s", chatID)
+	err := s.redisRepo.Del(cacheKey, ctx)
+	if err != nil {
+		log.Printf("ChatService -> clearRecommendationsCache -> Warning: Failed to clear recommendations cache for chatID %s: %v", chatID, err)
+		// Don't return error as this is not critical to the operation
+		return nil
+	}
+	log.Printf("ChatService -> clearRecommendationsCache -> Successfully cleared recommendations cache for chatID %s", chatID)
+	return nil
 }

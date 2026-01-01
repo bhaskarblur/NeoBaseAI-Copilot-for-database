@@ -8,7 +8,7 @@ import analyticsService from '../../services/analyticsService';
 import { Chat, Connection } from '../../types/chat';
 import { transformBackendMessage } from '../../types/messages';
 import ConfirmationModal from '../modals/ConfirmationModal';
-import ConnectionModal, { ModalTab } from '../modals/ConnectionModal';
+import ConnectionModal from '../modals/ConnectionModal';
 import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
@@ -20,7 +20,7 @@ interface ChatWindowProps {
   isExpanded: boolean;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  onSendMessage: (message: string) => Promise<void>;
+  onSendMessage: (message: string, llmModel?: string) => Promise<void>;
   onEditMessage: (id: string, content: string) => void;
   onClearChat: () => void;
   onCloseConnection: () => void;
@@ -129,7 +129,6 @@ export default function ChatWindow({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const pageSize = 25; // Messages per page
   const loadingRef = useRef<HTMLDivElement>(null);
-  const [isMessageSending, setIsMessageSending] = useState(false);
   const isLoadingOldMessages = useRef(false);
   const messageUpdateSource = useRef<UpdateSource>(null);
   const isInitialLoad = useRef(true);
@@ -137,9 +136,11 @@ export default function ChatWindow({
   const isScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [showSearch, setShowSearch] = useState(false);
+  const [isMessageSending, _setIsMessageSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
+  const [selectedLLMModel, setSelectedLLMModel] = useState<string | undefined>(undefined);
   const searchResultRefs = useRef<{ [key: string]: HTMLElement | null }>({});
   const [showEditQueryConfirm, setShowEditQueryConfirm] = useState<{
     show: boolean;
@@ -161,7 +162,7 @@ export default function ChatWindow({
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(false);
   const [inputPrefill, setInputPrefill] = useState<string | null>(null);
   // recoVersion comes from props to trigger recommendation refresh
-  const [shimmerTexts, setShimmerTexts] = useState<string[]>([]);
+  const [_shimmerTexts, setShimmerTexts] = useState<string[]>([]);
   const lastRecoKeyRef = useRef<string | null>(null);
 
   // Search functionality
@@ -272,6 +273,50 @@ export default function ChatWindow({
     }
   }, [isConnected]);
 
+  // Initialize with default LLM model on component mount or when chat changes
+  useEffect(() => {
+    const initializeDefaultModel = async () => {
+      try {
+        // First check if chat has a preferred model
+        if (chat?.preferred_llm_model) {
+          console.log('ChatWindow -> Using chat preferred model:', chat.preferred_llm_model);
+          setSelectedLLMModel(chat.preferred_llm_model);
+          return;
+        }
+
+        // Otherwise fetch and set default model
+        const response = await axios.get(`${import.meta.env.VITE_API_URL}/llm-models`);
+        console.log('ChatWindow -> fetched LLM models response:', response.data);
+        
+        // Extract models from the correct nested path: response.data.data.models
+        const models = response.data.data?.models;
+        console.log('ChatWindow -> extracted models:', models);
+        
+        if (models && Array.isArray(models)) {
+          // Find the first model with default === true
+          const defaultModel = models.find((model: any) => {
+            console.log('ChatWindow -> checking model:', model.id, 'default:', model.default);
+            return model.default === true;
+          });
+          
+          console.log('ChatWindow -> found default model:', defaultModel?.id);
+          if (defaultModel) {
+            console.log('ChatWindow -> setting selectedLLMModel to:', defaultModel.id);
+            setSelectedLLMModel(defaultModel.id);
+          } else {
+            console.warn('ChatWindow -> no default model found in response');
+          }
+        } else {
+          console.warn('ChatWindow -> models not found in response');
+        }
+      } catch (error) {
+        console.error('Failed to fetch default LLM model:', error);
+      }
+    };
+
+    initializeDefaultModel();
+  }, [chat?.id, chat?.preferred_llm_model]); // Re-initialize when chat changes or preferred model updates
+
   // When App signals reco refresh, shimmer then refetch
   useEffect(() => {
     if (!chat?.id) return;
@@ -324,7 +369,7 @@ export default function ChatWindow({
     }
   };
 
-  const scrollToBottom = (origin: string, force: boolean = false) => {
+  const scrollToBottom = (force: boolean = false) => {
     const chatContainer = chatContainerRef.current;
     if (!chatContainer) {
       return;
@@ -491,16 +536,16 @@ export default function ChatWindow({
       }
 
       // Check if the connection is already established
-      const connectionStatus = await checkConnectionStatus(chat.id, currentStreamId);
+      const connectionStatus = await checkConnectionStatus(chat.id);
       if (!connectionStatus) {
         await connectToDatabase(chat.id, currentStreamId);
       }
       console.log('connectionStatus', connectionStatus);
       onConnectionStatusChange?.(chat.id, true, 'chat-window-reconnect');
     } catch (error) {
-      console.error('Failed to reconnect to database:', error);
+      console.error('Failed to reconnect to data source:', error);
       onConnectionStatusChange?.(chat.id, false, 'chat-window-reconnect');
-      toast.error('Failed to reconnect to database:' + error, {
+      toast.error('Failed to reconnect to data source:' + error, {
         style: {
           background: '#ff4444',
           color: '#fff',
@@ -515,7 +560,7 @@ export default function ChatWindow({
     }
   }, [chat.id, streamId, generateStreamId, onConnectionStatusChange]);
 
-  const checkConnectionStatus = async (chatId: string, streamId: string) => {
+  const checkConnectionStatus = async (chatId: string) => {
     try {
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/chats/${chatId}/connection-status`,
@@ -539,7 +584,7 @@ export default function ChatWindow({
       handleCloseConfirm();
     } catch (error) {
       console.error('Failed to disconnect:', error);
-      toast.error('Failed to disconnect from database');
+      handleCloseConfirm();
     }
   }, [onCloseConnection, handleCloseConfirm]);
 
@@ -572,6 +617,35 @@ export default function ChatWindow({
     }, 200);
   };
 
+  // Handle LLM model selection and save to chat
+  const handleLLMModelChange = async (modelId: string) => {
+    try {
+      console.log('ChatWindow -> Saving preferred model:', modelId, 'for chat:', chat.id);
+      setSelectedLLMModel(modelId);
+      
+      // Save to backend
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/chats/${chat.id}`,
+        { preferred_llm_model: modelId },
+        {
+          withCredentials: true,
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      
+      // Update local chat object
+      if (chat) {
+        chat.preferred_llm_model = modelId;
+      }
+      
+      console.log('ChatWindow -> Successfully saved preferred model');
+    } catch (error) {
+      console.error('Failed to save preferred LLM model:', error);
+    }
+  };
+
   const connectToDatabase = async (chatId: string, streamId: string) => {
     try {
       const response = await axios.post(
@@ -598,12 +672,11 @@ export default function ChatWindow({
         analyticsService.trackMessageSent(chat.id, content.length, userId || '', userName || '');
       }
 
-
-      await onSendMessage(content);
+      await onSendMessage(content, selectedLLMModel);
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [chat?.id, onSendMessage]);
+  }, [chat?.id, onSendMessage, selectedLLMModel]);
 
   const handleSaveEdit = useCallback((id: string, content: string) => {
     if (content.trim()) {
@@ -680,10 +753,10 @@ export default function ChatWindow({
           if (isInitialLoad.current) {
             // Use multiple timeouts to ensure DOM is fully updated and all images/content loaded
             setTimeout(() => {
-              scrollToBottom('initial-load', true);
+              scrollToBottom(true);
               // Double-check after a longer delay to handle lazy-loaded content
               setTimeout(() => {
-                scrollToBottom('initial-load-verification', true);
+                scrollToBottom(true);
                 isInitialLoad.current = false;
               }, 300);
             }, 100);
@@ -867,7 +940,7 @@ export default function ChatWindow({
       
       // Immediate scroll for welcome message or empty state
       setTimeout(() => {
-        scrollToBottom('chat-mounted', true);
+        scrollToBottom(true);
       }, 50);
       fetchMessages(1);
       fetchPinnedMessages();
@@ -902,16 +975,13 @@ export default function ChatWindow({
     const chatContainer = chatContainerRef.current;
     if (!chatContainer) return;
     
-    const { scrollTop, scrollHeight, clientHeight } = chatContainer;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
-    
     const lastMessage = messages[messages.length - 1];
     const shouldScrollForNewMessage = lastMessage?.type === 'user' && messageUpdateSource.current === 'new';
 
     if (shouldScrollForNewMessage) {
       // Use timeout to ensure proper timing after state updates
       setTimeout(() => {
-        scrollToBottom('new-message', true);
+        scrollToBottom(true);
       }, 50);
     }
   }, [messages]);
@@ -956,7 +1026,7 @@ export default function ChatWindow({
       await handleSendMessage(content);
       // Force scroll after message is sent
       setTimeout(() => {
-        scrollToBottom('user-message-sent', true);
+        scrollToBottom(true);
       }, 100);
     } finally {
       setTimeout(() => {
@@ -1172,6 +1242,8 @@ export default function ChatWindow({
           onReconnect={handleReconnect}
           setShowRefreshSchema={() => setShowRefreshSchema(true)}
           onToggleSearch={handleToggleSearch}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
         
         {showSearch && (
@@ -1238,7 +1310,7 @@ export default function ChatWindow({
           relative 
           scroll-smooth 
           ${viewMode === 'chats' ? 'pb-24 md:pb-32' : 'pb-8'} 
-          mt-16
+          -mt-6
           md:mt-0
           flex-shrink
         `}
@@ -1323,7 +1395,7 @@ export default function ChatWindow({
                   isSearchResult={showSearch && searchResults.some(r => r === `msg-${message.id}`)}
                   isCurrentSearchResult={showSearch && searchResults[currentSearchIndex] === `msg-${message.id}`}
                   searchResultRefs={searchResultRefs}
-                  buttonCallback={(action) => {
+                  buttonCallback={(action, label) => {
                     if (action === "refresh_schema") {
                       setShowRefreshSchema(true);
                     } else if (action === "fix_error") {
@@ -1332,12 +1404,21 @@ export default function ChatWindow({
                     } else if (action === "fix_rollback_error") {
                       // Handle fix_rollback_error action
                       handleFixRollbackErrorAction(message);
+                    } else if (action === "try_again") {
+                      // Handle try_again action - resend the user's message
+                      const userMessage = messages.find(msg => msg.id === message.user_message_id || (msg.type === 'user' && msg.created_at < message.created_at && msg.type === 'user'));
+                      if (userMessage) {
+                        handleSendMessage(userMessage.content);
+                      } else {
+                        toast.error('Could not find original message to retry');
+                      }
                     } else if (action === "open_settings") {
                       setOpenWithSettingsTab(true);
                       setShowEditConnection(true);
                     } else {
-                      console.log(`Action not implemented: ${action}`);
-                      toast.error(`There is no available action for this button: ${action}`);
+                      console.log(`Action not implemented, sending it as a message to AI Assistant: ${action}`);
+                      handleSendMessage(`${label}`);
+                      // toast.error(`There is no available action for this button: ${action}`);
                     }
                   }}
                 />
@@ -1407,7 +1488,7 @@ export default function ChatWindow({
                   message={{
                     id: "welcome-message",
                     type: "assistant",
-                    content: `Hi ${userName || 'There'}! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond with data. You can start by asking me what's in this database or try recommendations.`,
+                    content: `Hi ${userName || 'There'}! I am your Data Copilot. You can ask me anything about your data and i will understand your request & respond. You can start by asking me what all data is stored or try recommendations.`,
                     queries: [],
                     action_buttons: [],
                     created_at: new Date().toISOString(),
@@ -1436,6 +1517,20 @@ export default function ChatWindow({
                   buttonCallback={(action) => {
                     if (action === "refresh_schema") {
                       setShowRefreshSchema(true);
+                    } else if (action === "try_again") {
+                      // Handle try_again action - resend the user's message
+                      // Find the user message that preceded the timeout message by searching backwards
+                      const streamingMsgIndex = messages.findIndex(msg => msg.is_streaming);
+                      if (streamingMsgIndex > 0) {
+                        const userMessage = messages[streamingMsgIndex - 1];
+                        if (userMessage && userMessage.type === 'user') {
+                          handleSendMessage(userMessage.content);
+                        } else {
+                          toast.error('Could not find original message to retry');
+                        }
+                      } else {
+                        toast.error('Could not find original message to retry');
+                      }
                     } else if (action === "open_settings") {
                       setOpenWithSettingsTab(true);
                       setShowEditConnection(true);
@@ -1483,7 +1578,7 @@ export default function ChatWindow({
 
         {showScrollButton && (
           <button
-            onClick={() => scrollToBottom('scroll-button', true)}
+            onClick={() => scrollToBottom(true)}
             className="fixed bottom-24 right-4 md:right-8 p-3 bg-black text-white rounded-full shadow-lg hover:bg-gray-800 transition-all neo-border z-40"
             title="Scroll to bottom"
           >
@@ -1505,6 +1600,8 @@ export default function ChatWindow({
           onCancelStream={handleCancelStreamClick}
           prefillText={inputPrefill || ''}
           onConsumePrefill={() => setInputPrefill(null)}
+          onModelChange={handleLLMModelChange}
+          selectedModel={selectedLLMModel}
         />
       )}
 
@@ -1512,9 +1609,9 @@ export default function ChatWindow({
         <ConfirmationModal
           icon={<RefreshCcw className="w-6 h-6 text-black" />}
           themeColor="black"
-          title="Refresh Knowledge/Data"
+          title="Refresh Knowledge Base"
           buttonText="Refresh"
-          message="This action will refetch the schema from the data source and update the knowledge base. This may take a few minutes depending on the size of the database."
+          message="This action will refetch the schema from the data source and update the knowledge base. This may take 1-3 minutes depending on the size of your data."
           onConfirm={handleConfirmRefreshSchema}
           onCancel={handleCancelRefreshSchema}
         />

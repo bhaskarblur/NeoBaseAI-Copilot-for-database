@@ -19,6 +19,8 @@ type Message struct {
 	NonTechMode   bool                `bson:"non_tech_mode" json:"non_tech_mode"`                       // Whether this message was generated in non-tech mode
 	IsPinned      bool                `bson:"is_pinned" json:"is_pinned"`                               // Whether this message is pinned
 	PinnedAt      *time.Time          `bson:"pinned_at,omitempty" json:"pinned_at,omitempty"`           // When the message was pinned
+	LLMModel      *string             `bson:"llm_model,omitempty" json:"llm_model,omitempty"`           // LLM model used to generate this message (e.g., "gpt-4o", "gemini-2.0-flash") - nullable for backward compatibility
+	LLMModelName  *string             `bson:"llm_model_name,omitempty" json:"llm_model_name,omitempty"` // Human-readable display name for the LLM model (e.g., "GPT-4 Omni", "Gemini 2.0 Flash")
 	Base          `bson:",inline"`
 }
 
@@ -31,26 +33,28 @@ type ActionButton struct {
 }
 
 type Query struct {
-	ID                     primitive.ObjectID `bson:"id" json:"id"`
-	Query                  string             `bson:"query" json:"query"`
-	QueryType              *string            `bson:"query_type" json:"query_type"` // SELECT, INSERT, UPDATE, DELETE...
-	Pagination             *Pagination        `bson:"pagination,omitempty" json:"pagination,omitempty"`
-	Tables                 *string            `bson:"tables" json:"tables"` // comma separated table names involved in the query
-	Description            string             `bson:"description" json:"description"`
-	RollbackDependentQuery *string            `bson:"rollback_dependent_query,omitempty" json:"rollback_dependent_query,omitempty"` // ID of the query that this query depends on
-	RollbackQuery          *string            `bson:"rollback_query,omitempty" json:"rollback_query,omitempty"`                     // the query to rollback the query
-	ExecutionTime          *int               `bson:"execution_time" json:"execution_time"`                                         // in milliseconds, same for execution & rollback query
-	ExampleExecutionTime   int                `bson:"example_execution_time" json:"example_execution_time"`                         // in milliseconds
-	CanRollback            bool               `bson:"can_rollback" json:"can_rollback"`
-	IsCritical             bool               `bson:"is_critical" json:"is_critical"`
-	IsExecuted             bool               `bson:"is_executed" json:"is_executed"`       // if the query has been executed
-	IsRolledBack           bool               `bson:"is_rolled_back" json:"is_rolled_back"` // if the query has been rolled back
-	Error                  *QueryError        `bson:"error,omitempty" json:"error,omitempty"`
-	ExampleResult          *string            `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
-	ExecutionResult        *string            `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
-	IsEdited               bool               `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
-	Metadata               *string            `bson:"metadata,omitempty" json:"metadata,omitempty"`                 // JSON string for database-specific metadata (e.g., ClickHouse engine type)
-	ActionAt               *string            `bson:"action_at,omitempty" json:"action_at,omitempty"`               // The timestamp when the action was taken
+	ID                     primitive.ObjectID  `bson:"id" json:"id"`
+	Query                  string              `bson:"query" json:"query"`
+	QueryType              *string             `bson:"query_type" json:"query_type"` // SELECT, INSERT, UPDATE, DELETE...
+	Pagination             *Pagination         `bson:"pagination,omitempty" json:"pagination,omitempty"`
+	Tables                 *string             `bson:"tables" json:"tables"` // comma separated table names involved in the query
+	Description            string              `bson:"description" json:"description"`
+	RollbackDependentQuery *string             `bson:"rollback_dependent_query,omitempty" json:"rollback_dependent_query,omitempty"` // ID of the query that this query depends on
+	RollbackQuery          *string             `bson:"rollback_query,omitempty" json:"rollback_query,omitempty"`                     // the query to rollback the query
+	ExecutionTime          *int                `bson:"execution_time" json:"execution_time"`                                         // in milliseconds, same for execution & rollback query
+	ExampleExecutionTime   int                 `bson:"example_execution_time" json:"example_execution_time"`                         // in milliseconds
+	CanRollback            bool                `bson:"can_rollback" json:"can_rollback"`
+	IsCritical             bool                `bson:"is_critical" json:"is_critical"`
+	IsExecuted             bool                `bson:"is_executed" json:"is_executed"`       // if the query has been executed
+	IsRolledBack           bool                `bson:"is_rolled_back" json:"is_rolled_back"` // if the query has been rolled back
+	Error                  *QueryError         `bson:"error,omitempty" json:"error,omitempty"`
+	ExampleResult          *string             `bson:"example_result,omitempty" json:"example_result,omitempty"`     // JSON string
+	ExecutionResult        *string             `bson:"execution_result,omitempty" json:"execution_result,omitempty"` // JSON string
+	IsEdited               bool                `bson:"is_edited" json:"is_edited"`                                   // if the query has been edited
+	Metadata               *string             `bson:"metadata,omitempty" json:"metadata,omitempty"`                 // JSON string for database-specific metadata (e.g., ClickHouse engine type)
+	ActionAt               *string             `bson:"action_at,omitempty" json:"action_at,omitempty"`               // The timestamp when the action was taken
+	LLMModel               string              `bson:"llm_model" json:"llm_model"`                                   // LLM model used to generate this query
+	VisualizationID        *primitive.ObjectID `bson:"visualization_id,omitempty" json:"visualization_id,omitempty"` // Reference to MessageVisualization, enables per-query visualization
 }
 
 type QueryError struct {
@@ -60,9 +64,9 @@ type QueryError struct {
 }
 
 type Pagination struct {
-	TotalRecordsCount *int    `bson:"total_records_count" json:"total_records_count"`
-	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`
-	CountQuery        *string `bson:"count_query" json:"count_query"`
+	TotalRecordsCount *int    `bson:"total_records_count" json:"total_records_count"` // Total number of records available for the query
+	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`         // The modified query string that includes pagination (e.g., LIMIT, OFFSET) to fetch a subset of results
+	CountQuery        *string `bson:"count_query" json:"count_query"`                 // The query string to get the total count of records (e.g., SELECT COUNT(*) FROM ...)
 }
 
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query, userMessageId *primitive.ObjectID) *Message {

@@ -227,6 +227,19 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	var tempFiles []string
 
+	// Test SSH tunnel if configured
+	if config.SSHEnabled && config.SSHHost != nil && config.SSHPort != nil && config.SSHUsername != nil && config.SSHPrivateKey != nil {
+		log.Printf("Manager -> TestConnection -> Testing SSH tunnel connection")
+		sshPassphrase := ""
+		if config.SSHPassphrase != nil {
+			sshPassphrase = *config.SSHPassphrase
+		}
+		if err := TestSSHTunnel(*config.SSHHost, *config.SSHPort, *config.SSHUsername, *config.SSHPrivateKey, sshPassphrase); err != nil {
+			return fmt.Errorf("SSH tunnel test failed: %v", err)
+		}
+		log.Printf("Manager -> TestConnection -> SSH tunnel test passed")
+	}
+
 	switch config.Type {
 	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
 		var dsn string

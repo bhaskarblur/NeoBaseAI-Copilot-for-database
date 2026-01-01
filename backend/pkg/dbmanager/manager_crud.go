@@ -23,7 +23,7 @@ import (
 
 const (
 	cleanupInterval     = 10 * time.Minute   // Check every 10 minutes
-	idleTimeout         = 15 * time.Minute   // Close after 15 minutes of inactivity
+	idleTimeout         = 30 * time.Minute   // Close after 30 minutes of inactivity
 	schemaCheckInterval = 3 * 24 * time.Hour // Check after every 3 days
 )
 
@@ -366,7 +366,7 @@ func (m *Manager) Connect(chatID, userID, streamID string, config ConnectionConf
 
 		// Update metrics
 		m.poolMetrics.reuseCount++
-		
+
 		// For spreadsheet connections from pool, ensure schema exists
 		if config.Type == "spreadsheet" && chatID != "" {
 			schemaName := fmt.Sprintf("conn_%s", chatID)
@@ -539,7 +539,7 @@ func (m *Manager) cleanupSchemaForInactiveConnection(chatID string, connectionTy
 			WHERE schema_name = '%s'
 		)
 	`, schemaName)
-	
+
 	var exists bool
 	row := sqlDB.QueryRow(checkQuery)
 	if err := row.Scan(&exists); err != nil {
@@ -570,12 +570,12 @@ func (m *Manager) DisconnectWithType(chatID, userID, connectionType string, dele
 	conn, exists := m.connections[chatID]
 	m.mu.RUnlock()
 
-	// If no active connection exists but we need to delete schema, 
+	// If no active connection exists but we need to delete schema,
 	// we still need to proceed for spreadsheet/Google Sheets connections
 	if !exists {
 		if deleteSchema {
 			log.Printf("DBManager -> DisconnectWithType -> No active connection found for chat %s, but attempting schema cleanup", chatID)
-			
+
 			// CRITICAL SAFETY CHECK: Only allow schema deletion for spreadsheet and Google Sheets connections
 			if connectionType != "spreadsheet" && connectionType != "google_sheets" {
 				log.Printf("DBManager -> DisconnectWithType -> SAFETY CHECK FAILED: Schema deletion requested for connection type '%s' for chat %s - REFUSING", connectionType, chatID)
@@ -595,7 +595,7 @@ func (m *Manager) DisconnectWithType(chatID, userID, connectionType string, dele
 
 	// For active connections, verify the connection type matches what was stored
 	if conn.Config.Type != connectionType {
-		log.Printf("DBManager -> DisconnectWithType -> WARNING: Connection type mismatch for chat %s. Active: %s, Expected: %s", 
+		log.Printf("DBManager -> DisconnectWithType -> WARNING: Connection type mismatch for chat %s. Active: %s, Expected: %s",
 			chatID, conn.Config.Type, connectionType)
 		// Use the active connection type for further processing (it's more reliable)
 		connectionType = conn.Config.Type
@@ -615,7 +615,7 @@ func (m *Manager) DisconnectWithType(chatID, userID, connectionType string, dele
 // This method is kept for backward compatibility but should be avoided for schema deletion
 func (m *Manager) Disconnect(chatID, userID string, deleteSchema bool) error {
 	log.Printf("DBManager -> Disconnect (LEGACY) -> DEPRECATED: This method should not be used for schema deletion without connection type validation")
-	
+
 	m.mu.RLock()
 	conn, exists := m.connections[chatID]
 	m.mu.RUnlock()
@@ -1228,4 +1228,3 @@ type ConnectionInfo struct {
 func (m *Manager) SetStreamHandler(handler StreamHandler) {
 	m.streamHandler = handler
 }
-

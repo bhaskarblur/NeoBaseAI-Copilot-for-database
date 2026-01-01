@@ -516,16 +516,72 @@ func processMongoResults(ctx context.Context, cursor *mongo.Cursor, collection s
 // Connect establishes a connection to a MongoDB database
 func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 	var tempFiles []string
+	var sshTunnel *SSHTunnel
 	log.Printf("MongoDBDriver -> Connect -> Connecting to MongoDB at %s:%v", config.Host, config.Port)
+
+	// Establish SSH tunnel if configured
+	if config.SSHEnabled && config.SSHHost != nil && config.SSHPort != nil && config.SSHUsername != nil {
+		log.Printf("MongoDBDriver -> Connect -> Establishing SSH tunnel for MongoDB connection")
+
+		// Determine SSH auth method
+		authMethod := SSHAuthMethodPublicKey // Default
+		if config.SSHAuthMethod != nil {
+			authMethod = ToSSHAuthMethod(*config.SSHAuthMethod)
+		}
+
+		var tunnel *SSHTunnel
+		var err error
+
+		if authMethod == SSHAuthMethodPassword && config.SSHPassword != nil {
+			// Use password-based authentication
+			tunnel, err = CreateSSHTunnelWithPassword(*config.SSHHost, *config.SSHPort, *config.SSHUsername, *config.SSHPassword)
+		} else {
+			// Use public key authentication
+			privateKey := ""
+			if config.SSHPrivateKey != nil {
+				privateKey = *config.SSHPrivateKey
+			} else if config.SSHPrivateKeyURL != nil {
+				// Load private key from URL
+				var err error
+				privateKey, err = LoadPrivateKeyFromURL(*config.SSHPrivateKeyURL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load SSH private key from URL: %v", err)
+				}
+			}
+
+			if privateKey == "" {
+				return nil, fmt.Errorf("SSH private key is required for public key authentication")
+			}
+
+			tunnel, err = CreateSSHTunnel(*config.SSHHost, *config.SSHPort, *config.SSHUsername, privateKey, getValue(config.SSHPassphrase))
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH tunnel: %v", err)
+		}
+
+		sshTunnel = tunnel
+		defer func() {
+			if err != nil {
+				sshTunnel.Close()
+			}
+		}()
+	}
 
 	var uri string
 	port := "27017" // Default port for MongoDB
+	connectHost := config.Host
+
+	// When using SSH tunnel, connect through localhost
+	if sshTunnel != nil {
+		connectHost = "localhost"
+	}
 
 	// Check if we're using SRV records (mongodb+srv://)
 	// Only check for .mongodb.net in non-encrypted hosts
 	isSRV := false
-	if !strings.Contains(config.Host, "+") && !strings.Contains(config.Host, "/") && !strings.Contains(config.Host, "=") {
-		isSRV = strings.Contains(config.Host, ".mongodb.net")
+	if !strings.Contains(connectHost, "+") && !strings.Contains(connectHost, "/") && !strings.Contains(connectHost, "=") {
+		isSRV = strings.Contains(connectHost, ".mongodb.net")
 	}
 
 	protocol := "mongodb"
@@ -551,6 +607,9 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 				// Verify port is numeric for non-encrypted ports
 				if _, err := strconv.Atoi(port); err != nil {
 					log.Printf("MongoDBDriver -> Connect -> Invalid port value: %v, error: %v", port, err)
+					if sshTunnel != nil {
+						sshTunnel.Close()
+					}
 					return nil, fmt.Errorf("invalid port value: %v, must be a number", port)
 				}
 			}
@@ -569,20 +628,20 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 		if isSRV {
 			// For SRV records, don't include port
 			uri = fmt.Sprintf("%s://%s:%s@%s/%s",
-				protocol, encodedUsername, encodedPassword, config.Host, config.Database)
+				protocol, encodedUsername, encodedPassword, connectHost, config.Database)
 		} else {
 			// Include port for standard connections
 			uri = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
-				protocol, encodedUsername, encodedPassword, config.Host, port, config.Database)
+				protocol, encodedUsername, encodedPassword, connectHost, port, config.Database)
 		}
 	} else {
 		// Without authentication
 		if isSRV {
 			// For SRV records, don't include port
-			uri = fmt.Sprintf("%s://%s/%s", protocol, config.Host, config.Database)
+			uri = fmt.Sprintf("%s://%s/%s", protocol, connectHost, config.Database)
 		} else {
 			// Include port for standard connections
-			uri = fmt.Sprintf("%s://%s:%s/%s", protocol, config.Host, port, config.Database)
+			uri = fmt.Sprintf("%s://%s:%s/%s", protocol, connectHost, port, config.Database)
 		}
 	}
 
@@ -637,6 +696,9 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 			// Fetch certificates from URLs
 			certPath, keyPath, rootCertPath, certTempFiles, err := utils.PrepareCertificatesFromURLs(*config.SSLCertURL, *config.SSLKeyURL, *config.SSLRootCertURL)
 			if err != nil {
+				if sshTunnel != nil {
+					sshTunnel.Close()
+				}
 				return nil, err
 			}
 
@@ -745,6 +807,15 @@ func (d *MongoDBDriver) Connect(config ConnectionConfig) (*Connection, error) {
 // Disconnect closes the MongoDB connection
 func (d *MongoDBDriver) Disconnect(conn *Connection) error {
 	log.Printf("MongoDBDriver -> Disconnect -> Disconnecting from MongoDB")
+
+	// Close SSH tunnel if present
+	if conn.SSHTunnel != nil {
+		if sshTunnel, ok := conn.SSHTunnel.(*SSHTunnel); ok {
+			if err := sshTunnel.Close(); err != nil {
+				log.Printf("MongoDBDriver -> Disconnect -> Warning: Failed to close SSH tunnel: %v", err)
+			}
+		}
+	}
 
 	// Get the MongoDB wrapper from the connection
 	wrapper, ok := conn.MongoDBObj.(*MongoDBWrapper)
@@ -1948,14 +2019,14 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 		if err := processDotNotationInAggregation(pipeline); err != nil {
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
-		
+
 		// Process ObjectIds and Dates in the pipeline
 		for _, stage := range pipeline {
 			if err := processObjectIds(stage); err != nil {
 				log.Printf("MongoDBDriver -> ExecuteQuery -> Error processing ObjectIds/Dates in pipeline: %v", err)
 			}
 		}
-		
+
 		// Debug: Log the final pipeline before execution
 		pipelineJSON, _ := json.Marshal(pipeline)
 		log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline: %s", string(pipelineJSON))
@@ -2266,4 +2337,3 @@ func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transacti
 	log.Printf("MongoDBDriver -> BeginTx -> MongoDB transaction started successfully")
 	return tx
 }
-

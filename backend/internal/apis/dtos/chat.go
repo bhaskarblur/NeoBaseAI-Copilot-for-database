@@ -1,15 +1,17 @@
 package dtos
 
 type CreateChatSettings struct {
-	AutoExecuteQuery *bool `json:"auto_execute_query"`
-	ShareDataWithAI  *bool `json:"share_data_with_ai"`
-	NonTechMode      *bool `json:"non_tech_mode"`
+	AutoExecuteQuery          *bool `json:"auto_execute_query"`
+	ShareDataWithAI           *bool `json:"share_data_with_ai"`
+	NonTechMode               *bool `json:"non_tech_mode"`
+	AutoGenerateVisualization *bool `json:"auto_generate_visualization"`
 }
 
 type ChatSettingsResponse struct {
-	AutoExecuteQuery bool `json:"auto_execute_query"`
-	ShareDataWithAI  bool `json:"share_data_with_ai"`
-	NonTechMode      bool `json:"non_tech_mode"`
+	AutoExecuteQuery          bool `json:"auto_execute_query"`
+	ShareDataWithAI           bool `json:"share_data_with_ai"`
+	NonTechMode               bool `json:"non_tech_mode"`
+	AutoGenerateVisualization bool `json:"auto_generate_visualization"`
 }
 type CreateConnectionRequest struct {
 	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet google_sheets"`
@@ -65,6 +67,7 @@ type UpdateChatRequest struct {
 	Connection          *CreateConnectionRequest `json:"connection"`
 	SelectedCollections *string                  `json:"selected_collections"` // "ALL" or comma-separated table names
 	Settings            *CreateChatSettings      `json:"settings"`
+	PreferredLLMModel   *string                  `json:"preferred_llm_model"` // User's preferred LLM model for this chat
 }
 
 type ChatResponse struct {
@@ -75,6 +78,7 @@ type ChatResponse struct {
 	CreatedAt           string               `json:"created_at"`
 	UpdatedAt           string               `json:"updated_at"`
 	Settings            ChatSettingsResponse `json:"settings"`
+	PreferredLLMModel   *string              `json:"preferred_llm_model"`
 }
 
 type ChatListResponse struct {

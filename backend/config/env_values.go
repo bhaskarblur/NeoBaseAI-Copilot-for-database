@@ -30,7 +30,7 @@ type Environment struct {
 	JWTRefreshExpirationMilliseconds int
 	AdminUser                        string
 	AdminPassword                    string
-	DefaultLLMClient                 string
+	DefaultLLMModel                  string
 
 	// Database configs
 	MongoURI          string
@@ -42,17 +42,17 @@ type Environment struct {
 	RedisUsername string
 	RedisPassword string
 
-	// OpenAI configs
-	OpenAIAPIKey              string
-	OpenAIModel               string
-	OpenAIMaxCompletionTokens int
-	OpenAITemperature         float64
+	// OpenAI configs (API key only, models defined in constants)
+	OpenAIAPIKey string
 
-	// Gemini configs
-	GeminiAPIKey              string
-	GeminiModel               string
-	GeminiMaxCompletionTokens int
-	GeminiTemperature         float64
+	// Gemini configs (API key only, models defined in constants)
+	GeminiAPIKey string
+
+	// Claude configs (API key only, models defined in constants)
+	ClaudeAPIKey string
+
+	// Ollama configs (base URL only, models defined in constants)
+	OllamaBaseURL string
 
 	// SMTP Email configs
 	SMTPHost      string
@@ -64,13 +64,13 @@ type Environment struct {
 	SMTPFromEmail string
 
 	// Spreadsheet PostgreSQL configs
-	SpreadsheetPostgresHost       string
-	SpreadsheetPostgresPort       string
-	SpreadsheetPostgresDatabase   string
-	SpreadsheetPostgresUsername   string
-	SpreadsheetPostgresPassword   string
-	SpreadsheetPostgresSSLMode    string
-	SpreadsheetDataEncryptionKey  string
+	SpreadsheetPostgresHost      string
+	SpreadsheetPostgresPort      string
+	SpreadsheetPostgresDatabase  string
+	SpreadsheetPostgresUsername  string
+	SpreadsheetPostgresPassword  string
+	SpreadsheetPostgresSSLMode   string
+	SpreadsheetDataEncryptionKey string
 
 	// Google OAuth configs
 	GoogleClientID     string
@@ -124,19 +124,20 @@ func LoadEnv() error {
 	Env.ExampleDatabasePassword = getRequiredEnv("EXAMPLE_DB_PASSWORD", "")
 
 	// LLM configs
-	Env.DefaultLLMClient = getEnvWithDefault("DEFAULT_LLM_CLIENT", constants.OpenAI)
+	Env.DefaultLLMModel = getEnvWithDefault("DEFAULT_LLM_MODEL", "")
 
-	// OpenAI configs
+	// OpenAI configs - API key only, models defined in constants/supported_models.go
 	Env.OpenAIAPIKey = getRequiredEnv("OPENAI_API_KEY", "")
-	Env.OpenAIModel = getEnvWithDefault("OPENAI_MODEL", constants.OpenAIModel)
-	Env.OpenAIMaxCompletionTokens = getIntEnvWithDefault("OPENAI_MAX_COMPLETION_TOKENS", constants.OpenAIMaxCompletionTokens)
-	Env.OpenAITemperature = getFloatEnvWithDefault("OPENAI_TEMPERATURE", constants.OpenAITemperature)
 
-	// Gemini configs
+	// Gemini configs - API key only, models defined in constants/supported_models.go
 	Env.GeminiAPIKey = getRequiredEnv("GEMINI_API_KEY", "")
-	Env.GeminiModel = getEnvWithDefault("GEMINI_MODEL", constants.GeminiModel)
-	Env.GeminiMaxCompletionTokens = getIntEnvWithDefault("GEMINI_MAX_COMPLETION_TOKENS", constants.GeminiMaxCompletionTokens)
-	Env.GeminiTemperature = getFloatEnvWithDefault("GEMINI_TEMPERATURE", constants.GeminiTemperature)
+
+	// Claude configs - API key only, models defined in constants/supported_models.go
+	Env.ClaudeAPIKey = getRequiredEnv("CLAUDE_API_KEY", "")
+
+	// Ollama configs - base URL only, models defined in constants/supported_models.go
+	// Empty by default - only enable when explicitly configured
+	Env.OllamaBaseURL = getEnvWithDefault("OLLAMA_BASE_URL", "")
 
 	// SMTP Email configs
 	Env.SMTPHost = getEnvWithDefault("SMTP_HOST", "")
@@ -156,7 +157,7 @@ func LoadEnv() error {
 	Env.SpreadsheetPostgresSSLMode = getEnvWithDefault("SPREADSHEET_POSTGRES_SSL_MODE", "disable")
 	Env.SpreadsheetDataEncryptionKey = getRequiredEnv("SPREADSHEET_DATA_ENCRYPTION_KEY", "spreadsheet_data_key_32bytes")
 
-	// Google OAuth configs
+	// Google OAuth configs (used for both authentication and Google Sheets integration)
 	Env.GoogleClientID = getEnvWithDefault("GOOGLE_CLIENT_ID", "")
 	Env.GoogleClientSecret = getEnvWithDefault("GOOGLE_CLIENT_SECRET", "")
 	Env.GoogleRedirectURL = getEnvWithDefault("GOOGLE_REDIRECT_URL", "http://localhost:5173/auth/google/callback")
@@ -198,7 +199,7 @@ func getFloatEnvWithDefault(key string, defaultValue float64) float64 {
 	if strValue == "" {
 		return defaultValue
 	}
-	
+
 	value, err := strconv.ParseFloat(strValue, 64)
 	if err != nil {
 		fmt.Printf("Warning: Invalid value for %s, using default: %f\n", key, defaultValue)
@@ -232,6 +233,23 @@ func validateConfig() error {
 	if !validSSLModes[Env.SpreadsheetPostgresSSLMode] {
 		return fmt.Errorf("invalid SPREADSHEET_POSTGRES_SSL_MODE: %s, must be one of: disable, require, verify-ca, verify-full", Env.SpreadsheetPostgresSSLMode)
 	}
+
+	// Validate Default LLM Model if specified
+	if Env.DefaultLLMModel != "" {
+		model := constants.GetLLMModel(Env.DefaultLLMModel)
+		if model == nil {
+			return fmt.Errorf("invalid DEFAULT_LLM_MODEL: %s, model not found in supported models", Env.DefaultLLMModel)
+		}
+		if !model.IsEnabled {
+			return fmt.Errorf("DEFAULT_LLM_MODEL: %s is disabled", Env.DefaultLLMModel)
+		}
+	}
+
+	// Disable models for providers without API keys configured
+	constants.DisableUnavailableProviders(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)
+
+	// Log LLM model initialization status
+	constants.LogModelInitialization(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)
 
 	return nil
 }
