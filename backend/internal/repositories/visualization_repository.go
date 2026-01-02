@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"errors"
+	"log"
 	"neobase-ai/internal/models"
 	"neobase-ai/pkg/mongodb"
 
@@ -32,8 +33,15 @@ func NewVisualizationRepository(mongoClient *mongodb.MongoDBClient) IVisualizati
 }
 
 func (r *VisualizationRepository) CreateVisualization(ctx context.Context, visualization *models.MessageVisualization) error {
-	_, err := r.collection.InsertOne(ctx, visualization)
-	return err
+	log.Printf("CreateVisualization -> Saving visualization with ID: %s, CanVisualize: %v, ChartType: %s",
+		visualization.ID.Hex(), visualization.CanVisualize, visualization.ChartType)
+	result, err := r.collection.InsertOne(ctx, visualization)
+	if err != nil {
+		log.Printf("CreateVisualization -> Error inserting: %v", err)
+		return err
+	}
+	log.Printf("CreateVisualization -> Successfully inserted with ID: %v", result.InsertedID)
+	return nil
 }
 
 func (r *VisualizationRepository) UpdateVisualization(ctx context.Context, id interface{}, visualization *models.MessageVisualization) error {
@@ -86,25 +94,32 @@ func (r *VisualizationRepository) GetVisualizationByQueryID(ctx context.Context,
 
 	// Try first with visualization ID (_id)
 	filter := bson.M{"_id": queryIDOrVizID}
+	log.Printf("GetVisualizationByQueryID -> Attempting to fetch with ID filter: %v", filter)
 	err := r.collection.FindOne(ctx, filter).Decode(&visualization)
 
 	if err != nil {
+		log.Printf("GetVisualizationByQueryID -> First attempt failed: %v", err)
 		// If not found by ID, try by query_id for backward compatibility
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			filter = bson.M{"query_id": queryIDOrVizID}
+			log.Printf("GetVisualizationByQueryID -> Attempting fallback with query_id filter: %v", filter)
 			err = r.collection.FindOne(ctx, filter).Decode(&visualization)
 
 			if err != nil {
+				log.Printf("GetVisualizationByQueryID -> Fallback also failed: %v", err)
 				if errors.Is(err, mongo.ErrNoDocuments) {
+					log.Printf("GetVisualizationByQueryID -> No document found for queryIDOrVizID: %v", queryIDOrVizID)
 					return nil, nil
 				}
 				return nil, err
 			}
 		} else {
+			log.Printf("GetVisualizationByQueryID -> Unexpected error: %v", err)
 			return nil, err
 		}
 	}
 
+	log.Printf("GetVisualizationByQueryID -> Successfully found visualization: ID=%s", visualization.ID.Hex())
 	return &visualization, nil
 }
 

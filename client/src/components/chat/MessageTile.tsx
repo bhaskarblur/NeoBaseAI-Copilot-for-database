@@ -164,7 +164,8 @@ export default function MessageTile({
                             chart_type: query.visualization.chart_type,
                             title: query.visualization.title,
                             chart_configuration: query.visualization.chart_configuration,
-                            chart_data: query.visualization.chart_data
+                            chart_data: query.visualization.chart_data,
+                            updated_at: query.visualization.updated_at
                         };
                         
                         // Mark visualization as generated
@@ -713,6 +714,21 @@ export default function MessageTile({
                     ...prev,
                     [queryId]: response.data
                 }));
+                
+                // Update message with the new visualization data
+                setMessage({
+                    ...message,
+                    queries: message.queries?.map(q => 
+                        q.id === queryId 
+                            ? {
+                                ...q,
+                                visualization: response.data,
+                                visualization_id: response.data.visualization_id
+                              }
+                            : q
+                    ) || []
+                });
+                
                 setVisualizationStates(prev => ({
                     ...prev,
                     [queryId]: { loading: false, error: null, isGenerating: false }
@@ -767,7 +783,8 @@ export default function MessageTile({
                         ...prev[queryId],
                         chart_data: response.data.chart_data,
                         total_records: response.data.total_records,
-                        returned_count: response.data.returned_count
+                        returned_count: response.data.returned_count,
+                        updated_at: response.data.updated_at
                     }
                 }));
                 
@@ -2031,7 +2048,6 @@ export default function MessageTile({
                                                                 </button>
                                                                 {visualizations[query.id] && (
                                                                     <>
-                                                                        <div className="border-t border-gray-700 my-1"></div>
                                                                         <button 
                                                                             onClick={(e) => {
                                                                                 e.preventDefault();
@@ -2041,12 +2057,7 @@ export default function MessageTile({
                                                                             }}
                                                                             className="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-700 flex items-center gap-2"
                                                                         >
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                                                <line x1="18" y1="20" x2="18" y2="10"></line>
-                                                                                <line x1="12" y1="20" x2="12" y2="4"></line>
-                                                                                <line x1="6" y1="20" x2="6" y2="14"></line>
-                                                                            </svg>
-                                                                            Export as Visualization
+                                                                            Export Visualization
                                                                         </button>
                                                                     </>
                                                                 )}
@@ -2128,8 +2139,8 @@ export default function MessageTile({
                                                 <button
                                                     onClick={() => handleCopyToClipboard(JSON.stringify(resultToShow, null, 2), { type: 'result', queryId: query.id })}
                                                     className="p-2 hover:bg-gray-800 rounded text-white hover:text-gray-200 hover-tooltip-messagetile"
-                                                    data-tooltip="Copy result"
-                                                    title="Copy result"
+                                                    data-tooltip="Copy JSON"
+                                                    title="Copy JSON"
                                                 >
                                                     <Copy className="w-4 h-4" />
                                                 </button>
@@ -2229,6 +2240,7 @@ export default function MessageTile({
                                                                             data={visualizations[query.id].chart_data}
                                                                             onRetry={() => handleGenerateVisualization(query.id)}
                                                                             onRegenerate={() => handleGenerateVisualization(query.id)}
+                                                                            updatedAt={visualizations[query.id].updated_at}
                                                                         />
                                                                     </div>
                                                                 ) : query.visualization && query.visualization.can_visualize && !visualizations[query.id]?.chart_data ? (
@@ -2454,7 +2466,7 @@ export default function MessageTile({
             const visualizationElement = document.querySelector(`[data-query-id="${queryId}"] .recharts-wrapper`);
             
             if (!visualizationElement) {
-                toast.error('Visualization not found', toastStyle);
+                toast.error('Visualization not found or loaded', toastStyle);
                 return;
             }
 

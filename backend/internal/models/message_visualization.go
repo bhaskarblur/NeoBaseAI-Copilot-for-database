@@ -1,8 +1,6 @@
 package models
 
 import (
-	"time"
-
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -10,7 +8,6 @@ import (
 // Each Query can have its own MessageVisualization record for independent visualization management
 // Relationship: Query.VisualizationID → MessageVisualization.ID
 type MessageVisualization struct {
-	ID                 primitive.ObjectID  `bson:"_id" json:"id"`
 	MessageID          primitive.ObjectID  `bson:"message_id" json:"message_id"`
 	QueryID            *primitive.ObjectID `bson:"query_id,omitempty" json:"query_id,omitempty"` // Reference to Query for per-query visualization (enables 1:1 query-visualization relationship)
 	ChatID             primitive.ObjectID  `bson:"chat_id" json:"chat_id"`
@@ -32,8 +29,8 @@ type MessageVisualization struct {
 	YAxisLabel         string              `bson:"y_axis_label,omitempty" json:"y_axis_label,omitempty"`
 	GeneratedBy        string              `bson:"generated_by,omitempty" json:"generated_by,omitempty"` // LLM model used
 	Error              string              `bson:"error,omitempty" json:"error,omitempty"`
-	CreatedAt          time.Time           `bson:"created_at" json:"created_at"`
-	UpdatedAt          time.Time           `bson:"updated_at" json:"updated_at"`
+
+	Base `bson:",inline"`
 }
 
 // NewMessageVisualization creates a new MessageVisualization instance
@@ -45,18 +42,15 @@ func NewMessageVisualization(
 	chatID, userID primitive.ObjectID,
 	queryID *primitive.ObjectID,
 ) *MessageVisualization {
-	now := time.Now()
 	msgID := primitive.NilObjectID
 	if messageID != nil {
 		msgID = *messageID
 	}
 	return &MessageVisualization{
-		ID:        primitive.NewObjectID(),
+		Base:      NewBase(),
 		MessageID: msgID,
 		QueryID:   queryID,
 		ChatID:    chatID,
 		UserID:    userID,
-		CreatedAt: now,
-		UpdatedAt: now,
 	}
 }
