@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"neobase-ai/internal/models"
+	"time"
 )
 
 type CreateMessageRequest struct {
@@ -73,6 +74,7 @@ type VisualizationData struct {
 	Description        *string                `json:"description,omitempty"`
 	ChartConfiguration map[string]interface{} `json:"chart_configuration,omitempty"` // Full chart config JSON parsed
 	GeneratedBy        *string                `json:"generated_by,omitempty"`
+	UpdatedAt          *string                `json:"updated_at,omitempty"` // When the visualization was last generated
 }
 
 type Pagination struct {
@@ -173,6 +175,9 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 		if vizRepo != nil && ctx != nil && query.VisualizationID != nil {
 			log.Printf("ToQueryDto -> Fetching visualization for query %s with visualization ID: %s", query.ID.Hex(), query.VisualizationID.Hex())
 			viz, err := vizRepo.GetVisualizationByQueryID(ctx, *query.VisualizationID)
+			if err != nil {
+				log.Printf("ToQueryDto -> Error fetching visualization: %v", err)
+			}
 			if err == nil && viz != nil {
 				log.Printf("ToQueryDto -> Found visualization: canVisualize=%v, chartType=%s", viz.CanVisualize, viz.ChartType)
 				visualizationData = &VisualizationData{
@@ -197,6 +202,9 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 				if viz.GeneratedBy != "" {
 					visualizationData.GeneratedBy = &viz.GeneratedBy
 				}
+				// Include the timestamp when the visualization was last generated
+				updatedAtStr := viz.UpdatedAt.Format(time.RFC3339)
+				visualizationData.UpdatedAt = &updatedAtStr
 
 				// Parse and include the full chart configuration if available
 				if viz.ChartConfigJSON != "" {

@@ -5,7 +5,8 @@ import {
   Cell, ReferenceLine
 } from 'recharts';
 import { ChartConfiguration } from '../types/visualization';
-import { PencilRuler, RefreshCcw } from 'lucide-react';
+import { PencilRuler, RefreshCcw, Clock } from 'lucide-react';
+import TooltipComponent from './ui/Tooltip';
 
 interface ChartRendererProps {
   config: ChartConfiguration;
@@ -15,6 +16,7 @@ interface ChartRendererProps {
   onError?: (error: string) => void;
   onRetry?: () => void;
   onRegenerate?: () => void;
+  updatedAt?: string; // Timestamp when the chart was last generated
 }
 
 // ============================================
@@ -137,26 +139,53 @@ const ChartErrorState = ({ error, onRetry }: { error: string; onRetry?: () => vo
   </div>
 );
 
-const ChartHeader = ({ config, onRegenerate }: { config: ChartConfiguration; onRegenerate?: () => void }) => (
-  <div className="mb-4 pb-2 border-b border-gray-700/30 flex items-center justify-between">
-    <div>
-      <h3 className="text-base font-bold text-white mb-1">{config.title}</h3>
-      {config.description && (
-        <p className="text-sm text-gray-400">{config.description}</p>
-      )}
+const ChartHeader = ({ config, onRegenerate, updatedAt }: { config: ChartConfiguration; onRegenerate?: () => void; updatedAt?: string }) => {
+  const formatTimestamp = (timestamp: string): string => {
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (e) {
+      return timestamp;
+    }
+  };
+
+  return (
+    <div className="mb-4 pb-2 border-b border-gray-700/30">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <h3 className="text-base font-bold text-white mb-1">{config.title}</h3>
+          {config.description && (
+            <p className="text-sm text-gray-400 mb-3">{config.description}</p>
+          )}
+          {updatedAt && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+              <Clock className="w-3.5 h-3.5" />
+              <span>{formatTimestamp(updatedAt)}</span>
+            </div>
+          )}
+        </div>
+        {onRegenerate && (
+          <TooltipComponent content="This is used to regenerate the graph with latest data.">
+            <button
+              onClick={onRegenerate}
+              className="p-2 hover:bg-gray-800 rounded transition-colors text-gray-400 hover:text-gray-200 flex items-center gap-2 whitespace-nowrap ml-4 flex-shrink-0"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              <span className="text-sm font-semibold">Regenerate</span>
+            </button>
+          </TooltipComponent>
+        )}
+      </div>
     </div>
-    {onRegenerate && (
-      <button
-        onClick={onRegenerate}
-        className="p-2 hover:bg-gray-800 rounded transition-colors text-gray-400 hover:text-gray-200 flex items-center gap-2 whitespace-nowrap"
-        title="Regenerate chart"
-      >
-        <RefreshCcw className="w-4 h-4" />
-        <span className="text-sm font-semibold">Regenerate</span>
-      </button>
-    )}
-  </div>
-);
+  );
+};
 
 // Line Chart Component
 const LineChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
@@ -853,7 +882,8 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({
   isLoading = false,
   error,
   onRetry,
-  onRegenerate
+  onRegenerate,
+  updatedAt
 }) => {
   const isEmpty = !data || data.length === 0;
 
@@ -888,7 +918,7 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({
 
   return (
     <div className="w-full bg-gray-950 rounded-lg p-5">
-      <ChartHeader config={config} onRegenerate={onRegenerate} />
+      <ChartHeader config={config} onRegenerate={onRegenerate} updatedAt={updatedAt} />
       <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto overflow-y-auto" style={{ maxHeight: '600px' }}>
         {renderChart()}
       </div>

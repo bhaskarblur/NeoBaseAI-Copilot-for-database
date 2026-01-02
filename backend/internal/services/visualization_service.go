@@ -10,6 +10,7 @@ import (
 	"neobase-ai/internal/models"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -244,6 +245,9 @@ func (s *chatService) GenerateVisualizationForMessage(
 		} else if vizID != "" {
 			log.Printf("GenerateVisualizationForMessage -> Visualization saved with ID: %s", vizID)
 			visualization.VisualizationID = vizID
+			// Set UpdatedAt to current timestamp on response
+			visualization.UpdatedAt = time.Now().Format(time.RFC3339)
+			log.Printf("GenerateVisualizationForMessage -> Visualization updatedAt saved with timestamp: %s", visualization.UpdatedAt)
 
 			// Update the Query object to link it to this visualization
 			msgObjID, _ := primitive.ObjectIDFromHex(messageID)
@@ -253,6 +257,8 @@ func (s *chatService) GenerateVisualizationForMessage(
 			if updateErr := s.chatRepo.UpdateQueryVisualizationID(msgObjID, queryObjID, vizObjID); updateErr != nil {
 				log.Printf("GenerateVisualizationForMessage -> Warning: Failed to update query visualization ID: %v", updateErr)
 				// Don't fail the response, visualization is still valid
+			} else {
+				log.Printf("GenerateVisualizationForMessage -> Successfully linked visualization %s to query %s in message %s", vizID, queryID, messageID)
 			}
 
 			// Include chart data directly from finalResults (we already have it!)
@@ -770,12 +776,43 @@ func (s *chatService) SaveVisualizationToMessage(
 
 	msgViz.Error = visualization.Error
 
+	// Check if visualization already exists for this query (if queryID provided)
+	// If yes, update it instead of creating new one to save storage
+	if queryObjID != nil {
+		existingViz, err := s.visualizationRepo.GetVisualizationByQueryID(ctx, *queryObjID)
+		if err == nil && existingViz != nil {
+			// Visualization exists for this query - update it instead
+			log.Printf("SaveVisualizationToMessage -> Existing visualization found for queryID: %s, updating instead of creating new", queryID)
+
+			// Preserve the existing ID and creation time
+			msgViz.ID = existingViz.ID
+			msgViz.CreatedAt = existingViz.CreatedAt
+			msgViz.UpdatedAt = time.Now() // Update the timestamp
+
+			// Update in database
+			updateErr := s.visualizationRepo.UpdateVisualization(ctx, existingViz.ID, msgViz)
+			if updateErr != nil {
+				return "", updateErr
+			}
+
+			log.Printf("SaveVisualizationToMessage -> Successfully updated existing visualization with ID: %s", existingViz.ID.Hex())
+			return existingViz.ID.Hex(), nil
+		} else if err != nil {
+			log.Printf("SaveVisualizationToMessage -> Error checking for existing visualization: %v (will create new)", err)
+		}
+		// If no existing visualization, fall through to create new
+	}
+
+	// No existing visualization found or queryID not provided - create new one
+	msgViz.UpdatedAt = time.Now()
+
 	// Save to database
 	err = s.visualizationRepo.CreateVisualization(ctx, msgViz)
 	if err != nil {
 		return "", err
 	}
 
+	log.Printf("SaveVisualizationToMessage -> Created new visualization with ID: %s", msgViz.ID.Hex())
 	// Return the ID of the saved visualization
 	return msgViz.ID.Hex(), nil
 }
@@ -848,6 +885,7 @@ func (s *chatService) GetVisualizationForQuery(
 		CanVisualize: msgViz.CanVisualize,
 		Reason:       msgViz.Reason,
 		Error:        msgViz.Error,
+		UpdatedAt:    msgViz.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// Parse chart configuration if available
@@ -1109,6 +1147,7 @@ func (s *chatService) GetVisualizationData(
 	if visualization != nil {
 		response["can_visualize"] = visualization.CanVisualize
 		response["chart_configuration"] = visualization.ChartConfiguration
+		response["updated_at"] = visualization.UpdatedAt
 		if visualization.Reason != "" {
 			response["reason"] = visualization.Reason
 		}

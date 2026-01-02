@@ -164,7 +164,8 @@ export default function MessageTile({
                             chart_type: query.visualization.chart_type,
                             title: query.visualization.title,
                             chart_configuration: query.visualization.chart_configuration,
-                            chart_data: query.visualization.chart_data
+                            chart_data: query.visualization.chart_data,
+                            updated_at: query.visualization.updated_at
                         };
                         
                         // Mark visualization as generated
@@ -713,6 +714,21 @@ export default function MessageTile({
                     ...prev,
                     [queryId]: response.data
                 }));
+                
+                // Update message with the new visualization data
+                setMessage({
+                    ...message,
+                    queries: message.queries?.map(q => 
+                        q.id === queryId 
+                            ? {
+                                ...q,
+                                visualization: response.data,
+                                visualization_id: response.data.visualization_id
+                              }
+                            : q
+                    ) || []
+                });
+                
                 setVisualizationStates(prev => ({
                     ...prev,
                     [queryId]: { loading: false, error: null, isGenerating: false }
@@ -767,7 +783,8 @@ export default function MessageTile({
                         ...prev[queryId],
                         chart_data: response.data.chart_data,
                         total_records: response.data.total_records,
-                        returned_count: response.data.returned_count
+                        returned_count: response.data.returned_count,
+                        updated_at: response.data.updated_at
                     }
                 }));
                 
@@ -2229,6 +2246,7 @@ export default function MessageTile({
                                                                             data={visualizations[query.id].chart_data}
                                                                             onRetry={() => handleGenerateVisualization(query.id)}
                                                                             onRegenerate={() => handleGenerateVisualization(query.id)}
+                                                                            updatedAt={visualizations[query.id].updated_at}
                                                                         />
                                                                     </div>
                                                                 ) : query.visualization && query.visualization.can_visualize && !visualizations[query.id]?.chart_data ? (

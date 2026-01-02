@@ -294,6 +294,9 @@ func (r *chatRepository) FindMessagesByChatAfterTime(chatID primitive.ObjectID, 
 
 // UpdateQueryVisualizationID updates a query's visualization ID within a message
 func (r *chatRepository) UpdateQueryVisualizationID(messageID, queryID, visualizationID primitive.ObjectID) error {
+	log.Printf("UpdateQueryVisualizationID -> Attempting to update: messageID=%s, queryID=%s, visualizationID=%s",
+		messageID.Hex(), queryID.Hex(), visualizationID.Hex())
+
 	filter := bson.M{
 		"_id":        messageID,
 		"queries.id": queryID,
@@ -303,6 +306,22 @@ func (r *chatRepository) UpdateQueryVisualizationID(messageID, queryID, visualiz
 			"queries.$.visualization_id": visualizationID,
 		},
 	}
-	_, err := r.messageCollection.UpdateOne(context.Background(), filter, update)
-	return err
+
+	result, err := r.messageCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		log.Printf("UpdateQueryVisualizationID -> Error: %v", err)
+		return err
+	}
+
+	log.Printf("UpdateQueryVisualizationID -> Matched: %d, Modified: %d, VisualizationID: %s",
+		result.MatchedCount, result.ModifiedCount, visualizationID.Hex())
+
+	if result.MatchedCount == 0 {
+		log.Printf("UpdateQueryVisualizationID -> WARNING: No documents matched! Filter: %+v", filter)
+	}
+	if result.ModifiedCount == 0 {
+		log.Printf("UpdateQueryVisualizationID -> WARNING: No documents modified! Filter: %+v", filter)
+	}
+
+	return nil
 }

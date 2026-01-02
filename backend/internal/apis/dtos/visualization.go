@@ -17,6 +17,7 @@ type VisualizationResponse struct {
 	TotalRecords       interface{}         `json:"total_records,omitempty"`  // Total record count
 	ReturnedCount      interface{}         `json:"returned_count,omitempty"` // Rows returned in this response
 	HasMore            interface{}         `json:"has_more,omitempty"`       // Whether more data is available
+	UpdatedAt          string              `json:"updated_at,omitempty"`     // When the visualization was generated
 	Error              string              `json:"error,omitempty"`
 }
 
