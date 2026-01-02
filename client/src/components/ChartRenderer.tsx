@@ -292,7 +292,7 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
         margin={{
           top: CHART_THEME.dimensions.marginTop,
           right: CHART_THEME.dimensions.marginRight,
-          left: CHART_THEME.dimensions.marginLeft,
+          left: CHART_THEME.dimensions.marginLeft + 5,
           bottom: CHART_THEME.dimensions.marginBottom,
         }}
       >
@@ -310,7 +310,7 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
           label={{
             value: config.chart_render.x_axis.label,
             position: 'bottom' as const,
-            offset: -25,
+            offset: -15,
             fontSize: CHART_THEME.axis.labelFontSize,
             fontWeight: CHART_THEME.axis.labelFontWeight,
             fill: CHART_THEME.axis.labelColor,
@@ -325,7 +325,7 @@ const BarChartComponent: React.FC<ChartRendererProps> = ({ config, data }) => {
               value: config.chart_render.y_axis.label,
               angle: -90,
               position: 'insideLeft' as const,
-              offset: -4,
+              offset: -15,
               dy: 20,
               fontSize: CHART_THEME.axis.labelFontSize,
               fontWeight: CHART_THEME.axis.labelFontWeight,
@@ -917,9 +917,9 @@ const ChartRenderer: React.FC<ChartRendererProps> = ({
   };
 
   return (
-    <div className="w-full bg-gray-950 rounded-lg p-5">
+    <div className="w-full bg-gray-900 rounded-lg p-5">
       <ChartHeader config={config} onRegenerate={onRegenerate} updatedAt={updatedAt} />
-      <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto overflow-y-auto" style={{ maxHeight: '600px' }}>
+      <div className="rounded-lg p-4 overflow-x-auto overflow-y-auto" style={{ maxHeight: '600px' }}>
         {renderChart()}
       </div>
     </div>
