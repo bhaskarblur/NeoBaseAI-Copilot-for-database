@@ -495,11 +495,13 @@ const chatService = {
         }
     },
 
-    async getQueryRecommendations(chatId: string): Promise<QueryRecommendationsResponse> {
+    async getQueryRecommendations(chatId: string, streamId?: string): Promise<QueryRecommendationsResponse> {
         try {
+            const params = streamId ? { stream_id: streamId } : {};
             const response = await axios.get<QueryRecommendationsResponse>(
                 `${API_URL}/chats/${chatId}/recommendations`,
                 {
+                    params,
                     withCredentials: true,
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('token')}`

@@ -155,6 +155,9 @@ export default function ChatWindow({
   });
   const wasStreamingRef = useRef<boolean>(false);
   const currentChatIdRef = useRef<string | null>(null);
+  const currentFetchChatIdRef = useRef<string | null>(null); // Track which chat we're fetching messages for
+  const pageRef = useRef<number>(1); // Track current page to avoid stale closures
+  const hasMoreRef = useRef<boolean>(true); // Track hasMore to avoid stale closures
   const [viewMode, setViewMode] = useState<'chats' | 'pinned'>('chats');
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const scrollPositions = useRef<{ chats: number; pinned: number }>({ chats: 0, pinned: 0 });
@@ -324,7 +327,15 @@ export default function ChatWindow({
     
     // Only start shimmer if we're actually going to fetch
     const key = `${chat.id}-${recoVersion}`;
+    console.log('ChatWindow -> useEffect [recoVersion] -> Checking recommendations fetch', {
+      chatId: chat.id,
+      recoVersion,
+      lastRecoKey: lastRecoKeyRef.current,
+      key,
+      streamId
+    });
     if (lastRecoKeyRef.current === key) {
+      console.log('ChatWindow -> useEffect [recoVersion] -> Skipping, already fetched for this key');
       return;
     }
     
@@ -339,8 +350,9 @@ export default function ChatWindow({
     
     (async () => {
       try {
+        console.log('ChatWindow -> useEffect [recoVersion] -> Fetching recommendations from API');
         lastRecoKeyRef.current = key;
-        const resp = await chatService.getQueryRecommendations(chat.id);
+        const resp = await chatService.getQueryRecommendations(chat.id, streamId || undefined);
         if (!cancelled) {
           if (resp.success && resp.data?.recommendations) {
             setRecommendations(resp.data.recommendations.map((r: any) => r.text));
@@ -357,7 +369,7 @@ export default function ChatWindow({
     return () => {
       cancelled = true;
     };
-  }, [recoVersion, chat?.id]);
+  }, [recoVersion, chat?.id, streamId]);
 
   const setMessage = (message: Message) => {
     console.log('setMessage called with message:', message);
@@ -723,13 +735,30 @@ export default function ChatWindow({
   const fetchMessages = useCallback(async (page: number) => {
     if (!chat?.id || isLoadingMessages) return;
 
+    // Store the chat ID we're fetching for to detect if it changes
+    const fetchingForChatId = chat.id;
+    currentFetchChatIdRef.current = fetchingForChatId;
+
     try {
-      console.log('Fetching messages for chat:', chat.id, 'page:', page);
+      console.log('Fetching messages for chat:', fetchingForChatId, 'page:', page);
+      
+      // Check if chat changed before we even start
+      if (currentFetchChatIdRef.current !== fetchingForChatId) {
+        console.log('Chat changed before fetch, aborting');
+        return;
+      }
+      
       setIsLoadingMessages(true);
       isLoadingOldMessages.current = page > 1;
       messageUpdateSource.current = 'api';
 
-      const response = await chatService.getMessages(chat.id, page, pageSize);
+      const response = await chatService.getMessages(fetchingForChatId, page, pageSize);
+      
+      // Check if chat changed after response
+      if (currentFetchChatIdRef.current !== fetchingForChatId) {
+        console.log('Chat changed after fetch, discarding messages');
+        return;
+      }
 
       if (response.success) {
         const newMessages = response.data.messages.map(transformBackendMessage);
@@ -738,18 +767,8 @@ export default function ChatWindow({
         if (page === 1) {
           // For initial load, set messages and scroll to bottom
           setMessages(newMessages);
-          // Trigger recommendations fetch for this chat (single call) only if not already fetched for this chat
-          if (lastRecoKeyRef.current !== chat.id) {
-            lastRecoKeyRef.current = chat.id;
-            setIsLoadingRecommendations(true);
-            const resp = await chatService.getQueryRecommendations(chat.id).catch(() => null);
-            if (resp && resp.success && resp.data?.recommendations) {
-              setRecommendations(resp.data.recommendations.map((r: any) => r.text));
-            } else {
-              setRecommendations([]);
-            }
-            setIsLoadingRecommendations(false);
-          }
+          // Recommendations are now handled by useEffect watching [recoVersion, chat?.id, streamId]
+          console.log('ChatWindow -> fetchMessages -> page 1, recommendations handled by useEffect');
           if (isInitialLoad.current) {
             // Use multiple timeouts to ensure DOM is fully updated and all images/content loaded
             setTimeout(() => {
@@ -880,17 +899,37 @@ export default function ChatWindow({
     }
   }, [chat?.id, messages, pinnedMessages, setMessages]);
 
+  // Sync refs with state
+  useEffect(() => {
+    pageRef.current = page;
+  }, [page]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
   // Update intersection observer effect
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
+        // Only trigger if we're viewing chats and we have more messages
+        // Use refs to avoid stale closures
+        // Don't trigger during initial load or if we're still on page 1
         if (entries[0].isIntersecting &&
-          hasMore &&
+          hasMoreRef.current &&
           !isLoadingMessages &&
-          viewMode === 'chats') {  // Only paginate regular messages in chat view
-          console.log('Loading more messages, current page:', page);
-          setPage(prev => prev + 1);
-          fetchMessages(page + 1);  // Fetch next page immediately
+          !isInitialLoad.current &&  // Don't trigger during initial load
+          pageRef.current > 0 &&  // Ensure we have a valid page
+          viewMode === 'chats' &&
+          chat?.id &&
+          currentFetchChatIdRef.current === chat.id) {  // Ensure we're still on same chat
+          const nextPage = pageRef.current + 1;
+          console.log('Loading more messages, current page:', pageRef.current, 'for chat:', chat.id);
+          setPage(nextPage);
+          // Call fetchMessages with the chat ID to ensure we use the latest closure
+          if (chat?.id) {
+            fetchMessages(nextPage);
+          }
         }
       },
       {
@@ -905,13 +944,14 @@ export default function ChatWindow({
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoadingMessages, page, fetchMessages, chat?.id, viewMode]);
+  }, [isLoadingMessages, fetchMessages, chat?.id, viewMode]);
 
   // Keep only necessary effects
   useEffect(() => {
     if (chat?.id && chat.id !== currentChatIdRef.current) {
       // Update current chat ID
       currentChatIdRef.current = chat.id;
+      currentFetchChatIdRef.current = chat.id; // Also update fetch tracking ref
 
       // Close search when changing chats
       if (showSearch) {
@@ -935,6 +975,9 @@ export default function ChatWindow({
       
       setPage(1);
       setHasMore(true);
+      // Also update refs immediately
+      pageRef.current = 1;
+      hasMoreRef.current = true;
       setMessages([]);
       setPinnedMessages([]); // Reset pinned messages when changing chats
       
@@ -1213,6 +1256,52 @@ export default function ChatWindow({
     setShowRefreshSchema(false);
   }, [chat?.id, chat?.connection.database, onCancelRefreshSchema]);
 
+  // Memoize button callback to prevent unnecessary re-renders of MessageTile
+  const handleButtonCallback = useCallback((message: Message, action: string, label?: string) => {
+    if (action === "refresh_schema") {
+      setShowRefreshSchema(true);
+    } else if (action === "fix_error") {
+      handleFixErrorAction(message);
+    } else if (action === "fix_rollback_error") {
+      handleFixRollbackErrorAction(message);
+    } else if (action === "try_again") {
+      const userMessage = messages.find(msg => msg.id === message.user_message_id || (msg.type === 'user' && msg.created_at < message.created_at && msg.type === 'user'));
+      if (userMessage) {
+        handleSendMessage(userMessage.content);
+      } else {
+        toast.error('Could not find original message to retry');
+      }
+    } else if (action === "open_settings") {
+      setOpenWithSettingsTab(true);
+      setShowEditConnection(true);
+    } else {
+      console.log(`Action not implemented, sending it as a message to AI Assistant: ${action}`);
+      handleSendMessage(`${label}`);
+    }
+  }, [messages, handleSendMessage]);
+
+  // Separate callback for welcome message to avoid passing message param
+  const handleWelcomeButtonCallback = useCallback((action: string) => {
+    if (action === "refresh_schema") {
+      setShowRefreshSchema(true);
+    } else if (action === "try_again") {
+      const streamingMsgIndex = messages.findIndex(msg => msg.is_streaming);
+      if (streamingMsgIndex > 0) {
+        const userMessage = messages[streamingMsgIndex - 1];
+        if (userMessage && userMessage.type === 'user') {
+          handleSendMessage(userMessage.content);
+        } else {
+          toast.error('Could not find original message to retry');
+        }
+      } else {
+        toast.error('Could not find original message to retry');
+      }
+    } else if (action === "open_settings") {
+      setOpenWithSettingsTab(true);
+      setShowEditConnection(true);
+    }
+  }, [messages, handleSendMessage]);
+
   return (
     <div className={`
       flex-1 
@@ -1395,32 +1484,7 @@ export default function ChatWindow({
                   isSearchResult={showSearch && searchResults.some(r => r === `msg-${message.id}`)}
                   isCurrentSearchResult={showSearch && searchResults[currentSearchIndex] === `msg-${message.id}`}
                   searchResultRefs={searchResultRefs}
-                  buttonCallback={(action, label) => {
-                    if (action === "refresh_schema") {
-                      setShowRefreshSchema(true);
-                    } else if (action === "fix_error") {
-                      // Handle fix_error action
-                      handleFixErrorAction(message);
-                    } else if (action === "fix_rollback_error") {
-                      // Handle fix_rollback_error action
-                      handleFixRollbackErrorAction(message);
-                    } else if (action === "try_again") {
-                      // Handle try_again action - resend the user's message
-                      const userMessage = messages.find(msg => msg.id === message.user_message_id || (msg.type === 'user' && msg.created_at < message.created_at && msg.type === 'user'));
-                      if (userMessage) {
-                        handleSendMessage(userMessage.content);
-                      } else {
-                        toast.error('Could not find original message to retry');
-                      }
-                    } else if (action === "open_settings") {
-                      setOpenWithSettingsTab(true);
-                      setShowEditConnection(true);
-                    } else {
-                      console.log(`Action not implemented, sending it as a message to AI Assistant: ${action}`);
-                      handleSendMessage(`${label}`);
-                      // toast.error(`There is no available action for this button: ${action}`);
-                    }
-                  }}
+                  buttonCallback={(action, label) => handleButtonCallback(message, action, label)}
                 />
               ))}
               {/* Inline recommendations under the latest AI message within this date group */}
@@ -1514,28 +1578,7 @@ export default function ChatWindow({
                   isSearchResult={false}
                   isCurrentSearchResult={false}
                   searchResultRefs={searchResultRefs}
-                  buttonCallback={(action) => {
-                    if (action === "refresh_schema") {
-                      setShowRefreshSchema(true);
-                    } else if (action === "try_again") {
-                      // Handle try_again action - resend the user's message
-                      // Find the user message that preceded the timeout message by searching backwards
-                      const streamingMsgIndex = messages.findIndex(msg => msg.is_streaming);
-                      if (streamingMsgIndex > 0) {
-                        const userMessage = messages[streamingMsgIndex - 1];
-                        if (userMessage && userMessage.type === 'user') {
-                          handleSendMessage(userMessage.content);
-                        } else {
-                          toast.error('Could not find original message to retry');
-                        }
-                      } else {
-                        toast.error('Could not find original message to retry');
-                      }
-                    } else if (action === "open_settings") {
-                      setOpenWithSettingsTab(true);
-                      setShowEditConnection(true);
-                    }
-                  }}
+                  buttonCallback={handleWelcomeButtonCallback}
                 />
               ) : (
                 <div className="text-center text-gray-600 mt-40">

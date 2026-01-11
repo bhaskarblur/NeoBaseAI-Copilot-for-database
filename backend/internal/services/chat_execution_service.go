@@ -2878,13 +2878,30 @@ func (s *chatService) removeFixErrorButton(msg *models.Message) {
 }
 
 // GetQueryRecommendations generates 4 random query recommendations with Redis caching
-func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatID string) (*dtos.QueryRecommendationsResponse, uint32, error) {
-	log.Printf("ChatService -> GetQueryRecommendations -> userID: %s, chatID: %s", userID, chatID)
+func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatID string, streamID string) (*dtos.QueryRecommendationsResponse, uint32, error) {
+	log.Printf("ChatService -> GetQueryRecommendations -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
 	// Get connection info
 	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
 	if !exists {
-		return nil, http.StatusBadRequest, fmt.Errorf("database connection not found")
+		log.Printf("ChatService -> GetQueryRecommendations -> Connection not found, creating new connection for chatID: %s", chatID)
+		// Create a new connection instead of returning an error
+		// Use provided streamID or generate a temporary one
+		if streamID == "" {
+			streamID = fmt.Sprintf("recommendations-%s", chatID)
+		}
+		_, err := s.ConnectDB(ctx, userID, chatID, streamID)
+		if err != nil {
+			log.Printf("ChatService -> GetQueryRecommendations -> Failed to create connection: %v", err)
+			return nil, http.StatusBadRequest, fmt.Errorf("failed to connect to database: %v", err)
+		}
+
+		// Get connection info again after creating connection
+		connInfo, exists = s.dbManager.GetConnectionInfo(chatID)
+		if !exists {
+			return nil, http.StatusInternalServerError, fmt.Errorf("connection created but not found in manager")
+		}
+		log.Printf("ChatService -> GetQueryRecommendations -> Successfully created connection for chatID: %s", chatID)
 	}
 
 	// Get chat to access settings and context
