@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, MessageSquare, Pin, RefreshCcw } from 'lucide-react';
+import { ArrowDown, Loader2, Pin, RefreshCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -1350,44 +1350,7 @@ export default function ChatWindow({
       </div>
 
       {/* Tab Switch - Overlay style - Hidden on mobile */}
-      <div className="hidden md:block absolute top-[76px] right-4 z-20">
-        <div className="flex gap-1 p-1 bg-white border-2 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-          <button
-            onClick={() => {
-              // Save current scroll position
-              if (chatContainerRef.current) {
-                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
-              }
-              setViewMode('chats');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
-              viewMode === 'chats' 
-                ? 'bg-black text-white' 
-                : 'bg-white text-black hover:bg-gray-100'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" />
-            
-          </button>
-          <button
-            onClick={() => {
-              // Save current scroll position
-              if (chatContainerRef.current) {
-                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
-              }
-              setViewMode('pinned');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
-              viewMode === 'pinned' 
-                ? 'bg-black text-white' 
-                : 'bg-white text-black hover:bg-gray-100'
-            }`}
-          >
-            <Pin className="w-4 h-4 rotate-45" />
-            
-          </button>
-        </div>
-      </div>
+      {/* Commented out: Toggle for showing messages and pinned messages not needed on desktop */}
 
       <div
         ref={chatContainerRef}

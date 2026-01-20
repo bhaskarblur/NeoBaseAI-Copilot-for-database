@@ -283,12 +283,12 @@ export default function ChatHeader({
                                     onViewModeChange(viewMode === 'pinned' ? 'chats' : 'pinned');
                                 }
                             })}
-                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors md:hidden"
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
                         >
                             {viewMode === 'pinned' ? (
                                 <>
                                     <PinOffIcon className="w-4 h-4 mr-2 text-black rotate-45" />
-                                    Hide Pinned
+                                    Show Messages
                                 </>
                             ) : (
                                 <>
@@ -298,7 +298,7 @@ export default function ChatHeader({
                             )}
                         </button>
                         {viewMode !== undefined && (
-                            <div className="h-px bg-gray-200 mx-2 md:hidden"></div>
+                            <div className="h-px bg-gray-200 mx-2"></div>
                         )}
                         {isConnected ? (
                             <button 
