@@ -1,4 +1,4 @@
-import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon } from 'lucide-react';
+import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon, Settings } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
@@ -265,16 +265,8 @@ export default function ChatHeader({
                             onClick={() => handleDropdownAction(handleEditConnection)}
                             className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
                         >
-                            <Pencil className="w-4 h-4 mr-2 text-black" />
-                            Edit Connection
-                        </button>
-                        <div className="h-px bg-gray-200 mx-2"></div>
-                        <button 
-                            onClick={() => handleDropdownAction(handleClearChat)}
-                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
-                        >
-                            <Eraser className="w-4 h-4 mr-2" />
-                            Clear Chat
+                            <Settings className="w-4 h-4 mr-2 text-black" />
+                            Chat Settings
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
@@ -297,6 +289,15 @@ export default function ChatHeader({
                                 </>
                             )}
                         </button>
+                        <div className="h-px bg-gray-200 mx-2"></div>
+                        <button 
+                            onClick={() => handleDropdownAction(handleClearChat)}
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
+                        >
+                            <Eraser className="w-4 h-4 mr-2" />
+                            Clear Chat
+                        </button>
+                        
                         {viewMode !== undefined && (
                             <div className="h-px bg-gray-200 mx-2"></div>
                         )}
