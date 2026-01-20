@@ -46,8 +46,21 @@ func Initialize() {
 	// Initialize token repository
 	tokenRepo := repositories.NewTokenRepository(redisRepo)
 
+	// Initialize chat repository with Redis support
 	chatRepo := repositories.NewChatRepository(mongodbClient)
+	if chatRepoWithRedis, ok := chatRepo.(interface {
+		SetRedisRepo(redis.IRedisRepositories)
+	}); ok {
+		chatRepoWithRedis.SetRedisRepo(redisRepo)
+	}
+
 	llmRepo := repositories.NewLLMMessageRepository(mongodbClient)
+	if llmRepoWithRedis, ok := llmRepo.(interface {
+		SetRedisRepo(redis.IRedisRepositories)
+	}); ok {
+		llmRepoWithRedis.SetRedisRepo(redisRepo)
+	}
+
 	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient)
 
 	// Provide all dependencies to the container
