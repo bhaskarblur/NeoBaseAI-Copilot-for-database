@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, X, FileText, Table, AlertCircle, Info, Loader2, Database } from 'lucide-react';
 import { Connection, FileUpload } from '../../../types/chat';
+import chatService from '../../../services/chatService';
 
 interface FileUploadTabProps {
   formData: Connection;
@@ -57,15 +58,9 @@ const FileUploadTab: React.FC<FileUploadTabProps> = ({
     
     setLoadingTables(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/chats/${chatId}/tables`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setExistingTables(data.data?.tables || []);
-      }
+      console.log('FileUploadTab: Loading tables for chatId:', chatId);
+      const data = await chatService.getTables(chatId);
+      setExistingTables(data.tables || []);
     } catch (error) {
       console.error('Failed to load existing tables:', error);
     } finally {

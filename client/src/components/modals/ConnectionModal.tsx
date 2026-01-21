@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Chat, ChatSettings, Connection, TableInfo, FileUpload, SSHAuthMethod } from '../../types/chat';
 import chatService from '../../services/chatService';
 import { BasicConnectionTab, SchemaTab, SettingsTab, SSHConnectionTab, FileUploadTab, DataStructureTab, GoogleSheetsTab } from './components';
@@ -140,6 +140,11 @@ export default function ConnectionModal({
   const mongoUriInputRef = useRef<HTMLInputElement>(null);
   const mongoUriSshInputRef = useRef<HTMLInputElement>(null);
   const credentialsTextAreaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Ref to prevent duplicate table loading calls
+  const isLoadingTablesRef = useRef(false);
+  const hasLoadedTablesRef = useRef(false);
+  const lastLoadedChatIdRef = useRef<string | undefined>(undefined);
 
   // Add these refs to store previous tab states
   const [, setTabsVisited] = useState<Record<ModalTab, boolean>>({
@@ -157,6 +162,13 @@ export default function ConnectionModal({
 
   // Update autoExecuteQuery when initialData changes
   useEffect(() => {
+    // Reset the loaded flag when initialData changes (new modal opened with different chat)
+    const currentChatId = initialData?.id;
+    if (currentChatId && currentChatId !== lastLoadedChatIdRef.current) {
+      hasLoadedTablesRef.current = false;
+      lastLoadedChatIdRef.current = undefined;
+    }
+    
     if (initialData) {
       if (initialData.settings.auto_execute_query !== undefined) {
         setAutoExecuteQuery(initialData.settings.auto_execute_query);
@@ -211,17 +223,105 @@ export default function ConnectionModal({
     }
   }, [initialData]);
 
+  // Memoize formData.type to prevent unnecessary re-renders
+  const formDataType = useMemo(() => formData.type, [formData.type]);
+
+  // Track previous dependency values to identify what changed
+  const prevDepsRef = useRef({
+    initialDataId: initialData?.id,
+    activeTab,
+    newChatId,
+    showingNewlyCreatedSchema,
+    formDataType
+  });
+
   // Load tables for Schema tab when editing an existing connection or after creating a new one
   useEffect(() => {
-    // Load tables when schema tab is active and we have either initialData or a new connection
-    const shouldLoadTables = 
-      ((activeTab === 'schema' || (activeTab === 'connection' && (formData.type === 'spreadsheet' || formData.type === 'google_sheets'))) && 
-      ((initialData && !tables.length) || (showingNewlyCreatedSchema && newChatId && !tables.length)));
-    
-    if (shouldLoadTables) {
-      loadTables();
+    // FIRST CHECK: Exit immediately if already loading - do this before any other work
+    if (isLoadingTablesRef.current) {
+      console.log('loadTables useEffect: Already loading, skipping (early exit)');
+      return;
     }
-  }, [initialData, activeTab, tables.length, showingNewlyCreatedSchema, newChatId, formData.type]);
+
+    // Get the current chat ID
+    const currentChatId = initialData?.id || (showingNewlyCreatedSchema ? newChatId : undefined);
+    
+    // Identify what changed
+    const changes = {
+      initialDataId: prevDepsRef.current.initialDataId !== initialData?.id,
+      activeTab: prevDepsRef.current.activeTab !== activeTab,
+      newChatId: prevDepsRef.current.newChatId !== newChatId,
+      showingNewlyCreatedSchema: prevDepsRef.current.showingNewlyCreatedSchema !== showingNewlyCreatedSchema,
+      formDataType: prevDepsRef.current.formDataType !== formDataType
+    };
+    
+    const whatChanged = Object.keys(changes).filter(key => changes[key as keyof typeof changes]);
+    
+    console.log('loadTables useEffect TRIGGERED - WHAT CHANGED:', whatChanged.length > 0 ? whatChanged : ['INITIAL_RENDER']);
+    console.log('  └─ Details:', {
+      currentChatId,
+      activeTab,
+      'initialData?.id': initialData?.id,
+      newChatId,
+      showingNewlyCreatedSchema,
+      formDataType,
+      isLoadingTablesRef: isLoadingTablesRef.current,
+      hasLoadedTablesRef: hasLoadedTablesRef.current,
+      lastLoadedChatIdRef: lastLoadedChatIdRef.current
+    });
+    
+    // Update previous values
+    prevDepsRef.current = {
+      initialDataId: initialData?.id,
+      activeTab,
+      newChatId,
+      showingNewlyCreatedSchema,
+      formDataType
+    };
+    
+    // Early exit if we've already loaded for this specific chat ID
+    if (hasLoadedTablesRef.current && lastLoadedChatIdRef.current === currentChatId) {
+      console.log('loadTables useEffect: Already loaded for this chat, skipping');
+      return;
+    }
+    
+    // Exit if no chat ID available
+    if (!currentChatId) {
+      console.log('loadTables useEffect: No chat ID, skipping');
+      return;
+    }
+    
+    // Exit if tables already loaded
+    if (tables.length > 0 && lastLoadedChatIdRef.current === currentChatId) {
+      console.log('loadTables useEffect: Tables already loaded, skipping');
+      return;
+    }
+    
+    // Determine if we should load based on active tab and connection type
+    const isSchemaTabActive = activeTab === 'schema';
+    const isSpreadsheetOrSheetsInConnectionTab = activeTab === 'connection' && 
+      (formData.type === 'spreadsheet' || formData.type === 'google_sheets');
+    
+    // Only load if we're in the right tab
+    if (!isSchemaTabActive && !isSpreadsheetOrSheetsInConnectionTab) {
+      console.log('loadTables useEffect: Not in correct tab, skipping');
+      return;
+    }
+    
+    // Only load if we have a valid chat (either existing or newly created)
+    const hasValidChat = (initialData && initialData.id) || (showingNewlyCreatedSchema && newChatId);
+    if (!hasValidChat) {
+      console.log('loadTables useEffect: No valid chat, skipping');
+      return;
+    }
+    
+    // All checks passed - SET FLAGS IMMEDIATELY (synchronously) before async call
+    console.log('loadTables useEffect: All checks passed, loading tables for chat:', currentChatId);
+    isLoadingTablesRef.current = true;  // Set this FIRST to block concurrent calls
+    hasLoadedTablesRef.current = true;
+    lastLoadedChatIdRef.current = currentChatId;
+    loadTables();
+  }, [initialData?.id, activeTab, newChatId, showingNewlyCreatedSchema, formDataType]); // Using memoized formDataType
 
   // Use useEffect to update the value of the MongoDB URI inputs when the tab changes
   useEffect(() => {
@@ -264,16 +364,27 @@ export default function ConnectionModal({
   }, [connectionType, prevConnectionType, formData.type, mongoUriValue, mongoUriSshValue]);
 
   // Function to load tables for the Schema tab
-  const loadTables = async () => {
+  const loadTables = async (caller: string = 'useEffect') => {
     // Use newChatId when initialData is not available
     const chatId = initialData ? initialData.id : (showingNewlyCreatedSchema ? newChatId : undefined);
-    if (!chatId) return;
+    console.log(`loadTables called from: ${caller}, chatId: ${chatId}`);
+    
+    if (!chatId) {
+      // Reset flags if no chat ID
+      console.log(`loadTables: No chatId, resetting flags (caller: ${caller})`);
+      isLoadingTablesRef.current = false;
+      hasLoadedTablesRef.current = false;
+      return;
+    }
+    
+    // Note: isLoadingTablesRef.current is already set to true by the useEffect before calling this
     
     try {
       setIsLoadingTables(true);
       setError(null);
       setSchemaValidationError(null);
       
+      console.log(`loadTables: About to call chatService.getTables for chatId: ${chatId}`);
       const tablesResponse = await chatService.getTables(chatId);
       setTables(tablesResponse.tables || []);
       
@@ -288,8 +399,12 @@ export default function ConnectionModal({
     } catch (error: any) {
       console.error('Failed to load tables:', error);
       setError(error.message || 'Failed to load tables');
+      // Reset the loaded flag on error so it can be retried
+      hasLoadedTablesRef.current = false;
+      lastLoadedChatIdRef.current = undefined;
     } finally {
       setIsLoadingTables(false);
+      isLoadingTablesRef.current = false;
     }
   };
 
@@ -627,6 +742,7 @@ export default function ConnectionModal({
           
           // Force reload tables after upload
           setTables([]); // Clear existing tables to force refresh
+          hasLoadedTablesRef.current = false; // Reset flag to allow reload
           await loadTables();
           
           // Refresh the chat data to get updated database name
@@ -743,6 +859,7 @@ export default function ConnectionModal({
               
               // Force reload tables after upload
               setTables([]); // Clear existing tables to force refresh
+              hasLoadedTablesRef.current = false; // Reset flag to allow reload
               await loadTables();
               
               // Refresh the chat data to get updated database name
@@ -770,8 +887,10 @@ export default function ConnectionModal({
           } else if (credentialsChanged && activeTab === 'connection') {
             // If credentials changed and we're in the connection tab, switch to schema tab
             setActiveTab('schema');
+            // Reset the loaded flag to allow loading tables
+            hasLoadedTablesRef.current = false;
             // Load tables
-            loadTables();
+            loadTables('handleSubmit-credentialsChanged');
             setIsLoading(false);
           } else {
             // Show success message - will auto-dismiss after 3 seconds
@@ -880,11 +999,15 @@ export default function ConnectionModal({
             // Switch to schema tab
             setActiveTab('schema');
             
+            // Reset the loaded flag to allow loading tables for the new connection
+            hasLoadedTablesRef.current = false;
+            
             // Set isLoadingTables to true while fetching schema data
             setIsLoadingTables(true);
             
             // Load the tables for the new connection
             try {
+              console.log('ConnectionModal: Loading tables for new connection, chatId:', result.chatId);
               const tablesResponse = await chatService.getTables(result.chatId);
               setTables(tablesResponse.tables || []);
               
@@ -1307,15 +1430,15 @@ DATABASE_PASSWORD=`; // Mask password
             chatId={newChatId || initialData?.id || ''}
             isLoadingData={isLoadingTables}
             onDeleteTable={(tableName) => {
+              console.log('DataStructureTab: Delete table requested:', tableName);
               // TODO: Implement delete table functionality
-              console.log('Delete table:', tableName);
             }}
             onDownloadData={(tableName) => {
-              // TODO: Implement download data functionality
-              console.log('Download data:', tableName);
+              console.log('DataStructureTab: Download data requested:', tableName);
             }}
             onRefreshData={() => {
               // Refresh the tables
+              hasLoadedTablesRef.current = false; // Reset flag to allow reload
               loadTables();
             }}
           />

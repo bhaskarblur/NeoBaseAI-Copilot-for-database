@@ -63,15 +63,18 @@ export default function DataStructureTab({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('DataStructureTab useEffect triggered:', { chatId, hasData: tables.length > 0 });
     if (chatId) {
       loadTableData();
     }
   }, [chatId]);
 
   const loadTableData = async () => {
+    console.log('DataStructureTab: loadTableData called for chatId:', chatId);
     setLoading(true);
     setError(null);
     try {
+      console.log('DataStructureTab: About to call chatService.getTables for chatId:', chatId);
       const tablesResponse = await chatService.getTables(chatId);
       
       if (tablesResponse.tables && tablesResponse.tables.length > 0) {
