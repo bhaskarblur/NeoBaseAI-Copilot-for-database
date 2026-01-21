@@ -34,9 +34,6 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
   {/* Features Cards */}
   <div className="w-full max-w-4xl mx-auto grid md:grid-cols-3 gap-6 mb-12">
     <button
-      onClick={() => {
-        toast.success('Talk to your database in plain English. NeoBase translates your questions into database queries automatically.', toastStyle);
-      }}
       className="
                     neo-border 
                     bg-white 
@@ -65,7 +62,6 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
     </button>
 
     <button
-      onClick={() => setShowConnectionModal(true)}
       className="
                     neo-border 
                     bg-white 
@@ -92,9 +88,6 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
     </button>
 
     <button
-      onClick={() => {
-        toast.success('Your data is visualized in tables or JSON format. Execute queries and see results in real-time.', toastStyle);
-      }}
       className="
                     neo-border 
                     bg-white 

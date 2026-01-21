@@ -62,11 +62,19 @@ func (r *userRepository) cacheUser(user *models.User) {
 		return
 	}
 
-	// Cache under all three keys: ID, email, and username
+	// Cache under ID key (always exists)
 	keys := []string{
 		fmt.Sprintf("user:id:%s", user.ID.Hex()),
-		fmt.Sprintf("user:email:%s", user.Email),
-		fmt.Sprintf("user:username:%s", user.Username),
+	}
+
+	// Only cache email key if email exists
+	if user.Email != "" {
+		keys = append(keys, fmt.Sprintf("user:email:%s", user.Email))
+	}
+
+	// Only cache username key if username exists
+	if user.Username != "" {
+		keys = append(keys, fmt.Sprintf("user:username:%s", user.Username))
 	}
 
 	log.Printf("[CACHE WRITE] Caching user under %d keys - UserID: %s, Size: %d bytes, TTL: %v", len(keys), user.ID.Hex(), len(userData), constants.UserCacheTTL)
@@ -111,12 +119,12 @@ func (r *userRepository) updateUserCache(userID string) {
 
 	// If email or username changed, delete old keys first
 	if oldUser != nil {
-		if oldUser.Email != user.Email {
+		if oldUser.Email != user.Email && oldUser.Email != "" {
 			oldKey := fmt.Sprintf("user:email:%s", oldUser.Email)
 			log.Printf("[CACHE UPDATE] Email changed, removing old key - Key: %s", oldKey)
 			r.redisRepo.Del(oldKey, ctx)
 		}
-		if oldUser.Username != user.Username {
+		if oldUser.Username != user.Username && oldUser.Username != "" {
 			oldKey := fmt.Sprintf("user:username:%s", oldUser.Username)
 			log.Printf("[CACHE UPDATE] Username changed, removing old key - Key: %s", oldKey)
 			r.redisRepo.Del(oldKey, ctx)

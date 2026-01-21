@@ -47,21 +47,13 @@ func Initialize() {
 	tokenRepo := repositories.NewTokenRepository(redisRepo)
 
 	// Initialize chat repository with Redis support
-	chatRepo := repositories.NewChatRepository(mongodbClient)
-	if chatRepoWithRedis, ok := chatRepo.(interface {
-		SetRedisRepo(redis.IRedisRepositories)
-	}); ok {
-		chatRepoWithRedis.SetRedisRepo(redisRepo)
-	}
+	chatRepo := repositories.NewChatRepository(mongodbClient, redisRepo)
 
-	llmRepo := repositories.NewLLMMessageRepository(mongodbClient)
-	if llmRepoWithRedis, ok := llmRepo.(interface {
-		SetRedisRepo(redis.IRedisRepositories)
-	}); ok {
-		llmRepoWithRedis.SetRedisRepo(redisRepo)
-	}
+	// Initialize LLM message repository with Redis support
+	llmRepo := repositories.NewLLMMessageRepository(mongodbClient, redisRepo)
 
-	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient)
+	// Initialize visualization repository with Redis support
+	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient, redisRepo)
 
 	// Provide all dependencies to the container
 	if err := DiContainer.Provide(func() *mongodb.MongoDBClient { return mongodbClient }); err != nil {

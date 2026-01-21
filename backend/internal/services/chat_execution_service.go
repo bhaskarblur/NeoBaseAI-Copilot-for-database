@@ -27,7 +27,7 @@ func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
-// processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
+// private function, processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
 func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, userMessageID, streamID string, synchronous bool, allowSSEUpdates bool) (*dtos.MessageResponse, error) {
 	log.Printf("processLLMResponse -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
@@ -273,6 +273,26 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			}
 		}
 	}
+
+	// Log messages being sent to LLM (for debugging)
+	log.Printf("========== LLM MESSAGES DEBUG START ==========")
+	log.Printf("processLLMResponse -> Sending %d messages to LLM", len(filteredMessages))
+	log.Printf("processLLMResponse -> Database Type: %s", connInfo.Config.Type)
+	log.Printf("processLLMResponse -> NonTechMode: %v", chat.Settings.NonTechMode)
+	log.Printf("processLLMResponse -> Selected LLM Model: %s", selectedLLMModel)
+	for i, msg := range filteredMessages {
+		log.Printf("processLLMResponse -> Message[%d]: Role=%s, MessageID=%s", i, msg.Role, msg.MessageID.Hex())
+		// Log content preview (first 500 chars to avoid too much log spam)
+		if contentBytes, err := json.Marshal(msg.Content); err == nil {
+			contentStr := string(contentBytes)
+			if len(contentStr) > 500 {
+				log.Printf("processLLMResponse -> Message[%d] Content (first 500 chars): %s...", i, contentStr[:500])
+			} else {
+				log.Printf("processLLMResponse -> Message[%d] Content: %s", i, contentStr)
+			}
+		}
+	}
+	log.Printf("========== LLM MESSAGES DEBUG END ==========")
 
 	// Generate LLM response
 	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
@@ -2917,21 +2937,21 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	// Try to get cached recommendations first
 	cacheKey := fmt.Sprintf("recommendations:%s", chatID)
-	cachedData, err := s.redisRepo.Get(cacheKey, ctx)
-	if err == nil && cachedData != "" {
-		log.Printf("ChatService -> GetQueryRecommendations -> Found cached recommendations")
+	cachedData, err := s.redisRepo.GetCompressed(cacheKey, ctx)
+	if err == nil && len(cachedData) > 0 {
+		log.Printf("ChatService -> GetQueryRecommendations -> Found cached recommendations (compressed)")
 
 		// Parse cached recommendations
 		var cachedRecs dtos.CachedQueryRecommendations
-		if err := json.Unmarshal([]byte(cachedData), &cachedRecs); err == nil {
+		if err := json.Unmarshal(cachedData, &cachedRecs); err == nil {
 			// Select 4 random recommendations from cache
 			selectedRecs, err := s.selectAndMarkRecommendations(&cachedRecs)
 			if err != nil {
 				log.Printf("ChatService -> GetQueryRecommendations -> Error selecting from cache: %v", err)
 			} else {
-				// Update cache with marked recommendations
+				// Update cache with marked recommendations (compressed)
 				updatedCacheData, _ := json.Marshal(cachedRecs)
-				s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+				s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 24*time.Hour, ctx)
 
 				return &dtos.QueryRecommendationsResponse{
 					Recommendations: selectedRecs,
@@ -3084,10 +3104,12 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		CreatedAt:       time.Now().Unix(),
 	}
 
-	// Cache the recommendations for 24 hours
+	// Cache the recommendations for 24 hours (compressed)
 	cacheData, _ := json.Marshal(cachedRecommendations)
-	if err := s.redisRepo.Set(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
+	if err := s.redisRepo.SetCompressed(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
 		log.Printf("ChatService -> GetQueryRecommendations -> Warning: Failed to cache recommendations: %v", err)
+	} else {
+		log.Printf("ChatService -> GetQueryRecommendations -> Successfully cached %d recommendations (compressed)", len(recommendations))
 	}
 
 	// Select 4 random recommendations and mark them as picked
@@ -3096,9 +3118,9 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to select recommendations: %v", err)
 	}
 
-	// Update cache with marked recommendations
+	// Update cache with marked recommendations (compressed)
 	updatedCacheData, _ := json.Marshal(cachedRecommendations)
-	s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+	s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 24*time.Hour, ctx)
 
 	return &dtos.QueryRecommendationsResponse{
 		Recommendations: selectedRecs,

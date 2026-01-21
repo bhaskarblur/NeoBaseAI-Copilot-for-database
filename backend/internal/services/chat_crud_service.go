@@ -82,7 +82,6 @@ type ChatService interface {
 	GenerateVisualizationForQueryResults(ctx context.Context, userID, chatID string, chat *models.Chat, selectedLLMModel, userQuestion string, executedQueries []interface{}, queryResults []map[string]interface{}, isExplicitRequest bool) (*dtos.VisualizationResponse, error)
 	GenerateVisualizationForMessage(ctx context.Context, userID, chatID, messageID, queryID string, selectedLLMModel string) (*dtos.VisualizationResponse, error) // New: Fetch message data and generate visualization
 	SaveVisualizationToMessage(ctx context.Context, messageID, chatID, userID string, visualization *dtos.VisualizationResponse, queryID string) (string, error)
-	GetVisualizationForMessage(ctx context.Context, messageID string) (*dtos.VisualizationResponse, error)
 	GetVisualizationForQuery(ctx context.Context, queryID string) (*dtos.VisualizationResponse, error)                           // Get visualization by query ID (per-query visualization)
 	GetVisualizationData(ctx context.Context, userID, chatID, messageID, queryID string, limit, offset int) (interface{}, error) // Lazy-load visualization data on demand
 	ExecuteChartQuery(ctx context.Context, userID, chatID string, chartConfig *dtos.ChartConfiguration, limit int) ([]map[string]interface{}, error)
