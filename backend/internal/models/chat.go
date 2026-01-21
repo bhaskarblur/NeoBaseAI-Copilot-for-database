@@ -46,6 +46,10 @@ type Connection struct {
 	GoogleAuthToken    *string `bson:"google_auth_token,omitempty" json:"-"`                         // Hide in JSON
 	GoogleRefreshToken *string `bson:"google_refresh_token,omitempty" json:"-"`                      // Hide in JSON
 
+	// Schema Cache - stores formatted schema for LLM context
+	CurrentSchema   *string             `bson:"current_schema,omitempty" json:"current_schema,omitempty"`       // Formatted schema string ready for LLM
+	SchemaUpdatedAt *primitive.DateTime `bson:"schema_updated_at,omitempty" json:"schema_updated_at,omitempty"` // When schema was last fetched/updated
+
 	Base `bson:",inline"`
 }
 

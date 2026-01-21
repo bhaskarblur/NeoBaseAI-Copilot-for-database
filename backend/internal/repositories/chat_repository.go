@@ -21,6 +21,7 @@ import (
 type ChatRepository interface {
 	Create(chat *models.Chat) error
 	Update(id primitive.ObjectID, chat *models.Chat) error
+	UpdateConnectionSchema(ctx context.Context, id primitive.ObjectID, schema string) error
 	Delete(id primitive.ObjectID) error
 	FindByID(id primitive.ObjectID) (*models.Chat, error)
 	FindByUserID(userID primitive.ObjectID, page, pageSize int) ([]*models.Chat, int64, error)
@@ -427,6 +428,29 @@ func (r *chatRepository) Update(id primitive.ObjectID, chat *models.Chat) error 
 	}
 
 	return err
+}
+
+// UpdateConnectionSchema updates only the schema fields in connection
+func (r *chatRepository) UpdateConnectionSchema(ctx context.Context, id primitive.ObjectID, schema string) error {
+	now := primitive.NewDateTimeFromTime(time.Now())
+	filter := bson.M{"_id": id}
+	update := bson.M{
+		"$set": bson.M{
+			"connection.current_schema":    schema,
+			"connection.schema_updated_at": now,
+			"updated_at":                   time.Now(),
+		},
+	}
+
+	_, err := r.chatCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update connection schema: %w", err)
+	}
+
+	// Update cache with fresh data
+	go r.updateChatCache(id)
+
+	return nil
 }
 
 func (r *chatRepository) Delete(id primitive.ObjectID) error {
