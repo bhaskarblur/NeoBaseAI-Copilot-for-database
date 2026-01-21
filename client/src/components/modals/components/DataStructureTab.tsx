@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ChevronDown, 
   ChevronRight, 
@@ -61,6 +61,9 @@ export default function DataStructureTab({
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ show: boolean; tableName: string | null; isSelectedRows?: boolean; rowId?: string | number }>({ show: false, tableName: null, isSelectedRows: false });
   const [downloadMenu, setDownloadMenu] = useState<{ show: boolean; tableName: string | null; x: number; y: number }>({ show: false, tableName: null, x: 0, y: 0 });
   const [error, setError] = useState<string | null>(null);
+  
+  // Track which tables are currently loading preview data to prevent duplicates
+  const loadingPreviewRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     console.log('DataStructureTab useEffect triggered:', { chatId, hasData: tables.length > 0 });
@@ -133,7 +136,17 @@ export default function DataStructureTab({
   };
 
   const loadTablePreviewData = async (tableName: string, page: number = 1, pageSize: number = 15) => {
+    // Prevent duplicate calls - check ref synchronously
+    const loadingKey = `${tableName}-${page}-${pageSize}`;
+    if (loadingPreviewRef.current[loadingKey]) {
+      console.log(`⏭️ Skipping duplicate preview load for ${tableName} (already loading)`);
+      return;
+    }
+    
+    console.log(`📊 Loading preview for ${tableName} page=${page} size=${pageSize}`);
+    loadingPreviewRef.current[loadingKey] = true;
     setLoadingPreview(prev => ({ ...prev, [tableName]: true }));
+    
     try {
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}?page=${page}&pageSize=${pageSize}`,
@@ -167,6 +180,8 @@ export default function DataStructureTab({
       console.error('Failed to load preview data:', error);
     } finally {
       setLoadingPreview(prev => ({ ...prev, [tableName]: false }));
+      delete loadingPreviewRef.current[loadingKey];
+      console.log(`✅ Finished loading preview for ${tableName}`);
     }
   };
 
