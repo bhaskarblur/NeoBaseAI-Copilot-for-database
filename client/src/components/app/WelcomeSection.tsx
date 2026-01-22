@@ -24,7 +24,7 @@ const WelcomeSection = ({ isSidebarExpanded, setShowConnectionModal, toastStyle 
     <h1 className="text-5xl font-bold mb-4">
      You Ask, NeoBase Will Answer!
     </h1>
-    <p className="text-xl text-gray-600 mb-2 max-w-2xl mx-auto">
+    <p className="text-xl text-gray-600 mb-2 max-w-3xl mx-auto">
       Open-source AI Copilot for seamless database interactions.
       <br />
       From SQL to NoSQL, explore and analyze your data through natural conversations.

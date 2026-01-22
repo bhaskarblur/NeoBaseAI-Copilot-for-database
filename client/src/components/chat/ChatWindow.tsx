@@ -1358,6 +1358,7 @@ export default function ChatWindow({
         className={`
           flex-1 
           overflow-y-auto 
+          overflow-x-hidden
           bg-[#FFDB58]/10 
           relative 
           scroll-smooth 

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, ChevronDown, Database, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronDown, Database, Globe, KeyRound, Loader2, Monitor, RefreshCcw, Settings, Table, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Chat, ChatSettings, Connection, TableInfo, FileUpload, SSHAuthMethod } from '../../types/chat';
 import chatService from '../../services/chatService';
@@ -1349,8 +1349,8 @@ DATABASE_PASSWORD=`; // Mask password
                   onClick={() => handleConnectionTypeChange('basic')}
                 >
                   <div className="flex items-center gap-2">
-                    <Monitor className="w-4 h-4" />
-                    <span>Basic Connection</span>
+                    <Globe className="w-4 h-4" />
+                    <span>Basic</span>
                   </div>
                 </button>
                 <button
@@ -1497,7 +1497,7 @@ DATABASE_PASSWORD=`; // Mask password
           </div>
         
         {/* Main Tabs Navigation */}
-        <div className="flex border-b border-gray-200 px-2 flex-shrink-0">
+        <div className="flex border-b border-gray-200 px-2 flex-shrink-0 overflow-x-auto">
           <button
             type="button"
             className={`py-2 px-4 font-semibold border-b-2 ${
@@ -1509,7 +1509,7 @@ DATABASE_PASSWORD=`; // Mask password
           >
             <div className="flex items-center gap-2">
               <Database className="w-4 h-4" />
-              <span className="hidden md:block">Connection</span>
+              <span className="">Connection</span>
             </div>
           </button>
           
@@ -1525,7 +1525,7 @@ DATABASE_PASSWORD=`; // Mask password
             >
               <div className="flex items-center gap-2">
                 <Table className="w-4 h-4" />
-                <span className="hidden md:block">{(formData.type === 'spreadsheet' || formData.type === 'google_sheets') ? 'Knowledge Base' : 'Knowledge Base'}</span>
+                <span className="flex flex-row">Knowledge <span className='hidden md:flex ml-1'>Base</span></span>
               </div>
             </button>
           )}
@@ -1541,7 +1541,7 @@ DATABASE_PASSWORD=`; // Mask password
           >
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4" />
-              <span className="hidden md:block">Settings</span>
+              <span className="">Settings</span>
             </div>
           </button>
         </div>
