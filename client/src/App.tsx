@@ -55,6 +55,8 @@ function AppContent() {
   const [recoRefreshToken, setRecoRefreshToken] = useState(0);
   // Recommendations are managed inside ChatWindow; App only signals refresh via recoRefreshToken
   const streamingMessageTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
+  const [llmModels, setLlmModels] = useState<any[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   
   // Debug useEffect for isSSEReconnecting state changes
@@ -151,12 +153,31 @@ function AppContent() {
     }
   }, [authError]);
 
-  // Load chats when authenticated
+  // Load chats and LLM models when authenticated
   useEffect(() => {
     const loadChats = async () => {
       if (!isAuthenticated) return;
 
       setIsLoadingChats(true);
+      
+      // Fetch LLM models
+      const fetchModels = async () => {
+        try {
+          setIsLoadingModels(true);
+          const response = await axios.get(`${import.meta.env.VITE_API_URL}/llm-models`);
+          if (response.data.success && response.data.data.models) {
+            setLlmModels(response.data.data.models);
+          }
+        } catch (error) {
+          console.error('Failed to fetch LLM models:', error);
+        } finally {
+          setIsLoadingModels(false);
+        }
+      };
+      
+      // Fetch both chats and models
+      fetchModels();
+      
       try {
         const response = await axios.get<ChatsResponse>(`${import.meta.env.VITE_API_URL}/chats`, {
           withCredentials: true,
@@ -1636,6 +1657,8 @@ function AppContent() {
             userId={user?.id || ''}
             userName={user?.username || ''}
             recoVersion={recoRefreshToken}
+            llmModels={llmModels}
+            isLoadingModels={isLoadingModels}
           />
         ) : (
           <WelcomeSection isSidebarExpanded={isSidebarExpanded} setShowConnectionModal={setShowConnectionModal} toastStyle={toastStyle} />

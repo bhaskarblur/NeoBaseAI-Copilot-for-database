@@ -3,20 +3,50 @@ import axios from './axiosConfig';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Prevent duplicate auth checks
+let authCheckPromise: Promise<UserResponse> | null = null;
+let lastAuthCheckTime = 0;
+const AUTH_CHECK_DEBOUNCE = 1000; // 1 second debounce
+
 const authService = {
     async getUser(): Promise<UserResponse> {
-        try {
-            const response = await axios.get<UserResponse>(`${API_URL}/auth/`, {
-                withCredentials: true,
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            });
-            return response.data;
-        } catch (error: any) {
-            console.error('Get user error:', error);
-            throw new Error(error.message || 'Get user failed');
+        const now = Date.now();
+        
+        // If there's an ongoing request, return it
+        if (authCheckPromise) {
+            console.log('AuthService: Reusing existing auth check promise');
+            return authCheckPromise;
         }
+        
+        // If we checked very recently, debounce
+        if (now - lastAuthCheckTime < AUTH_CHECK_DEBOUNCE) {
+            console.log('AuthService: Debouncing auth check');
+            throw new Error('Auth check debounced');
+        }
+        
+        lastAuthCheckTime = now;
+        
+        authCheckPromise = (async () => {
+            try {
+                const response = await axios.get<UserResponse>(`${API_URL}/auth/`, {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                return response.data;
+            } catch (error: any) {
+                console.error('Get user error:', error);
+                throw new Error(error.message || 'Get user failed');
+            } finally {
+                // Clear the promise after a short delay to allow for quick retries
+                setTimeout(() => {
+                    authCheckPromise = null;
+                }, 100);
+            }
+        })();
+        
+        return authCheckPromise;
     },
     async login(data: LoginFormData): Promise<AuthResponse> {
         try {
