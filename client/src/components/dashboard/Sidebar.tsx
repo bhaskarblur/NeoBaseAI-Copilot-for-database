@@ -14,6 +14,7 @@ import {
   PanelRightClose,
   Pencil,
   Plus,
+  Settings,
   Trash2,
   X
 } from 'lucide-react';
@@ -740,8 +741,8 @@ export default function Sidebar({
               }}
               className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
             >
-              <Pencil className="w-4 h-4 mr-2 text-black" />
-              Edit Connection
+              <Settings className="w-4 h-4 mr-2 text-black" />
+              Chat Settings
             </button>
             <div className="h-px bg-gray-200 mx-2"></div>
             <button 

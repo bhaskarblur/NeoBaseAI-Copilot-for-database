@@ -2,7 +2,6 @@ import { Send, Square, ChevronDown, Cpu } from 'lucide-react';
 import { FormEvent, useState, useEffect, useRef, useMemo } from 'react';
 import analyticsService from '../../services/analyticsService';
 import { LLMModel, CategorizedLLMModels } from '../../types/chat';
-import axios from 'axios';
 
 // Note: Recommendations UI moved to ChatWindow
 
@@ -20,6 +19,8 @@ interface MessageInputProps {
     onConsumePrefill?: () => void;
     onModelChange?: (modelId: string) => void;
     selectedModel?: string;
+    llmModels?: LLMModel[];
+    isLoadingModels?: boolean;
 }
 
 export default function MessageInput({ 
@@ -34,13 +35,13 @@ export default function MessageInput({
     prefillText, 
     onConsumePrefill,
     onModelChange,
-    selectedModel
+    selectedModel,
+    llmModels = [],
+    isLoadingModels = false
 }: MessageInputProps) {
     const [input, setInput] = useState('');
     const [isLoadingRecommendations] = useState(false);
-    const [llmModels, setLlmModels] = useState<LLMModel[]>([]);
     const [showModelDropdown, setShowModelDropdown] = useState(false);
-    const [isLoadingModels, setIsLoadingModels] = useState(false);
     const modelDropdownRef = useRef<HTMLDivElement>(null);
 
     // Categorize models by provider
@@ -67,25 +68,6 @@ export default function MessageInput({
             return (providerPriority[a] ?? 99) - (providerPriority[b] ?? 99);
         });
     }, [categorizedModels]);
-
-    // Fetch available LLM models
-    useEffect(() => {
-        const fetchModels = async () => {
-            try {
-                setIsLoadingModels(true);
-                const response = await axios.get(`${import.meta.env.VITE_API_URL}/llm-models`);
-                if (response.data.success && response.data.data.models) {
-                    setLlmModels(response.data.data.models);
-                }
-            } catch (error) {
-                console.error('Failed to fetch LLM models:', error);
-            } finally {
-                setIsLoadingModels(false);
-            }
-        };
-
-        fetchModels();
-    }, []);
 
     // Apply prefill from ChatWindow chips
     useEffect(() => {

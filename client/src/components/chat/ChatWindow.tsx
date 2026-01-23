@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, MessageSquare, Pin, RefreshCcw } from 'lucide-react';
+import { ArrowDown, Loader2, Pin, RefreshCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useStream } from '../../contexts/StreamContext';
@@ -36,6 +36,8 @@ interface ChatWindowProps {
   userId?: string;
   userName?: string;
   recoVersion?: number;
+  llmModels?: any[];
+  isLoadingModels?: boolean;
 }
 
 interface QueryState {
@@ -108,7 +110,9 @@ export default function ChatWindow({
   onEditConnectionFromChatWindow,
   userId,
   userName,
-  recoVersion
+  recoVersion,
+  llmModels = [],
+  isLoadingModels = false
 }: ChatWindowProps) {
   const queryTimeouts = useRef<Record<string, NodeJS.Timeout>>({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -278,47 +282,25 @@ export default function ChatWindow({
 
   // Initialize with default LLM model on component mount or when chat changes
   useEffect(() => {
-    const initializeDefaultModel = async () => {
-      try {
-        // First check if chat has a preferred model
-        if (chat?.preferred_llm_model) {
-          console.log('ChatWindow -> Using chat preferred model:', chat.preferred_llm_model);
-          setSelectedLLMModel(chat.preferred_llm_model);
-          return;
-        }
+    // First check if chat has a preferred model
+    if (chat?.preferred_llm_model) {
+      console.log('ChatWindow -> Using chat preferred model:', chat.preferred_llm_model);
+      setSelectedLLMModel(chat.preferred_llm_model);
+      return;
+    }
 
-        // Otherwise fetch and set default model
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/llm-models`);
-        console.log('ChatWindow -> fetched LLM models response:', response.data);
-        
-        // Extract models from the correct nested path: response.data.data.models
-        const models = response.data.data?.models;
-        console.log('ChatWindow -> extracted models:', models);
-        
-        if (models && Array.isArray(models)) {
-          // Find the first model with default === true
-          const defaultModel = models.find((model: any) => {
-            console.log('ChatWindow -> checking model:', model.id, 'default:', model.default);
-            return model.default === true;
-          });
-          
-          console.log('ChatWindow -> found default model:', defaultModel?.id);
-          if (defaultModel) {
-            console.log('ChatWindow -> setting selectedLLMModel to:', defaultModel.id);
-            setSelectedLLMModel(defaultModel.id);
-          } else {
-            console.warn('ChatWindow -> no default model found in response');
-          }
-        } else {
-          console.warn('ChatWindow -> models not found in response');
-        }
-      } catch (error) {
-        console.error('Failed to fetch default LLM model:', error);
+    // Otherwise use default model from passed models
+    if (llmModels && llmModels.length > 0) {
+      const defaultModel = llmModels.find((model: any) => model.default === true);
+      console.log('ChatWindow -> found default model:', defaultModel?.id);
+      if (defaultModel) {
+        console.log('ChatWindow -> setting selectedLLMModel to:', defaultModel.id);
+        setSelectedLLMModel(defaultModel.id);
+      } else {
+        console.warn('ChatWindow -> no default model found');
       }
-    };
-
-    initializeDefaultModel();
-  }, [chat?.id, chat?.preferred_llm_model]); // Re-initialize when chat changes or preferred model updates
+    }
+  }, [chat?.id, chat?.preferred_llm_model, llmModels]); // Re-initialize when chat changes or preferred model updates
 
   // When App signals reco refresh, shimmer then refetch
   useEffect(() => {
@@ -1350,44 +1332,7 @@ export default function ChatWindow({
       </div>
 
       {/* Tab Switch - Overlay style - Hidden on mobile */}
-      <div className="hidden md:block absolute top-[76px] right-4 z-20">
-        <div className="flex gap-1 p-1 bg-white border-2 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-          <button
-            onClick={() => {
-              // Save current scroll position
-              if (chatContainerRef.current) {
-                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
-              }
-              setViewMode('chats');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
-              viewMode === 'chats' 
-                ? 'bg-black text-white' 
-                : 'bg-white text-black hover:bg-gray-100'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" />
-            
-          </button>
-          <button
-            onClick={() => {
-              // Save current scroll position
-              if (chatContainerRef.current) {
-                scrollPositions.current[viewMode] = chatContainerRef.current.scrollTop;
-              }
-              setViewMode('pinned');
-            }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-sm transition-all ${
-              viewMode === 'pinned' 
-                ? 'bg-black text-white' 
-                : 'bg-white text-black hover:bg-gray-100'
-            }`}
-          >
-            <Pin className="w-4 h-4 rotate-45" />
-            
-          </button>
-        </div>
-      </div>
+      {/* Commented out: Toggle for showing messages and pinned messages not needed on desktop */}
 
       <div
         ref={chatContainerRef}
@@ -1395,6 +1340,7 @@ export default function ChatWindow({
         className={`
           flex-1 
           overflow-y-auto 
+          overflow-x-hidden
           bg-[#FFDB58]/10 
           relative 
           scroll-smooth 
@@ -1645,6 +1591,8 @@ export default function ChatWindow({
           onConsumePrefill={() => setInputPrefill(null)}
           onModelChange={handleLLMModelChange}
           selectedModel={selectedLLMModel}
+          llmModels={llmModels}
+          isLoadingModels={isLoadingModels}
         />
       )}
 

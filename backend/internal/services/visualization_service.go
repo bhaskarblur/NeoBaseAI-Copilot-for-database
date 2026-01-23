@@ -817,47 +817,6 @@ func (s *chatService) SaveVisualizationToMessage(
 	return msgViz.ID.Hex(), nil
 }
 
-// GetVisualizationForMessage retrieves saved visualization for a message
-func (s *chatService) GetVisualizationForMessage(
-	ctx context.Context,
-	messageID string,
-) (*dtos.VisualizationResponse, error) {
-	// Convert message ID to ObjectID
-	msgObjID, err := primitive.ObjectIDFromHex(messageID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid message ID: %v", err)
-	}
-
-	// Fetch visualization from database
-	msgViz, err := s.visualizationRepo.GetVisualizationByMessageID(ctx, msgObjID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch visualization: %v", err)
-	}
-
-	if msgViz == nil {
-		return nil, nil
-	}
-
-	// Convert to VisualizationResponse DTO
-	response := &dtos.VisualizationResponse{
-		CanVisualize: msgViz.CanVisualize,
-		Reason:       msgViz.Reason,
-		Error:        msgViz.Error,
-	}
-
-	// Parse chart configuration if available
-	if msgViz.ChartConfigJSON != "" {
-		var chartConfig dtos.ChartConfiguration
-		if err := json.Unmarshal([]byte(msgViz.ChartConfigJSON), &chartConfig); err != nil {
-			log.Printf("GetVisualizationForMessage -> Error parsing chart config: %v", err)
-		} else {
-			response.ChartConfiguration = &chartConfig
-		}
-	}
-
-	return response, nil
-}
-
 // GetVisualizationForQuery retrieves saved visualization for a specific query
 // Enables per-query visualization retrieval for the 1:1 query-visualization relationship
 func (s *chatService) GetVisualizationForQuery(

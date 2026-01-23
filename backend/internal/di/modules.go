@@ -46,9 +46,11 @@ func Initialize() {
 	// Initialize token repository
 	tokenRepo := repositories.NewTokenRepository(redisRepo)
 
-	chatRepo := repositories.NewChatRepository(mongodbClient)
-	llmRepo := repositories.NewLLMMessageRepository(mongodbClient)
-	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient)
+	// Initialize chat repository with Redis support
+	chatRepo := repositories.NewChatRepository(mongodbClient, redisRepo)
+
+	// Initialize visualization repository with Redis support
+	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient, redisRepo)
 
 	// Provide all dependencies to the container
 	if err := DiContainer.Provide(func() *mongodb.MongoDBClient { return mongodbClient }); err != nil {
@@ -65,10 +67,6 @@ func Initialize() {
 
 	if err := DiContainer.Provide(func() repositories.ChatRepository { return chatRepo }); err != nil {
 		log.Fatalf("Failed to provide chat repository: %v", err)
-	}
-
-	if err := DiContainer.Provide(func() repositories.LLMMessageRepository { return llmRepo }); err != nil {
-		log.Fatalf("Failed to provide LLM message repository: %v", err)
 	}
 
 	if err := DiContainer.Provide(func() repositories.IVisualizationRepository { return visualizationRepo }); err != nil {
@@ -411,7 +409,6 @@ func Initialize() {
 	// Update Chat Service provider to include DB manager setup
 	if err := DiContainer.Provide(func(
 		chatRepo repositories.ChatRepository,
-		llmRepo repositories.LLMMessageRepository,
 		visualizationRepo repositories.IVisualizationRepository,
 		dbManager *dbmanager.Manager,
 		llmManager *llm.Manager,
@@ -442,7 +439,7 @@ func Initialize() {
 			log.Printf("Warning: No LLM client available. Please configure OPENAI_API_KEY or GEMINI_API_KEY")
 		}
 
-		chatService := services.NewChatService(chatRepo, llmRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo)
+		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)

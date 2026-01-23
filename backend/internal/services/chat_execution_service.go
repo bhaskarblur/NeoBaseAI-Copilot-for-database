@@ -27,7 +27,141 @@ func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
-// processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
+// convertMessagesToLLMFormat converts regular messages to LLM format and prepends schema
+// It checks if schema exists in chat.Connection, if not fetches from DB Manager and caches it
+func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *models.Chat, messages []*models.Message, dbType string) ([]*models.LLMMessage, error) {
+	chatIDStr := chat.ID.Hex()
+
+	// Step 1: Get or fetch schema
+	var schemaStr string
+	var shouldUpdateCache bool
+
+	if chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
+		// Schema exists in cache
+		schemaStr = *chat.Connection.CurrentSchema
+		log.Printf("convertMessagesToLLMFormat -> Using cached schema from chat.Connection (length: %d)", len(schemaStr))
+	} else {
+		// Schema doesn't exist, fetch from DB Manager
+		log.Printf("convertMessagesToLLMFormat -> Schema not found in chat.Connection, fetching from DB Manager")
+
+		// Parse selected collections
+		selectedCollections := []string{"ALL"}
+		if chat.SelectedCollections != "" && chat.SelectedCollections != "ALL" {
+			selectedCollections = strings.Split(chat.SelectedCollections, ",")
+		}
+
+		// Fetch schema with examples from DB Manager
+		formattedSchema, err := s.dbManager.FormatSchemaWithExamples(ctx, chatIDStr, selectedCollections)
+		if err != nil {
+			// Fallback to basic schema if examples fail
+			log.Printf("convertMessagesToLLMFormat -> Error getting schema with examples, trying basic schema: %v", err)
+
+			dbConn, connErr := s.dbManager.GetConnection(chatIDStr)
+			if connErr != nil {
+				return nil, fmt.Errorf("failed to get database connection: %v", connErr)
+			}
+
+			connInfo, exists := s.dbManager.GetConnectionInfo(chatIDStr)
+			if !exists {
+				return nil, fmt.Errorf("connection info not found for chat %s", chatIDStr)
+			}
+
+			schema, schemaErr := s.dbManager.GetSchemaManager().GetSchema(ctx, chatIDStr, dbConn, connInfo.Config.Type, selectedCollections)
+			if schemaErr != nil {
+				return nil, fmt.Errorf("failed to get schema: %v", schemaErr)
+			}
+
+			formattedSchema = s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
+		}
+
+		schemaStr = formattedSchema
+		shouldUpdateCache = true
+		log.Printf("convertMessagesToLLMFormat -> Fetched and formatted schema from DB (length: %d)", len(schemaStr))
+	}
+
+	// Step 2: Create system message with schema
+	now := time.Now()
+	systemMessage := &models.LLMMessage{
+		ChatID: chat.ID,
+		UserID: chat.UserID,
+		Role:   string(constants.MessageTypeSystem),
+		Content: map[string]interface{}{
+			"schema_update": schemaStr,
+		},
+		IsEdited:    false,
+		NonTechMode: chat.Settings.NonTechMode,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// Step 3: Convert messages to LLM format
+	llmMessages := make([]*models.LLMMessage, 0, len(messages)+1)
+	llmMessages = append(llmMessages, systemMessage) // Prepend schema
+
+	for _, msg := range messages {
+		var contentMap map[string]interface{}
+
+		if string(msg.Type) == string(constants.MessageTypeUser) {
+			// User message
+			contentMap = map[string]interface{}{
+				"user_message": msg.Content,
+			}
+		} else {
+			// Assistant message - parse the content
+			var parsedContent map[string]interface{}
+			if err := json.Unmarshal([]byte(msg.Content), &parsedContent); err != nil {
+				log.Printf("Warning: Failed to parse assistant message content: %v", err)
+				contentMap = map[string]interface{}{
+					"assistant_response": msg.Content,
+				}
+			} else {
+				// Extract response and queries
+				contentMap = map[string]interface{}{
+					"assistant_response": parsedContent["response"],
+				}
+				if queries, ok := parsedContent["query"]; ok {
+					contentMap["queries"] = queries
+				}
+				if buttons, ok := parsedContent["button_prompts"]; ok {
+					contentMap["buttons"] = buttons
+				}
+			}
+		}
+
+		llmMessage := &models.LLMMessage{
+			MessageID:   msg.ID,
+			ChatID:      msg.ChatID,
+			UserID:      msg.UserID,
+			Role:        string(msg.Type),
+			Content:     contentMap,
+			IsEdited:    msg.IsEdited,
+			NonTechMode: chat.Settings.NonTechMode,
+			CreatedAt:   msg.CreatedAt,
+			UpdatedAt:   msg.UpdatedAt,
+		}
+
+		llmMessages = append(llmMessages, llmMessage)
+	}
+
+	// Step 4: Update cache if needed (async, don't wait)
+	if shouldUpdateCache {
+		go func() {
+			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// Update chat document
+			if err := s.chatRepo.UpdateConnectionSchema(updateCtx, chat.ID, schemaStr); err != nil {
+				log.Printf("Warning: Failed to update schema in chat.Connection: %v", err)
+			} else {
+				log.Printf("convertMessagesToLLMFormat -> Successfully cached schema in chat.Connection")
+			}
+		}()
+	}
+
+	return llmMessages, nil
+}
+
+// private function, processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
 func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, userMessageID, streamID string, synchronous bool, allowSSEUpdates bool) (*dtos.MessageResponse, error) {
 	log.Printf("processLLMResponse -> userID: %s, chatID: %s, streamID: %s", userID, chatID, streamID)
 
@@ -127,20 +261,27 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 
 	}
 
-	// Fetch all the messages from the LLM
-	messages, err := s.llmRepo.GetByChatID(chatObjID)
+	// Fetch all regular messages from the chat
+	regularMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1000) // Get up to 1000 messages
 	if err != nil {
 		s.handleError(ctx, chatID, err)
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch messages: %v", err)
 	}
 
 	// Filter messages up to the edited message
-	filteredMessages := make([]*models.LLMMessage, 0)
-	for _, msg := range messages {
-		filteredMessages = append(filteredMessages, msg)
-		if msg.MessageID == userMessageObjID {
+	filteredRegularMessages := make([]*models.Message, 0)
+	for _, msg := range regularMessages {
+		filteredRegularMessages = append(filteredRegularMessages, msg)
+		if msg.ID == userMessageObjID {
 			break
 		}
+	}
+
+	// Convert messages to LLM format (includes schema as system message)
+	filteredMessages, err := s.convertMessagesToLLMFormat(ctx, chat, filteredRegularMessages, connInfo.Config.Type)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return nil, fmt.Errorf("failed to convert messages to LLM format: %v", err)
 	}
 
 	// Now finalize model selection for edited messages
@@ -273,6 +414,26 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			}
 		}
 	}
+
+	// Log messages being sent to LLM (for debugging)
+	log.Printf("========== LLM MESSAGES DEBUG START ==========")
+	log.Printf("processLLMResponse -> Sending %d messages to LLM", len(filteredMessages))
+	log.Printf("processLLMResponse -> Database Type: %s", connInfo.Config.Type)
+	log.Printf("processLLMResponse -> NonTechMode: %v", chat.Settings.NonTechMode)
+	log.Printf("processLLMResponse -> Selected LLM Model: %s", selectedLLMModel)
+	for i, msg := range filteredMessages {
+		log.Printf("processLLMResponse -> Message[%d]: Role=%s, MessageID=%s", i, msg.Role, msg.MessageID.Hex())
+		// Log content preview (first 500 chars to avoid too much log spam)
+		if contentBytes, err := json.Marshal(msg.Content); err == nil {
+			contentStr := string(contentBytes)
+			if len(contentStr) > 500 {
+				log.Printf("processLLMResponse -> Message[%d] Content (first 500 chars): %s...", i, contentStr[:500])
+			} else {
+				log.Printf("processLLMResponse -> Message[%d] Content: %s", i, contentStr)
+			}
+		}
+	}
+	log.Printf("========== LLM MESSAGES DEBUG END ==========")
 
 	// Generate LLM response
 	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
@@ -536,23 +697,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			return nil, fmt.Errorf("failed to update AI message: %v", err)
 		}
 
-		// Update the LLM message
-		existingLLMMsg, err := s.llmRepo.FindMessageByChatMessageID(existingMessage.ID)
-		if err != nil {
-			s.handleError(ctx, chatID, err)
-			return nil, fmt.Errorf("failed to fetch LLM message: %v", err)
-		}
-
-		formattedJsonResponse := map[string]interface{}{
-			"assistant_response": jsonResponse,
-		}
-		existingLLMMsg.Content = formattedJsonResponse
-
-		if err := s.llmRepo.UpdateMessage(existingLLMMsg.ID, existingLLMMsg); err != nil {
-			s.handleError(ctx, chatID, err)
-			return nil, fmt.Errorf("failed to update LLM message: %v", err)
-		}
-
 		if !synchronous {
 			// Send final response
 			var llmModelName *string
@@ -626,22 +770,6 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	if err := s.chatRepo.CreateMessage(chatResponseMsg); err != nil {
 		log.Printf("processLLMResponse -> Error saving chat response message: %v", err)
 		return nil, err
-	}
-
-	formattedJsonResponse := map[string]interface{}{
-		"assistant_response": jsonResponse,
-	}
-	llmMsg := &models.LLMMessage{
-		Base:        models.NewBase(),
-		UserID:      userObjID,
-		ChatID:      chatObjID,
-		MessageID:   chatResponseMsg.ID,
-		NonTechMode: chat.Settings.NonTechMode, // Store the non-tech mode setting with the LLM message
-		Content:     formattedJsonResponse,
-		Role:        string(constants.MessageTypeAssistant),
-	}
-	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-		log.Printf("processLLMResponse -> Error saving LLM message: %v", err)
 	}
 
 	if !synchronous {
@@ -850,7 +978,7 @@ func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, s
 // ExecuteQuery executes a query, runs realtime query to connected database, stores the result in execution_result etc...
 func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
 	// Verify message and query ownership
-	chat, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	_, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
 	if err != nil {
 		return nil, http.StatusForbidden, err
 	}
@@ -1119,84 +1247,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 				log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
 			}
-
-			// Update LLM message with query execution results
-			llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-			if err != nil {
-				log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
-			} else if llmMsg != nil {
-				log.Printf("ChatService -> ExecuteQuery -> llmMsg: %+v", llmMsg)
-
-				content := llmMsg.Content
-				if content == nil {
-					content = make(map[string]interface{})
-				}
-
-				if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-					log.Printf("ChatService -> ExecuteQuery -> assistantResponse: %+v", assistantResponse)
-					log.Printf("ChatService -> ExecuteQuery -> queries type: %T", assistantResponse["queries"])
-
-					// Handle primitive.A (BSON array) type
-					switch queriesVal := assistantResponse["queries"].(type) {
-					case primitive.A:
-						log.Printf("ChatService -> ExecuteQuery -> queries is primitive.A")
-						// Convert primitive.A to []interface{}
-						queries := make([]interface{}, len(queriesVal))
-						for i, q := range queriesVal {
-							log.Printf("ChatService -> ExecuteQuery -> q: %+v", q)
-							if queryMap, ok := q.(map[string]interface{}); ok {
-								// Compare hex strings of ObjectIDs
-								if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-									queryMap["isRolledBack"] = false
-									queryMap["executionTime"] = nil
-									queryMap["error"] = map[string]interface{}{
-										"code":    queryErr.Code,
-										"message": queryErr.Message,
-										"details": queryErr.Details,
-									}
-									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-								}
-								queries[i] = queryMap
-							} else {
-								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
-								queries[i] = q
-							}
-							log.Printf("ChatService -> ExecuteQuery -> updated queries[%d]: %+v", i, queries[i])
-						}
-						assistantResponse["queries"] = queries
-
-					case []interface{}:
-						log.Printf("ChatService -> ExecuteQuery -> queries is []interface{}")
-						for i, q := range queriesVal {
-							if queryMap, ok := q.(map[string]interface{}); ok {
-								if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-									queryMap["isRolledBack"] = false
-									queryMap["executionTime"] = query.ExecutionTime
-									queryMap["error"] = map[string]interface{}{
-										"code":    queryErr.Code,
-										"message": queryErr.Message,
-										"details": queryErr.Details,
-									}
-									queriesVal[i] = queryMap
-									queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-								}
-							} else {
-								log.Printf("ChatService -> ExecuteQuery -> queryMap is not a map[string]interface{}")
-								queriesVal[i] = q
-							}
-
-						}
-						assistantResponse["queries"] = queriesVal
-					}
-
-					content["assistant_response"] = assistantResponse
-				}
-
-				llmMsg.Content = content
-				if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-					log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
-				}
-			}
 		}()
 
 		<-processCompleted
@@ -1381,143 +1431,6 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error updating message: %v", err)
 		}
-
-		// Update LLM message with query execution results
-		llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-		if err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error finding LLM message: %v", err)
-		} else if llmMsg != nil {
-			// Get the existing content
-			content := llmMsg.Content
-			if content == nil {
-				content = make(map[string]interface{})
-			}
-
-			if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-				log.Printf("ChatService -> ExecuteQuery -> assistantResponse: %+v", assistantResponse)
-				log.Printf("ChatService -> ExecuteQuery -> queries type: %T", assistantResponse["queries"])
-
-				// Handle primitive.A (BSON array) type
-				switch queriesVal := assistantResponse["queries"].(type) {
-				case primitive.A:
-					log.Printf("ChatService -> ExecuteQuery -> queries is primitive.A")
-					// Convert primitive.A to []interface{}
-					queries := make([]interface{}, len(queriesVal))
-					for i, q := range queriesVal {
-						if queryMap, ok := q.(map[string]interface{}); ok {
-							// Compare hex strings of ObjectIDs
-							if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-								queryMap["isExecuted"] = true
-								queryMap["isRolledBack"] = false
-								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-								// If share data with AI is true, then we need to share the result with AI
-								if chat.Settings.ShareDataWithAI {
-									// Get the encrypted result from the message and decrypt it for LLM
-									var resultForLLM string
-									// Find the corresponding query in the message to get encrypted result
-									for _, msgQuery := range *msg.Queries {
-										if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
-											resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
-											break
-										}
-									}
-									// Fallback: Convert current result to JSON if encrypted result not found
-									if resultForLLM == "" {
-										buf := utils.GetJSONBuffer()
-										encoder := json.NewEncoder(buf)
-										encoder.SetEscapeHTML(false)
-										_ = encoder.Encode(result.Result)
-										resultForLLM = buf.String()
-										utils.PutJSONBuffer(buf)
-									}
-									queryMap["executionResult"] = map[string]interface{}{
-										"result": resultForLLM,
-									}
-								} else {
-									queryMap["executionResult"] = map[string]interface{}{
-										"result": "Query executed successfully",
-									}
-								}
-								if result.Error != nil {
-									queryMap["error"] = map[string]interface{}{
-										"code":    result.Error.Code,
-										"message": result.Error.Message,
-										"details": result.Error.Details,
-									}
-								} else {
-									queryMap["error"] = nil
-								}
-							}
-							queries[i] = queryMap
-						} else {
-							queries[i] = q
-						}
-					}
-					assistantResponse["queries"] = queries
-
-				case []interface{}:
-					log.Printf("ChatService -> ExecuteQuery -> queries is []interface{}")
-					for i, q := range queriesVal {
-						if queryMap, ok := q.(map[string]interface{}); ok {
-							if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-								queryMap["isExecuted"] = true
-								queryMap["isRolledBack"] = false
-								queryMap["executionTime"] = result.ExecutionTime
-								queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-								// If share data with AI is true, then we need to share the result with AI
-								if chat.Settings.ShareDataWithAI {
-									// Get the encrypted result from the message and decrypt it for LLM
-									var resultForLLM string
-									// Find the corresponding query in the message to get encrypted result
-									for _, msgQuery := range *msg.Queries {
-										if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
-											resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
-											break
-										}
-									}
-									// Fallback: Convert current result to JSON if encrypted result not found
-									if resultForLLM == "" {
-										buf := utils.GetJSONBuffer()
-										encoder := json.NewEncoder(buf)
-										encoder.SetEscapeHTML(false)
-										_ = encoder.Encode(result.Result)
-										resultForLLM = buf.String()
-										utils.PutJSONBuffer(buf)
-									}
-									queryMap["executionResult"] = map[string]interface{}{
-										"result": resultForLLM,
-									}
-								} else {
-									queryMap["executionResult"] = map[string]interface{}{
-										"result": "Query executed successfully",
-									}
-								}
-								if result.Error != nil {
-									queryMap["error"] = map[string]interface{}{
-										"code":    result.Error.Code,
-										"message": result.Error.Message,
-										"details": result.Error.Details,
-									}
-								} else {
-									queryMap["error"] = nil
-								}
-								queriesVal[i] = queryMap
-							}
-						}
-					}
-					assistantResponse["queries"] = queriesVal
-				}
-
-				content["assistant_response"] = assistantResponse
-			}
-
-			// Save updated LLM message
-			llmMsg.Content = content
-			if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-				log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
-			}
-		}
 	}()
 
 	<-processCompleted
@@ -1609,39 +1522,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 				if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 					log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
 				}
-
-				// Update LLM message with query execution results
-				llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-				if err != nil {
-					log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
-				} else if llmMsg != nil {
-					content := llmMsg.Content
-					if content == nil {
-						content = make(map[string]interface{})
-					}
-					if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-						if queries, ok := assistantResponse["queries"].([]interface{}); ok {
-							for _, q := range queries {
-								if queryMap, ok := q.(map[string]interface{}); ok {
-									if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-										queryMap["isExecuted"] = true
-										queryMap["isRolledBack"] = false
-										queryMap["error"] = &models.QueryError{
-											Code:    queryErr.Code,
-											Message: queryErr.Message,
-											Details: queryErr.Details,
-										}
-									}
-								}
-							}
-						}
-					}
-
-					llmMsg.Content = content
-					if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-						log.Printf("ChatService -> RollbackQuery -> Error updating LLM message: %v", err)
-					}
-				}
 			}()
 
 			// Send event about dependent query failure
@@ -1675,23 +1555,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			}, http.StatusOK, nil
 		}
 
-		// Get LLM context from previous messages
-		llmMsgs, err := s.llmRepo.GetByChatID(msg.ChatID)
-		if err != nil {
-			return nil, http.StatusInternalServerError, fmt.Errorf("failed to get LLM context: %v", err)
-		}
-
-		// Build context for LLM
 		var contextBuilder strings.Builder
-		contextBuilder.WriteString("Previous messages:\n")
-		for _, llmMsg := range llmMsgs {
-			if content, ok := llmMsg.Content["assistant_response"].(map[string]interface{}); ok {
-				contextBuilder.WriteString(fmt.Sprintf("Assistant: %v\n", content["content"]))
-			}
-			if content, ok := llmMsg.Content["user_message"].(string); ok {
-				contextBuilder.WriteString(fmt.Sprintf("User: %s\n", content))
-			}
-		}
 		contextBuilder.WriteString(fmt.Sprintf("\nQuery id: %s\n", query.ID.Hex())) // This will help LLM to understand the context of the query to be rolled back
 		contextBuilder.WriteString(fmt.Sprintf("\nOriginal query: %s\n", query.Query))
 		// Convert Result to JSON string
@@ -1710,10 +1574,19 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			return nil, http.StatusBadRequest, fmt.Errorf("no database connection found")
 		}
 
-		// Convert LLM messages to expected format
-		llmMessages := make([]*models.LLMMessage, len(llmMsgs))
-		// Use copy to avoid modifying original messages
-		copy(llmMessages, llmMsgs)
+		// Get recent messages and convert to LLM format for context
+		recentMessages, _, err := s.chatRepo.FindLatestMessageByChat(msg.ChatID, 10, 1)
+		if err != nil {
+			log.Printf("ChatService -> RollbackQuery -> Error getting recent messages: %v", err)
+			recentMessages = []*models.Message{} // Continue with empty context
+		}
+
+		// Convert messages to LLM format
+		llmMessages, err := s.convertMessagesToLLMFormat(ctx, chat, recentMessages, conn.Config.Type)
+		if err != nil {
+			log.Printf("ChatService -> RollbackQuery -> Error converting messages: %v", err)
+			return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert messages: %v", err)
+		}
 
 		// Get rollback query from LLM
 		llmResponse, err := s.llmClient.GenerateResponse(
@@ -1809,50 +1682,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback query: %v", err)
 		}
-
-		// Update existing LLM message
-		llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-		if err != nil {
-			log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
-		} else if llmMsg != nil {
-			content := llmMsg.Content
-			if content == nil {
-				content = make(map[string]interface{})
-			}
-
-			if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-				// Update the assistant response with new queries
-				switch v := assistantResponse["queries"].(type) {
-				case primitive.A:
-					for i, q := range v {
-						if qMap, ok := q.(map[string]interface{}); ok {
-							if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-								qMap["isRolledBack"] = true
-								qMap["rollback_query"] = rollbackQuery
-								v[i] = qMap
-							}
-						}
-					}
-				case []interface{}:
-					for i, q := range v {
-						if qMap, ok := q.(map[string]interface{}); ok {
-							if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-								qMap["rollback_query"] = rollbackQuery
-								v[i] = qMap
-							}
-						}
-					}
-					assistantResponse["queries"] = v
-				}
-
-				content["assistant_response"] = assistantResponse
-			}
-
-			llmMsg.Content = content
-			if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-				log.Printf("ChatService -> RollbackQuery -> Error updating LLM message: %v", err)
-			}
-		}
 	}
 
 	// Now execute the rollback query
@@ -1905,44 +1734,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 
 				if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 					log.Printf("ChatService -> RollbackQuery -> Error updating message: %v", err)
-				}
-				// Update LLM message with query execution results
-				llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-				if err != nil {
-					log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
-				} else if llmMsg != nil {
-					content := llmMsg.Content
-					if content == nil {
-						content = make(map[string]interface{})
-					}
-					if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-						switch v := assistantResponse["queries"].(type) {
-						case primitive.A:
-							for _, q := range v {
-								if qMap, ok := q.(map[string]interface{}); ok {
-									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-										qMap["isExecuted"] = true
-										qMap["isRolledBack"] = false
-									}
-								}
-							}
-							assistantResponse["queries"] = v
-						case []interface{}:
-							for _, q := range v {
-								if qMap, ok := q.(map[string]interface{}); ok {
-									if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-										qMap["isExecuted"] = true
-										qMap["isRolledBack"] = false
-									}
-								}
-							}
-							assistantResponse["queries"] = v
-						}
-					}
-					llmMsg.Content = content
-					if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-						log.Printf("ChatService -> RollbackQuery -> Error updating LLM message: %v", err)
-					}
 				}
 			}
 		}()
@@ -2032,142 +1823,6 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 	// Save updated message
 	if err := s.chatRepo.UpdateMessage(msg.ID, msg); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message with rollback results: %v", err)
-	}
-
-	// Update LLM message with rollback results
-	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(msg.ID)
-	if err != nil {
-		log.Printf("ChatService -> RollbackQuery -> Error finding LLM message: %v", err)
-	} else if llmMsg != nil {
-		content := llmMsg.Content
-		if content == nil {
-			content = make(map[string]interface{})
-		}
-
-		if assistantResponse, ok := content["assistant_response"].(map[string]interface{}); ok {
-			log.Printf("ChatService -> RollbackQuery -> assistantResponse: %+v", assistantResponse)
-			log.Printf("ChatService -> RollbackQuery -> queries type: %T", assistantResponse["queries"])
-
-			// Handle primitive.A (BSON array) type
-			switch queriesVal := assistantResponse["queries"].(type) {
-			case primitive.A:
-				log.Printf("ChatService -> RollbackQuery -> queries is primitive.A")
-				// Convert primitive.A to []interface{}
-				queries := make([]interface{}, len(queriesVal))
-				for i, q := range queriesVal {
-					if queryMap, ok := q.(map[string]interface{}); ok {
-						// Compare hex strings of ObjectIDs
-						if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-							queryMap["isExecuted"] = true
-							queryMap["isRolledBack"] = true
-							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-							// If share data with AI is true, then we need to share the result with AI
-							if chat.Settings.ShareDataWithAI {
-								// Get the encrypted result from the message and decrypt it for LLM
-								var resultForLLM string
-								// Find the corresponding query in the message to get encrypted result
-								for _, msgQuery := range *msg.Queries {
-									if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
-										resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
-										break
-									}
-								}
-								// Fallback: Convert current result to JSON if encrypted result not found
-								if resultForLLM == "" {
-									buf := utils.GetJSONBuffer()
-									encoder := json.NewEncoder(buf)
-									encoder.SetEscapeHTML(false)
-									_ = encoder.Encode(result.Result)
-									resultForLLM = buf.String()
-									utils.PutJSONBuffer(buf)
-								}
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": resultForLLM,
-								}
-							} else {
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": "Rolled back successfully",
-								}
-							}
-							if result.Error != nil {
-								queryMap["error"] = map[string]interface{}{
-									"code":    result.Error.Code,
-									"message": result.Error.Message,
-									"details": result.Error.Details,
-								}
-							} else {
-								queryMap["error"] = nil
-							}
-						}
-						queries[i] = queryMap
-					} else {
-						queries[i] = q
-					}
-				}
-				assistantResponse["queries"] = queries
-
-			case []interface{}:
-				log.Printf("ChatService -> RollbackQuery -> queries is []interface{}")
-				for i, q := range queriesVal {
-					if queryMap, ok := q.(map[string]interface{}); ok {
-						if queryMap["query"] == query.Query && queryMap["queryType"] == *query.QueryType && queryMap["explanation"] == query.Description {
-							queryMap["isExecuted"] = true
-							queryMap["isRolledBack"] = true
-							queryMap["executionTime"] = result.ExecutionTime
-							queryMap["actionAt"] = utils.StringPtr(time.Now().Format(time.RFC3339))
-							// If share data with AI is true, then we need to share the result with AI
-							if chat.Settings.ShareDataWithAI {
-								// Get the encrypted result from the message and decrypt it for LLM
-								var resultForLLM string
-								// Find the corresponding query in the message to get encrypted result
-								for _, msgQuery := range *msg.Queries {
-									if msgQuery.ID == query.ID && msgQuery.ExecutionResult != nil {
-										resultForLLM = s.decryptQueryResult(*msgQuery.ExecutionResult)
-										break
-									}
-								}
-								// Fallback: Convert current result to JSON if encrypted result not found
-								if resultForLLM == "" {
-									buf := utils.GetJSONBuffer()
-									encoder := json.NewEncoder(buf)
-									encoder.SetEscapeHTML(false)
-									_ = encoder.Encode(result.Result)
-									resultForLLM = buf.String()
-									utils.PutJSONBuffer(buf)
-								}
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": resultForLLM,
-								}
-							} else {
-								queryMap["executionResult"] = map[string]interface{}{
-									"result": "Rolled back successfully",
-								}
-							}
-							if result.Error != nil {
-								queryMap["error"] = map[string]interface{}{
-									"code":    result.Error.Code,
-									"message": result.Error.Message,
-									"details": result.Error.Details,
-								}
-							} else {
-								queryMap["error"] = nil
-							}
-							queriesVal[i] = queryMap
-						}
-					}
-				}
-				assistantResponse["queries"] = queriesVal
-			}
-
-			content["assistant_response"] = assistantResponse
-		}
-
-		// Save updated LLM message
-		llmMsg.Content = content
-		if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error updating LLM message: %v", err)
-		}
 	}
 
 	// Send stream event
@@ -2592,13 +2247,6 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 			schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 90*time.Minute)
 			defer schemaCancel()
 
-			userObjID, err := primitive.ObjectIDFromHex(userID)
-			if err != nil {
-				log.Printf("ChatService -> RefreshSchema -> Error getting userID: %v", err)
-				dataChan <- err
-				return
-			}
-
 			// Force a fresh schema fetch by using a new context with a longer timeout
 			log.Printf("ChatService -> RefreshSchema -> Forcing fresh schema fetch for chatID: %s with 90-minute timeout", chatID)
 
@@ -2616,24 +2264,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 			}
 
 			log.Printf("ChatService -> RefreshSchema -> schemaMsg length: %d", len(schemaMsg))
-			llmMsg := &models.LLMMessage{
-				Base:   models.NewBase(),
-				UserID: userObjID,
-				ChatID: chatObjID,
-				Role:   string(constants.MessageTypeSystem),
-				Content: map[string]interface{}{
-					"schema_update": schemaMsg,
-				},
-			}
 
-			// Clear previous system message from LLM
-			if err := s.llmRepo.DeleteMessagesByRole(chatObjID, string(constants.MessageTypeSystem)); err != nil {
-				log.Printf("ChatService -> RefreshSchema -> Error deleting system message: %v", err)
-			}
-
-			if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-				log.Printf("ChatService -> RefreshSchema -> Error saving LLM message: %v", err)
-			}
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 
 			// Clear cached recommendations since schema is being refreshed
@@ -2917,21 +2548,21 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	// Try to get cached recommendations first
 	cacheKey := fmt.Sprintf("recommendations:%s", chatID)
-	cachedData, err := s.redisRepo.Get(cacheKey, ctx)
-	if err == nil && cachedData != "" {
-		log.Printf("ChatService -> GetQueryRecommendations -> Found cached recommendations")
+	cachedData, err := s.redisRepo.GetCompressed(cacheKey, ctx)
+	if err == nil && len(cachedData) > 0 {
+		log.Printf("ChatService -> GetQueryRecommendations -> Found cached recommendations (compressed)")
 
 		// Parse cached recommendations
 		var cachedRecs dtos.CachedQueryRecommendations
-		if err := json.Unmarshal([]byte(cachedData), &cachedRecs); err == nil {
+		if err := json.Unmarshal(cachedData, &cachedRecs); err == nil {
 			// Select 4 random recommendations from cache
 			selectedRecs, err := s.selectAndMarkRecommendations(&cachedRecs)
 			if err != nil {
 				log.Printf("ChatService -> GetQueryRecommendations -> Error selecting from cache: %v", err)
 			} else {
-				// Update cache with marked recommendations
+				// Update cache with marked recommendations (compressed)
 				updatedCacheData, _ := json.Marshal(cachedRecs)
-				s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+				s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 24*time.Hour, ctx)
 
 				return &dtos.QueryRecommendationsResponse{
 					Recommendations: selectedRecs,
@@ -2942,38 +2573,34 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	log.Printf("ChatService -> GetQueryRecommendations -> No cache found, generating new recommendations")
 
-	// Get recent LLM messages for context
-	llmMessages, err := s.llmRepo.GetByChatID(chatObjID)
+	// Get chat to access connection and settings
+	chat, err := s.chatRepo.FindByID(chatObjID)
 	if err != nil {
-		log.Printf("ChatService -> GetQueryRecommendations -> Error getting LLM messages: %v", err)
-		// Continue without context if we can't get messages
-		llmMessages = []*models.LLMMessage{}
+		log.Printf("ChatService -> GetQueryRecommendations -> Error getting chat: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get chat: %v", err)
 	}
 
-	// Condition 1: If LLM messages exist (including DB schema messages), use them as context
-	// Condition 2: If no messages exist, schema hasn't been loaded yet, skip generation
-	// Condition 3: Must have at least 1 system message (schema message) to ensure schema is present
-	if len(llmMessages) == 0 {
-		log.Printf("ChatService -> GetQueryRecommendations -> No LLM messages found (schema not ready), skipping recommendation generation")
+	// Check if schema is ready (connection has CurrentSchema)
+	if chat.Connection.CurrentSchema == nil || *chat.Connection.CurrentSchema == "" {
+		log.Printf("ChatService -> GetQueryRecommendations -> Schema not ready, skipping recommendation generation")
 		return &dtos.QueryRecommendationsResponse{
 			Recommendations: []dtos.QueryRecommendation{},
 		}, http.StatusOK, nil
 	}
 
-	// Check for at least one system message (schema message)
-	hasSystemMessage := false
-	for _, msg := range llmMessages {
-		if msg.Role == string(constants.MessageTypeSystem) {
-			hasSystemMessage = true
-			break
-		}
+	// Get recent messages and convert to LLM format for context
+	recentMessages, _, err := s.chatRepo.FindLatestMessageByChat(chatObjID, 10, 1)
+	if err != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> Error getting messages: %v", err)
+		recentMessages = []*models.Message{} // Continue with just schema
 	}
 
-	if !hasSystemMessage {
-		log.Printf("ChatService -> GetQueryRecommendations -> No system message (schema) found in LLM messages, skipping recommendation generation")
-		return &dtos.QueryRecommendationsResponse{
-			Recommendations: []dtos.QueryRecommendation{},
-		}, http.StatusOK, nil
+	// Convert messages to LLM format (includes schema as system message)
+	var llmMessages []*models.LLMMessage
+	llmMessages, err = s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type)
+	if err != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> Error converting messages: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert messages: %v", err)
 	}
 
 	log.Printf("ChatService -> GetQueryRecommendations -> Found %d LLM messages, using conversation and schema context", len(llmMessages))
@@ -2983,8 +2610,7 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 	selectedLLMModel := ""
 
 	// Check chat's preferred model first
-	chat, err := s.chatRepo.FindByID(chatObjID)
-	if err == nil && chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
+	if chat.PreferredLLMModel != nil && *chat.PreferredLLMModel != "" {
 		selectedLLMModel = *chat.PreferredLLMModel
 		log.Printf("ChatService -> GetQueryRecommendations -> Using chat's preferred model: %s", selectedLLMModel)
 	} else {
@@ -3084,10 +2710,12 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		CreatedAt:       time.Now().Unix(),
 	}
 
-	// Cache the recommendations for 24 hours
+	// Cache the recommendations for 24 hours (compressed)
 	cacheData, _ := json.Marshal(cachedRecommendations)
-	if err := s.redisRepo.Set(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
+	if err := s.redisRepo.SetCompressed(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
 		log.Printf("ChatService -> GetQueryRecommendations -> Warning: Failed to cache recommendations: %v", err)
+	} else {
+		log.Printf("ChatService -> GetQueryRecommendations -> Successfully cached %d recommendations (compressed)", len(recommendations))
 	}
 
 	// Select 4 random recommendations and mark them as picked
@@ -3096,9 +2724,9 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to select recommendations: %v", err)
 	}
 
-	// Update cache with marked recommendations
+	// Update cache with marked recommendations (compressed)
 	updatedCacheData, _ := json.Marshal(cachedRecommendations)
-	s.redisRepo.Set(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+	s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 24*time.Hour, ctx)
 
 	return &dtos.QueryRecommendationsResponse{
 		Recommendations: selectedRecs,

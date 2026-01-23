@@ -82,7 +82,6 @@ type ChatService interface {
 	GenerateVisualizationForQueryResults(ctx context.Context, userID, chatID string, chat *models.Chat, selectedLLMModel, userQuestion string, executedQueries []interface{}, queryResults []map[string]interface{}, isExplicitRequest bool) (*dtos.VisualizationResponse, error)
 	GenerateVisualizationForMessage(ctx context.Context, userID, chatID, messageID, queryID string, selectedLLMModel string) (*dtos.VisualizationResponse, error) // New: Fetch message data and generate visualization
 	SaveVisualizationToMessage(ctx context.Context, messageID, chatID, userID string, visualization *dtos.VisualizationResponse, queryID string) (string, error)
-	GetVisualizationForMessage(ctx context.Context, messageID string) (*dtos.VisualizationResponse, error)
 	GetVisualizationForQuery(ctx context.Context, queryID string) (*dtos.VisualizationResponse, error)                           // Get visualization by query ID (per-query visualization)
 	GetVisualizationData(ctx context.Context, userID, chatID, messageID, queryID string, limit, offset int) (interface{}, error) // Lazy-load visualization data on demand
 	ExecuteChartQuery(ctx context.Context, userID, chatID string, chartConfig *dtos.ChartConfiguration, limit int) ([]map[string]interface{}, error)
@@ -90,7 +89,6 @@ type ChatService interface {
 
 type chatService struct {
 	chatRepo          repositories.ChatRepository
-	llmRepo           repositories.LLMMessageRepository
 	visualizationRepo repositories.IVisualizationRepository
 	dbManager         *dbmanager.Manager
 	llmClient         llm.Client
@@ -150,7 +148,6 @@ func (s *chatService) HandleDBEvent(userID, chatID, streamID string, response dt
 
 func NewChatService(
 	chatRepo repositories.ChatRepository,
-	llmRepo repositories.LLMMessageRepository,
 	dbManager *dbmanager.Manager,
 	llmClient llm.Client,
 	llmManager *llm.Manager,
@@ -166,7 +163,6 @@ func NewChatService(
 
 	return &chatService{
 		chatRepo:          chatRepo,
-		llmRepo:           llmRepo,
 		visualizationRepo: visualizationRepo,
 		dbManager:         dbManager,
 		llmClient:         llmClient,
@@ -652,11 +648,6 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
 	}
 
-	// Delete LLM messages
-	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, false); err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat messages: %v", err)
-	}
-
 	go func() {
 		// Delete DB connection with connection type for safety validation
 		if err := s.dbManager.DisconnectWithType(chatID, userID, chat.Connection.Type, true); err != nil {
@@ -759,26 +750,6 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 
 	if err := s.chatRepo.CreateMessage(msg); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save message: %v", err)
-	}
-
-	// Make LLM Message
-	// Add current timestamp context to help LLM understand relative dates
-	currentTime := time.Now()
-	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), content)
-
-	llmMsg := &models.LLMMessage{
-		Base:        models.NewBase(),
-		UserID:      userObjID,
-		ChatID:      chatObjID,
-		MessageID:   msg.ID,
-		Role:        string(constants.MessageTypeUser),
-		NonTechMode: chat.Settings.NonTechMode, // Store the non-tech mode setting with the LLM message
-		Content: map[string]interface{}{
-			"user_message": contentWithTimestamp,
-		},
-	}
-	if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save LLM message: %v", err)
 	}
 
 	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.Settings.AutoExecuteQuery)
@@ -934,24 +905,6 @@ func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, message
 		}
 	}
 
-	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to fetch LLM message: %v", err)
-	}
-
-	log.Printf("UpdateMessage -> llmMsg: %+v", llmMsg)
-	// Add current timestamp context to help LLM understand relative dates
-	currentTime := time.Now()
-	contentWithTimestamp := fmt.Sprintf("[Current timestamp: %s]\n%s", currentTime.Format("2006-01-02 15:04:05 MST"), req.Content)
-
-	llmMsg.Content = map[string]interface{}{
-		"user_message": contentWithTimestamp,
-	}
-
-	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update LLM message: %v", err)
-	}
-
 	// If auto execute query is true, we need to process LLM response & run query automatically
 	if chat.Settings.AutoExecuteQuery {
 		if err := s.processLLMResponseAndRunQuery(ctx, userID, chatID, messageID, streamID); err != nil {
@@ -992,11 +945,6 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 
 	if err := s.chatRepo.DeleteMessages(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete messages: %v", err)
-	}
-
-	// Delete LLM messages
-	if err := s.llmRepo.DeleteMessagesByChatID(chatObjID, true); err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("failed to delete LLM messages: %v", err)
 	}
 
 	return http.StatusOK, nil
@@ -1161,64 +1109,6 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 				messageIDMapMutex.Lock()
 				messageIDMap[originalMsg.ID] = newMsg.ID
 				messageIDMapMutex.Unlock()
-			}
-		}
-
-		// Now handle LLM messages
-		allLLMMessages, _, err := s.llmRepo.FindMessagesByChatID(chatObjID)
-		if err != nil {
-			log.Printf("Warning: failed to fetch LLM messages: %v", err)
-			// Continue without LLM messages
-			return s.buildChatResponse(newChat), http.StatusOK, nil
-		}
-
-		if len(allLLMMessages) > 0 {
-			// Sort LLM messages by created_at to ensure proper ordering
-			sort.Slice(allLLMMessages, func(i, j int) bool {
-				return allLLMMessages[i].CreatedAt.Before(allLLMMessages[j].CreatedAt)
-			})
-
-			log.Printf("Duplicating %d LLM messages in order", len(allLLMMessages))
-
-			// Process LLM messages sequentially
-			baseLLMTime := time.Now().Add(time.Hour) // Use a different time base to differentiate from regular messages
-			for i, llmMsg := range allLLMMessages {
-				// Create a new LLM message with the same content but for the new chat
-				newLLMMsg := &models.LLMMessage{
-					ChatID:      newChat.ID,
-					UserID:      userObjID,
-					Role:        llmMsg.Role,
-					Content:     llmMsg.Content, // Copy the content map
-					IsEdited:    llmMsg.IsEdited,
-					NonTechMode: llmMsg.NonTechMode, // Preserve the non-tech mode setting
-					Base:        models.NewBase(),   // Create a new Base with new ID and timestamps
-				}
-
-				// Set unique timestamps
-				newLLMMsg.CreatedAt = baseLLMTime.Add(time.Duration(i*1000) * time.Millisecond) // 1 second increment
-				newLLMMsg.UpdatedAt = newLLMMsg.CreatedAt
-
-				// Map the original message ID to the new one
-				messageIDMapMutex.Lock()
-				newID, exists := messageIDMap[llmMsg.MessageID]
-				messageIDMapMutex.Unlock()
-
-				if exists {
-					newLLMMsg.MessageID = newID
-					log.Printf("Mapping LLM message: original message ID %s -> new message ID %s",
-						llmMsg.MessageID.Hex(), newID.Hex())
-				} else {
-					// If the message ID isn't mapped, create a new ID
-					newLLMMsg.MessageID = primitive.NewObjectID()
-					log.Printf("Warning: couldn't find mapping for message ID %s when duplicating LLM message",
-						llmMsg.MessageID.Hex())
-				}
-
-				// Save the new LLM message
-				if err := s.llmRepo.CreateMessage(newLLMMsg); err != nil {
-					log.Printf("Error duplicating LLM message: %v", err)
-					continue
-				}
 			}
 		}
 
@@ -1520,67 +1410,6 @@ func (s *chatService) EditQuery(ctx context.Context, userID, chatID, messageID, 
 		return nil, http.StatusBadRequest, fmt.Errorf("failed to update message: %v", err)
 	}
 
-	// Update the query in LLM messages too
-	llmMsg, err := s.llmRepo.FindMessageByChatMessageID(message.ID)
-	if err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("failed to find LLM message: %v", err)
-	}
-
-	if assistantResponse, ok := llmMsg.Content["assistant_response"].(map[string]interface{}); ok {
-		log.Printf("ChatService -> EditQuery -> assistantResponse: %+v", assistantResponse)
-		log.Printf("ChatService -> EditQuery -> queries type: %T", assistantResponse["queries"])
-
-		llmMsg.IsEdited = true
-		queries := assistantResponse["queries"]
-		// Handle primitive.A (BSON array) type
-		switch queriesVal := queries.(type) {
-		case primitive.A:
-			for i, q := range queriesVal {
-				qMap, ok := q.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == queryData.Query && qMap["queryType"] == *queryData.QueryType && qMap["explanation"] == queryData.Description {
-					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
-					qMap["is_edited"] = true
-					qMap["is_executed"] = false
-					if qMap["pagination"] != nil {
-						if qMap["pagination"].(map[string]interface{})["paginated_query"] != nil {
-							currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-							qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
-						}
-					}
-					queriesVal[i] = qMap
-					break
-				}
-			}
-			assistantResponse["queries"] = queriesVal
-		case []interface{}:
-			for i, q := range queriesVal {
-				qMap, ok := q.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if qMap["id"] == queryData.ID {
-					qMap["query"] = "EDITED by user: " + query // Telling the LLM that the query has been edited
-					qMap["is_edited"] = true
-					qMap["is_executed"] = false
-					if qMap["pagination"] != nil {
-						currentPaginatedQuery := qMap["pagination"].(map[string]interface{})["paginated_query"].(string)
-						qMap["pagination"].(map[string]interface{})["paginated_query"] = utils.StringPtr(strings.Replace(currentPaginatedQuery, originalQuery, query, 1))
-					}
-					queriesVal[i] = qMap
-					break
-				}
-			}
-			assistantResponse["queries"] = queriesVal
-		}
-	}
-
-	if err := s.llmRepo.UpdateMessage(llmMsg.ID, llmMsg); err != nil {
-		return nil, http.StatusBadRequest, fmt.Errorf("failed to update LLM message: %v", err)
-	}
-
 	return &dtos.EditQueryResponse{
 		ChatID:    chatID,
 		MessageID: messageID,
@@ -1673,23 +1502,11 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff i
 	}
 	log.Printf("ChatService -> HandleSchemaChange -> Selected collections: %v", selectedCollectionsSlice)
 
-	// Convert to ObjectID
-	userObjID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		log.Printf("ChatService -> HandleSchemaChange -> Invalid user ID format: %v", err)
-		return
-	}
-
 	// Convert chat ID to ObjectID
 	chatObjID, err = primitive.ObjectIDFromHex(chatID)
 	if err != nil {
 		log.Printf("ChatService -> HandleSchemaChange -> Invalid chat ID format: %v", err)
 		return
-	}
-
-	// Clear previous system message from LLM
-	if err := s.llmRepo.DeleteMessagesByRole(chatObjID, string(constants.MessageTypeSystem)); err != nil {
-		log.Printf("ChatService -> HandleSchemaChange -> Error deleting system message: %v", err)
 	}
 
 	// Format the schema changes for LLM
@@ -1723,24 +1540,13 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff i
 			}
 		}
 
-		// Create LLM message with schema
-		llmMsg := &models.LLMMessage{
-			Base:   models.NewBase(),
-			UserID: userObjID,
-			ChatID: chatObjID,
-			Role:   string(constants.MessageTypeSystem),
-			Content: map[string]interface{}{
-				"schema_update": schemaMsg,
-			},
-		}
-
-		// Save LLM message
-		if err := s.llmRepo.CreateMessage(llmMsg); err != nil {
-			log.Printf("ChatService -> HandleSchemaChange -> Error saving LLM message: %v", err)
+		// Update chat.Connection.CurrentSchema with the new schema
+		if err := s.chatRepo.UpdateConnectionSchema(ctx, chatObjID, schemaMsg); err != nil {
+			log.Printf("ChatService -> HandleSchemaChange -> Error updating connection schema: %v", err)
 			return
 		}
 
-		log.Printf("ChatService -> HandleSchemaChange -> Schema update message saved")
+		log.Printf("ChatService -> HandleSchemaChange -> Schema update saved to chat.Connection")
 	}
 }
 

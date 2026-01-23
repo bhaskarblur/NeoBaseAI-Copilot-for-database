@@ -1,5 +1,5 @@
 import { Github } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface StarUsButtonProps {
     className?: string;
@@ -8,9 +8,17 @@ interface StarUsButtonProps {
 
 export default function StarUsButton({ className = '', isMobile = false }: StarUsButtonProps) {
     const [starCount, setStarCount] = useState<number | null>(null);
+    const isFetchingRef = useRef(false);
+    const hasFetchedRef = useRef(false);
 
     useEffect(() => {
+        // Prevent duplicate fetches
+        if (isFetchingRef.current || hasFetchedRef.current) {
+            return;
+        }
+
         const fetchStarCount = async () => {
+            isFetchingRef.current = true;
             try {
                 const response = await fetch(`${import.meta.env.VITE_API_URL}/github/stats`);
                 if (!response.ok) {
@@ -18,9 +26,13 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                 }
                 const data = await response.json();
                 setStarCount(data.data.star_count);
+                hasFetchedRef.current = true;
             } catch (error) {
                 console.error('Error fetching star count:', error);
                 setStarCount(1); // I Starred it manually :)
+                hasFetchedRef.current = true;
+            } finally {
+                isFetchingRef.current = false;
             }
         };
 

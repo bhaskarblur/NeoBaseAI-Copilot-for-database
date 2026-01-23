@@ -1,4 +1,4 @@
-import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon } from 'lucide-react';
+import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon, Settings } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
@@ -265,8 +265,29 @@ export default function ChatHeader({
                             onClick={() => handleDropdownAction(handleEditConnection)}
                             className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
                         >
-                            <Pencil className="w-4 h-4 mr-2 text-black" />
-                            Edit Connection
+                            <Settings className="w-4 h-4 mr-2 text-black" />
+                            Chat Settings
+                        </button>
+                        <div className="h-px bg-gray-200 mx-2"></div>
+                        <button 
+                            onClick={() => handleDropdownAction(() => {
+                                if (onViewModeChange) {
+                                    onViewModeChange(viewMode === 'pinned' ? 'chats' : 'pinned');
+                                }
+                            })}
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors"
+                        >
+                            {viewMode === 'pinned' ? (
+                                <>
+                                    <PinOffIcon className="w-4 h-4 mr-2 text-black rotate-45" />
+                                    Show Messages
+                                </>
+                            ) : (
+                                <>
+                                    <PinIcon className="w-4 h-4 mr-2 text-black rotate-45" />
+                                    Show Pinned
+                                </>
+                            )}
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
@@ -276,29 +297,9 @@ export default function ChatHeader({
                             <Eraser className="w-4 h-4 mr-2" />
                             Clear Chat
                         </button>
-                        <div className="h-px bg-gray-200 mx-2"></div>
-                        <button 
-                            onClick={() => handleDropdownAction(() => {
-                                if (onViewModeChange) {
-                                    onViewModeChange(viewMode === 'pinned' ? 'chats' : 'pinned');
-                                }
-                            })}
-                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-neo-gray transition-colors md:hidden"
-                        >
-                            {viewMode === 'pinned' ? (
-                                <>
-                                    <PinOffIcon className="w-4 h-4 mr-2 text-black rotate-45" />
-                                    Hide Pinned
-                                </>
-                            ) : (
-                                <>
-                                    <PinIcon className="w-4 h-4 mr-2 text-black rotate-45" />
-                                    Show Pinned
-                                </>
-                            )}
-                        </button>
+                        
                         {viewMode !== undefined && (
-                            <div className="h-px bg-gray-200 mx-2 md:hidden"></div>
+                            <div className="h-px bg-gray-200 mx-2"></div>
                         )}
                         {isConnected ? (
                             <button 

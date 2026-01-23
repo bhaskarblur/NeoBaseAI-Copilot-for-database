@@ -18,13 +18,13 @@ interface QueryRecommendationsResponse {
     };
 }
 
-const chatService = {
-    // Add a cache for tables
-    tablesCache: {} as Record<string, {tables: any[], timestamp: number}>,
-    CACHE_TTL: 600000, // 10 minutes in milliseconds (increased from 1 minute)
-    // Track ongoing API requests to prevent duplicates
-    pendingRequests: {} as Record<string, Promise<TablesResponse>>,
+// Make these TRULY GLOBAL - outside the chatService object to survive hot reloads
+// This ensures all imports of chatService share the same cache/pending requests
+const tablesCache: Record<string, {tables: any[], timestamp: number}> = {};
+const pendingRequests: Record<string, Promise<TablesResponse>> = {};
+const CACHE_TTL = 600000; // 10 minutes in milliseconds
 
+const chatService = {
     async createChat(connection: Connection, settings: ChatSettings): Promise<Chat> {
         try {
             // Ensure we send the ssl_mode when it's present
@@ -325,9 +325,9 @@ const chatService = {
             }
 
             // Clear the cache for this chat
-            delete this.tablesCache[chatId];
+            delete tablesCache[chatId];
             // Clear any pending requests
-            delete this.pendingRequests[chatId];
+            delete pendingRequests[chatId];
 
             return response.data.data;
         } catch (error: any) {
@@ -388,79 +388,93 @@ const chatService = {
 
     async getTables(chatId: string): Promise<TablesResponse> {
         try {
-            console.log(`chatService.getTables called for chatId: ${chatId}`);
+            // Get call stack to identify the caller
+            const stack = new Error().stack;
+            const callerLine = stack?.split('\n')[2]?.trim() || 'unknown';
+            console.log(`🔍 getTables called for ${chatId}`);
+            console.log(`  └─ From: ${callerLine}`);
+            console.log(`  └─ Cache keys: [${Object.keys(tablesCache).join(', ')}]`);
+            console.log(`  └─ Pending keys: [${Object.keys(pendingRequests).join(', ')}]`);
             
-            // Check if there's already a pending request for this chat
-            if (this.pendingRequests[chatId] !== undefined) {
-                console.log(`chatService.getTables: Using pending request for chatId: ${chatId}`);
-                return await this.pendingRequests[chatId];
-            }
-            
-            // Check if we have a cached result that's still valid
-            const cachedResult = this.tablesCache[chatId];
+            // Check if we have a cached result that's still valid (do this first, before pending check)
+            const cachedResult = tablesCache[chatId];
             const now = Date.now();
             
-            if (cachedResult && (now - cachedResult.timestamp < this.CACHE_TTL)) {
-                console.log(`chatService.getTables: Using cached data for chatId: ${chatId}, cache age: ${(now - cachedResult.timestamp)/1000}s`);
+            if (cachedResult && (now - cachedResult.timestamp < CACHE_TTL)) {
+                console.log(`💾 Using cached data (age: ${(now - cachedResult.timestamp)/1000}s)`);
                 return { tables: cachedResult.tables };
             }
             
-            console.log(`chatService.getTables: Cache miss for chatId: ${chatId}, fetching from API`);
+            // Atomic check-and-set: if no pending request exists, create and store it in one expression
+            const isNewRequest = !pendingRequests[chatId];
             
-            // Create a promise for the API request and store it
-            const requestPromise = (async () => {
-                try {
-                    // Create a timeout promise
-                    const timeoutPromise = new Promise<never>((_, reject) => {
-                        setTimeout(() => reject(new Error('Request timeout')), 120000); // 120 seconds timeout
-                    });
-                    
-                    // Create the actual request promise
-                    const fetchPromise = axios.get<{success: boolean, data: TablesResponse}>(
-                        `${API_URL}/chats/${chatId}/tables`,
-                        {
-                            withCredentials: true,
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            const requestPromise = pendingRequests[chatId] || (pendingRequests[chatId] = (() => {
+                console.log(`🆕 Creating NEW request for ${chatId}`);
+                
+                let resolveRequest: (value: TablesResponse) => void;
+                let rejectRequest: (reason: any) => void;
+                
+                const promise = new Promise<TablesResponse>((resolve, reject) => {
+                    resolveRequest = resolve;
+                    rejectRequest = reject;
+                });
+                
+                // Start the async work
+                (async () => {
+                    try {
+                        console.log(`📡 Making HTTP request for ${chatId}`);
+                        
+                        const timeoutPromise = new Promise<never>((_, reject) => {
+                            setTimeout(() => reject(new Error('Request timeout')), 120000);
+                        });
+                        
+                        const fetchPromise = axios.get<{success: boolean, data: TablesResponse}>(
+                            `${API_URL}/chats/${chatId}/tables`,
+                            {
+                                withCredentials: true,
+                                headers: {
+                                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                }
                             }
+                        );
+                        
+                        const response = await Promise.race([fetchPromise, timeoutPromise]);
+        
+                        if (!response.data.success) {
+                            throw new Error('Failed to get tables');
                         }
-                    );
-                    
-                    // Race the timeout against the actual request
-                    const response = await Promise.race([fetchPromise, timeoutPromise]);
-    
-                    if (!response.data.success) {
-                        throw new Error('Failed to get tables');
+        
+                        tablesCache[chatId] = {
+                            tables: response.data.data.tables,
+                            timestamp: now
+                        };
+                        console.log(`✅ Cached ${response.data.data.tables.length} tables for ${chatId}`);
+        
+                        resolveRequest!(response.data.data);
+                    } catch (error) {
+                        console.error(`❌ Error for ${chatId}:`, error);
+                        rejectRequest!(error);
+                    } finally {
+                        delete pendingRequests[chatId];
+                        console.log(`🧹 Cleaned up request for ${chatId}`);
                     }
-    
-                    // Cache the result
-                    this.tablesCache[chatId] = {
-                        tables: response.data.data.tables,
-                        timestamp: now
-                    };
-                    console.log(`chatService.getTables: Cached ${response.data.data.tables.length} tables for chatId: ${chatId}`);
-    
-                    return response.data.data;
-                } finally {
-                    // Clean up the pending request when done
-                    delete this.pendingRequests[chatId];
-                }
-            })();
+                })();
+                
+                return promise;
+            })());
             
-            // Store the promise
-            this.pendingRequests[chatId] = requestPromise;
+            if (!isNewRequest) {
+                console.log(`♻️ Reusing EXISTING promise for ${chatId}`);
+            }
             
-            // Return the promise result
             return await requestPromise;
         } catch (error: any) {
             console.error('Get tables error:', error);
-            // Clean up the pending request on error
-            delete this.pendingRequests[chatId];
+            delete pendingRequests[chatId];
             
-            // If we have a stale cache, return it rather than failing completely
-            const cachedResult = this.tablesCache[chatId];
+            const cachedResult = tablesCache[chatId];
             if (cachedResult) {
-                console.log(`chatService.getTables: API request failed, using stale cache for chatId: ${chatId}`);
+                console.log(`Using stale cache for ${chatId}`);
                 return { tables: cachedResult.tables };
             }
             
