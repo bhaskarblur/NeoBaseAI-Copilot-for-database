@@ -63,6 +63,20 @@ function AppContent() {
   useEffect(() => {
   }, [isSSEReconnecting]);
   
+  // Update document title based on authentication and selected connection
+  useEffect(() => {
+    if (!isAuthenticated) {
+      document.title = 'Login to Continue | NeoBase Dashboard';
+    } else if (selectedConnection) {
+      const connectionName = selectedConnection.connection.is_example_db 
+        ? 'Sample Database' 
+        : selectedConnection.connection.database;
+      document.title = `${connectionName} | NeoBase Dashboard`;
+    } else {
+      document.title = 'NeoBase Dashboard - AI Copilot for database';
+    }
+  }, [isAuthenticated, selectedConnection]);
+  
   // Check auth status on mount
   useEffect(() => {
     if (!hasCheckedAuth) {
@@ -385,7 +399,7 @@ function AppContent() {
       // Show success message
       setSuccessMessage('Connection deleted successfully');
     } catch (error: any) {
-      console.error('Failed to delete connection:', error);
+      console.error('Failed to delete chat:', error);
       toast.error(error.message, errorToast);
     }
   };
@@ -428,9 +442,6 @@ function AppContent() {
           try {
             // First disconnect the current connection
             await chatService.disconnectFromConnection(id, streamId);
-            
-            // Clear any existing tables cache for this chat
-            delete chatService.tablesCache?.[id];
 
             // Wait a bit before reconnecting to ensure disconnection is complete
             await new Promise(resolve => setTimeout(resolve, 1000));

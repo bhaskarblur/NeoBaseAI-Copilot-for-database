@@ -772,7 +772,7 @@ export default function Sidebar({
               className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
             >
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete Connection
+              Delete Chat
             </button>
           </div>
         </div>
