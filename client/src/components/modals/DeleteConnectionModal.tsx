@@ -24,7 +24,7 @@ export default function DeleteConnectionModal({
     try {
       await onConfirm(chatId);
     } catch (error) {
-      console.error('Failed to delete connection:', error);
+      console.error('Failed to delete chat:', error);
     } finally {
       setIsDeleting(false);
     }
@@ -36,7 +36,7 @@ export default function DeleteConnectionModal({
         <div className="flex justify-between items-center p-6 border-b-4 border-black">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-6 h-6 text-neo-error" />
-            <h2 className="text-2xl font-bold">Delete Connection</h2>
+            <h2 className="text-2xl font-bold">Delete Chat</h2>
           </div>
           <button
             onClick={onCancel}
@@ -49,7 +49,7 @@ export default function DeleteConnectionModal({
 
         <div className="p-6">
           <p className="text-gray-600 mb-6">
-            Are you sure you want to delete the connection to <strong>{connectionName}</strong>?
+            Are you sure you want to delete the chat <strong>{connectionName}</strong>?
             This action cannot be undone.
           </p>
 
@@ -83,7 +83,7 @@ export default function DeleteConnectionModal({
                   <span>Deleting...</span>
                 </div>
               ) : (
-                'Delete Connection'
+                'Delete Chat'
               )}
             </button>
             <button

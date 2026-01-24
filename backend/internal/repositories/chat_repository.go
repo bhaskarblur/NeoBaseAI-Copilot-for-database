@@ -80,7 +80,8 @@ func (r *chatRepository) cacheChat(chat *models.Chat) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("chat:id:%s", chat.ID.Hex())
 
-	chatData, err := json.Marshal(chat)
+	// Use BSON marshal instead of JSON to preserve all fields including password (json:"-")
+	chatData, err := bson.Marshal(chat)
 	if err != nil {
 		log.Printf("[CACHE ERROR] Failed to marshal chat - ChatID: %s, Error: %v", chat.ID.Hex(), err)
 		return
@@ -409,8 +410,8 @@ func (r *chatRepository) Create(chat *models.Chat) error {
 	_, err := r.chatCollection.InsertOne(context.Background(), chat)
 
 	if err == nil {
-		// Warm cache immediately
-		go r.cacheChat(chat)
+		// Warm cache synchronously by fetching from DB to ensure consistent encrypted state
+		r.updateChatCache(chat.ID)
 	}
 
 	return err
@@ -423,8 +424,9 @@ func (r *chatRepository) Update(id primitive.ObjectID, chat *models.Chat) error 
 	_, err := r.chatCollection.UpdateOne(context.Background(), filter, update)
 
 	if err == nil {
-		// Update cache with fresh data (write-aside)
-		go r.updateChatCache(id)
+		// Update cache synchronously to avoid race conditions with rapid updates
+		// Fetch from DB to ensure we cache the exact stored version
+		r.updateChatCache(id)
 	}
 
 	return err
@@ -478,7 +480,8 @@ func (r *chatRepository) FindByID(id primitive.ObjectID) (*models.Chat, error) {
 	log.Printf("[CACHE] Attempting to fetch chat from cache - Key: %s", cacheKey)
 	if compressed, err := r.redisRepo.GetCompressed(cacheKey, ctx); err == nil {
 		var chat models.Chat
-		if err := json.Unmarshal(compressed, &chat); err == nil {
+		// Use BSON unmarshal instead of JSON to preserve all fields including password (json:"-")
+		if err := bson.Unmarshal(compressed, &chat); err == nil {
 			log.Printf("[CACHE HIT] Retrieved chat from cache - ChatID: %s", id.Hex())
 			return &chat, nil
 		}
