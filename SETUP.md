@@ -38,6 +38,7 @@ NeoBase requires the following services to function properly:
 - **MongoDB** - Stores user data, connections, and chat history
 - **Redis** - Manages user sessions and database schema caching
 - **PostgreSQL** (for Spreadsheet feature) - Stores uploaded CSV/Excel data with encryption
+- **Qdrant** (optional) - Vector database for RAG (Retrieval-Augmented Generation) pipeline
 
 ### Supported Databases (for querying)
 
@@ -54,9 +55,9 @@ NeoBase requires the following services to function properly:
 
 ### Supported LLM Clients
 
-- **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and legacy models
-- **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
-- **Anthropic Claude** (10 models) - Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
+- **OpenAI** (18 models) - GPT-5.2/5.2-Pro, GPT-5.1, GPT-5/5-Pro, GPT-5-Mini/Nano, O3/O4-Mini, GPT-4.1, GPT-4o, and legacy models
+- **Google Gemini** (7 models) - Gemini 3.1 Pro, Gemini 3 Flash, Gemini 2.5 Flash/Pro, and more
+- **Anthropic Claude** (12 models) - Opus 4.6 (most intelligent), Sonnet 4.6 (default), Opus 4.5, Sonnet 4.5, Haiku 4.5, Sonnet 4, 3.5 series, and 3.0 series
 - **Ollama** (30+ models) - Self-hosted open-source: DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, Gemma, Phi, and more
 
 #### Dynamic Model Selection
@@ -78,9 +79,9 @@ NeoBase uses a **simple configuration-based approach** to enable or disable AI p
 3. **No code changes needed** - Just update your `.env` file
 
 **Environment Variables:**
-- `OPENAI_API_KEY` - Enables all 14 OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
-- `GEMINI_API_KEY` - Enables all 7 Gemini models (Gemini 3 Pro, 2.5 Flash, etc.)
-- `CLAUDE_API_KEY` - Enables all 10 Claude models (Opus 4.5, Sonnet 4, etc.)
+- `OPENAI_API_KEY` - Enables all 18 OpenAI models (GPT-5.2, O3, GPT-4o, etc.)
+- `GEMINI_API_KEY` - Enables all 7 Gemini models (Gemini 3.1 Pro, 2.5 Flash, etc.)
+- `CLAUDE_API_KEY` - Enables all 12 Claude models (Opus 4.6, Sonnet 4.6, etc.)
 - `OLLAMA_BASE_URL` - Enables all 30+ Ollama models (default: http://localhost:11434)
 - `DEFAULT_LLM_MODEL` - Default model ID (optional, auto-selects if not set)
 
@@ -158,11 +159,67 @@ If you want to disable specific models while keeping their provider enabled, edi
 **Note:** This requires code changes and backend restart. For enabling/disabling entire providers, use environment variables instead.
 
 **Enterprise & Self-Hosted Options:**
-- Use Claude Opus 4.5 - the world's best model for coding, agents, and computer use
+- Use Claude Opus 4.6 - the most intelligent model for building agents and coding
 - Claude with your enterprise Anthropic license for advanced coding and reasoning
 - Self-host models with Ollama for complete data privacy and cost control
 - Mix cloud and self-hosted models based on your security and performance needs
-- Choose from 63 total models across 4 providers for maximum flexibility
+- Choose from 67+ total models across 4 providers for maximum flexibility
+
+### Embedding & RAG Configuration
+
+NeoBase uses vector embeddings and a RAG (Retrieval-Augmented Generation) pipeline to intelligently retrieve only the relevant schema context for each user query instead of sending the entire database schema to the LLM. This significantly improves accuracy and reduces token usage for large databases.
+
+#### Supported Embedding Providers & Models
+
+| Provider | Model | Dimensions | Max Input | Default |
+|----------|-------|-----------|-----------|--------|
+| **OpenAI** | `text-embedding-3-small` | 1536 | 8191 tokens | ✅ |
+| **OpenAI** | `text-embedding-3-large` | 3072 | 8191 tokens | |
+| **OpenAI** | `text-embedding-ada-002` | 1536 | 8191 tokens | |
+| **Gemini** | `gemini-embedding-001` | 768 (default 3072, truncated via MRL) | 2048 tokens | ✅ |
+| **Gemini** | `text-embedding-004` | 768 | 2048 tokens | |
+| **Gemini** | `embedding-001` | 768 | 2048 tokens | |
+
+> **⚠️ Important: Vector Dimension Consistency**
+>
+> NeoBase uses **768 dimensions** for its Qdrant vector collection by default. The embedding dimension is explicitly set in API requests via the `outputDimensionality` (Gemini) or `dimensions` (OpenAI) parameter to ensure consistency. If you change the embedding model or provider after initial vectorization, you **must re-vectorize** your schema (delete and recreate the Knowledge Base) to avoid dimension mismatch errors (e.g., `expected dim: 768, got 3072`).
+>
+> The `gemini-embedding-001` model defaults to 3072 dimensions but NeoBase truncates it to 768 via Matryoshka Representation Learning (MRL). Similarly, OpenAI's `text-embedding-3-small` defaults to 1536 but is truncated to match the configured dimension.
+
+#### Embedding Environment Variables
+
+- `EMBEDDING_PROVIDER` - Embedding provider: `openai` or `gemini` (auto-detected from LLM API keys if left empty)
+- `EMBEDDING_MODEL` - Specific model ID (uses provider default if left empty)
+
+**Auto-Detection:** If `EMBEDDING_PROVIDER` is not set, NeoBase automatically selects a provider based on your configured LLM API keys (priority: OpenAI > Gemini). No additional setup needed.
+
+**Examples:**
+```bash
+# Auto-detect (recommended) — uses OpenAI if OPENAI_API_KEY is set, otherwise Gemini
+EMBEDDING_PROVIDER=
+EMBEDDING_MODEL=
+
+# Explicitly use OpenAI with the large model
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-large
+
+# Explicitly use Gemini (free tier)
+EMBEDDING_PROVIDER=gemini
+EMBEDDING_MODEL=text-embedding-004
+```
+
+**Validation:** NeoBase validates the embedding provider and model at startup. If an unsupported provider or model is specified, the application will fail to start with a descriptive error message.
+
+#### Qdrant Vector Database
+
+Qdrant stores the vector embeddings for schema data. It runs as a Docker container alongside your other services.
+
+- `QDRANT_HOST` - Qdrant hostname (default: `localhost`, use `neobase-qdrant` in Docker)
+- `QDRANT_PORT` - Qdrant gRPC port (default: `6334`)
+- `QDRANT_API_KEY` - API key (optional for local, required for Qdrant Cloud)
+- `QDRANT_USE_TLS` - Enable TLS (default: `false`, set `true` for Qdrant Cloud)
+
+**Note:** Qdrant is optional. If Qdrant is unavailable, NeoBase gracefully falls back to sending the full schema (the pre-RAG behavior). The RAG pipeline enhances accuracy and reduces costs but is not required for basic functionality.
 
 ## Setup Options
 
@@ -226,10 +283,18 @@ You can set up NeoBase in several ways:
 3. Edit the `.env` file with your configuration (see `.env.example` for details)
 
    **Important LLM Configuration:**
-   - `OPENAI_API_KEY` - Your OpenAI API key (enables 15 models)
+   - `OPENAI_API_KEY` - Your OpenAI API key (enables 18 models)
    - `GEMINI_API_KEY` - Your Google Gemini API key (enables 7 models)
    - `DEFAULT_LLM_MODEL` - Default model ID (optional, automatically selects based on available keys)
    - At least one API key is required for the application to function
+
+   **Embedding & RAG Configuration (optional):**
+   - `EMBEDDING_PROVIDER` - `openai` or `gemini` (auto-detected from LLM API keys if empty)
+   - `EMBEDDING_MODEL` - e.g., `text-embedding-3-small` (uses provider default if empty)
+   - `QDRANT_HOST` - Qdrant vector DB host (default: `localhost`)
+   - `QDRANT_PORT` - Qdrant gRPC port (default: `6334`)
+   - `QDRANT_API_KEY` - Qdrant API key (optional for local)
+   - `QDRANT_USE_TLS` - Use TLS for Qdrant (default: `false`)
 
    **Important Spreadsheet & Google Sheets Configuration:**
    - `SPREADSHEET_POSTGRES_HOST` - PostgreSQL host for spreadsheet data storage
