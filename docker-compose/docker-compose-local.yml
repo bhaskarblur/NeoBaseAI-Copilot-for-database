@@ -48,6 +48,21 @@ services:
     networks:
       - neobase-network
 
+  neobase-qdrant:
+    image: qdrant/qdrant:latest
+    container_name: neobase-qdrant
+    restart: always
+    ports:
+      - 6333:6333   # REST API
+      - 6334:6334   # gRPC
+    volumes:
+      - neobase-qdrant-data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: neobase-qdrant-local-key
+    networks:
+      - neobase-network
+
   neobase-backend:
     build:
       context: ../backend
@@ -102,10 +117,17 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID} # Google OAuth client ID
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET} # Google OAuth client secret
       - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL} # Google OAuth redirect URL (e.g., http://localhost:5173/auth/google/callback)
+      - QDRANT_HOST=${QDRANT_HOST:-neobase-qdrant} # Qdrant vector DB host
+      - QDRANT_PORT=${QDRANT_PORT:-6334} # Qdrant gRPC port
+      - QDRANT_API_KEY=${QDRANT_API_KEY} # Qdrant API key (optional for local)
+      - QDRANT_USE_TLS=${QDRANT_USE_TLS:-false} # Use TLS for Qdrant connection
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER} # openai or gemini (auto-detected if empty)
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL} # e.g., text-embedding-3-small (uses provider default if empty)
     depends_on:
       - neobase-mongodb
       - neobase-redis
       - neobase-spreadsheet-postgres
+      - neobase-qdrant
     networks:
       - neobase-network
 
@@ -134,6 +156,7 @@ volumes:
   neobase-mongodb-data:
   neobase-redis-data:
   neobase-spreadsheet-postgres-data:
+  neobase-qdrant-data:
 
 networks:
   neobase-network:
