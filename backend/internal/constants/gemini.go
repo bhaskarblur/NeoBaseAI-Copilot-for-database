@@ -4,15 +4,15 @@ import "github.com/google/generative-ai-go/genai"
 
 var GeminiLLMModels = []LLMModel{
 	{
-		ID:                  "gemini-3-pro-preview",
+		ID:                  "gemini-3.1-pro-preview",
 		Provider:            Gemini,
-		DisplayName:         "Gemini 3 Pro (Most Intelligent)",
+		DisplayName:         "Gemini 3.1 Pro (Most Intelligent)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
-		MaxCompletionTokens: 100000,
+		MaxCompletionTokens: 65536,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
-		Description:         "Best model in the world for multimodal understanding with state-of-the-art reasoning and agentic capabilities",
+		InputTokenLimit:     1048576,
+		Description:         "Refined Gemini 3 Pro with better thinking, improved token efficiency, and factual consistency. Optimized for coding and agentic workflows",
 	},
 	{
 		ID:                  "gemini-3-flash-preview",
@@ -20,10 +20,10 @@ var GeminiLLMModels = []LLMModel{
 		DisplayName:         "Gemini 3 Flash (Frontier Speed)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
-		MaxCompletionTokens: 100000,
+		MaxCompletionTokens: 65536,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
-		Description:         "Most intelligent model built for speed, combining frontier intelligence with superior search and grounding",
+		InputTokenLimit:     1048576,
+		Description:         "Best model in the world for multimodal understanding with state-of-the-art reasoning and agentic capabilities",
 	},
 	// Gemini 2.5 Series (Advanced)
 	{
@@ -32,9 +32,9 @@ var GeminiLLMModels = []LLMModel{
 		DisplayName:         "Gemini 2.5 Pro (Advanced Reasoning)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
-		MaxCompletionTokens: 100000,
+		MaxCompletionTokens: 65536,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
+		InputTokenLimit:     1048576,
 		Description:         "State-of-the-art thinking model capable of reasoning over complex problems in code, math, and STEM",
 	},
 	{
@@ -43,9 +43,10 @@ var GeminiLLMModels = []LLMModel{
 		DisplayName:         "Gemini 2.5 Flash (Best Price-Performance)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
-		MaxCompletionTokens: 100000,
+		Default:             ptrBool(true), // Default model for this provider
+		MaxCompletionTokens: 65536,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
+		InputTokenLimit:     1048576,
 		Description:         "Best model for price-performance with well-rounded capabilities, ideal for large-scale processing and agentic tasks",
 	},
 	{
@@ -56,32 +57,31 @@ var GeminiLLMModels = []LLMModel{
 		APIVersion:          "v1beta",
 		MaxCompletionTokens: 50000,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
+		InputTokenLimit:     1048576,
 		Description:         "Fastest flash model optimized for cost-efficiency and high throughput on repetitive tasks",
 	},
-	// Gemini 2.0 Series (Previous Workhorse)
+	// Gemini 2.0 Series (Deprecated)
 	{
 		ID:                  "gemini-2.0-flash",
 		Provider:            Gemini,
-		DisplayName:         "Gemini 2.0 Flash (Workhorse)",
-		IsEnabled:           true,
-		Default:             ptrBool(true),
+		DisplayName:         "Gemini 2.0 Flash (Deprecated)",
+		IsEnabled:           false,
 		APIVersion:          "v1beta",
 		MaxCompletionTokens: 30000,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
-		Description:         "Second generation workhorse model with 1M token context window for large document processing",
+		InputTokenLimit:     1048576,
+		Description:         "Deprecated second generation workhorse model. Migrate to Gemini 2.5 Flash",
 	},
 	{
 		ID:                  "gemini-2.0-flash-lite",
 		Provider:            Gemini,
-		DisplayName:         "Gemini 2.0 Flash-Lite (Previous Fast)",
-		IsEnabled:           true,
+		DisplayName:         "Gemini 2.0 Flash-Lite (Deprecated)",
+		IsEnabled:           false,
 		APIVersion:          "v1beta",
 		MaxCompletionTokens: 20000,
 		Temperature:         1,
-		InputTokenLimit:     1000000,
-		Description:         "Second generation small workhorse model with 1M token context, lightweight version",
+		InputTokenLimit:     1048576,
+		Description:         "Deprecated second generation small workhorse model. Migrate to Gemini 2.5 Flash-Lite",
 	},
 }
 

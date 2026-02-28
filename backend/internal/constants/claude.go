@@ -1,16 +1,38 @@
 package constants
 
 var ClaudeLLMModels = []LLMModel{
-
+	// Claude 4.6 Series (Latest Generation)
+	{
+		ID:                  "claude-opus-4-6",
+		Provider:            Claude,
+		DisplayName:         "Claude Opus 4.6 (Most Intelligent)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 128000,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "The most intelligent model for building agents and coding. Exceptional performance in reasoning with extended thinking and adaptive thinking support",
+	},
+	{
+		ID:                  "claude-sonnet-4-6",
+		Provider:            Claude,
+		DisplayName:         "Claude Sonnet 4.6 (Best Speed + Intelligence)",
+		IsEnabled:           true,
+		Default:             ptrBool(true),
+		MaxCompletionTokens: 64000,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Best combination of speed and intelligence with extended and adaptive thinking. Fast comparative latency at affordable pricing",
+	},
+	// Claude 4.5 Series (Previous Flagship)
 	{
 		ID:                  "claude-opus-4-5-20251101",
 		Provider:            Claude,
-		DisplayName:         "Claude Opus 4.5 (Best in World)",
+		DisplayName:         "Claude Opus 4.5 (Previous Best)",
 		IsEnabled:           true,
 		MaxCompletionTokens: 16384,
 		Temperature:         1,
 		InputTokenLimit:     200000,
-		Description:         "World's best model for coding, agents, and computer use. State-of-the-art across all domains with 2x token efficiency",
+		Description:         "Previous world's best model for coding, agents, and computer use. State-of-the-art across all domains with 2x token efficiency",
 	},
 	{
 		ID:                  "claude-sonnet-4-5",
@@ -20,17 +42,17 @@ var ClaudeLLMModels = []LLMModel{
 		MaxCompletionTokens: 16384,
 		Temperature:         1,
 		InputTokenLimit:     200000,
-		Description:         "Best coding model in the world. State-of-the-art on SWE-bench, strongest for complex agents, most aligned model",
+		Description:         "Previous best coding model. State-of-the-art on SWE-bench, strongest for complex agents, most aligned model",
 	},
 	{
 		ID:                  "claude-haiku-4-5",
 		Provider:            Claude,
 		DisplayName:         "Claude Haiku 4.5 (Fast Intelligence)",
 		IsEnabled:           true,
-		MaxCompletionTokens: 8192,
+		MaxCompletionTokens: 64000,
 		Temperature:         1,
 		InputTokenLimit:     200000,
-		Description:         "State-of-the-art coding with unprecedented speed and cost-efficiency. Matches older frontier models at fraction of cost",
+		Description:         "Fastest model with near-frontier intelligence. State-of-the-art speed and cost-efficiency with extended thinking support",
 	},
 
 	// Claude 4 Series (Reliable Production)
@@ -39,7 +61,6 @@ var ClaudeLLMModels = []LLMModel{
 		Provider:            Claude,
 		DisplayName:         "Claude Sonnet 4 (Production Workhorse)",
 		IsEnabled:           true,
-		Default:             ptrBool(true),
 		MaxCompletionTokens: 8192,
 		Temperature:         1,
 		InputTokenLimit:     200000,
