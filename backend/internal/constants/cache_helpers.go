@@ -19,4 +19,7 @@ const (
 
 	// LLM message cache TTL
 	LLMMessageCacheTTL = 15 * time.Minute // 15 minutes cache for LLM message context
+
+	// Knowledge Base cache TTLs
+	KnowledgeBaseCacheTTL = 30 * time.Minute // 30 minutes cache for knowledge base per chat
 )
