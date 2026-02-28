@@ -1,8 +1,6 @@
 package models
 
 import (
-	"time"
-
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -25,8 +23,6 @@ type KnowledgeBase struct {
 	ChatID            primitive.ObjectID `bson:"chat_id" json:"chat_id"`
 	UserID            primitive.ObjectID `bson:"user_id" json:"user_id"`
 	TableDescriptions []TableDescription `bson:"table_descriptions" json:"table_descriptions"`
-	IsVectorized      bool               `bson:"is_vectorized" json:"is_vectorized"`
-	VectorizedAt      *time.Time         `bson:"vectorized_at,omitempty" json:"vectorized_at,omitempty"`
 	Base              `bson:",inline"`
 }
 
@@ -47,22 +43,4 @@ func (kb *KnowledgeBase) GetTableDescription(tableName string) *TableDescription
 		}
 	}
 	return nil
-}
-
-// GetTablesWithDescriptions returns only tables that have a non-empty description or at least one field with a description.
-func (kb *KnowledgeBase) GetTablesWithDescriptions() []TableDescription {
-	result := make([]TableDescription, 0)
-	for _, td := range kb.TableDescriptions {
-		if td.Description != "" {
-			result = append(result, td)
-			continue
-		}
-		for _, fd := range td.FieldDescriptions {
-			if fd.Description != "" {
-				result = append(result, td)
-				break
-			}
-		}
-	}
-	return result
 }

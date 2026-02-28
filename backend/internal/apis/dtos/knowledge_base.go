@@ -11,8 +11,6 @@ type UpdateKnowledgeBaseRequest struct {
 type KnowledgeBaseResponse struct {
 	ChatID            string                    `json:"chat_id"`
 	TableDescriptions []models.TableDescription `json:"table_descriptions"`
-	IsVectorized      bool                      `json:"is_vectorized"`
-	VectorizedAt      *string                   `json:"vectorized_at,omitempty"`
 	CreatedAt         string                    `json:"created_at"`
 	UpdatedAt         string                    `json:"updated_at"`
 }

@@ -14,8 +14,6 @@ export interface TableDescription {
 export interface KnowledgeBaseResponse {
   chat_id: string;
   table_descriptions: TableDescription[];
-  is_vectorized: boolean;
-  vectorized_at?: string;
   created_at: string;
   updated_at: string;
 }
