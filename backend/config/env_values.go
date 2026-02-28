@@ -76,6 +76,16 @@ type Environment struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	GoogleRedirectURL  string
+
+	// Qdrant Vector DB configs
+	QdrantHost   string
+	QdrantPort   string
+	QdrantAPIKey string
+	QdrantUseTLS bool
+
+	// Embedding configs
+	EmbeddingProvider string // "openai" or "gemini" — auto-detected if empty
+	EmbeddingModel    string // e.g. "text-embedding-3-small" or "text-embedding-004"
 }
 
 var Env Environment
@@ -161,6 +171,16 @@ func LoadEnv() error {
 	Env.GoogleClientID = getEnvWithDefault("GOOGLE_CLIENT_ID", "")
 	Env.GoogleClientSecret = getEnvWithDefault("GOOGLE_CLIENT_SECRET", "")
 	Env.GoogleRedirectURL = getEnvWithDefault("GOOGLE_REDIRECT_URL", "http://localhost:5173/auth/google/callback")
+
+	// Qdrant Vector DB configs
+	Env.QdrantHost = getEnvWithDefault("QDRANT_HOST", "localhost")
+	Env.QdrantPort = getEnvWithDefault("QDRANT_PORT", "6334")
+	Env.QdrantAPIKey = getEnvWithDefault("QDRANT_API_KEY", "")
+	Env.QdrantUseTLS = getEnvWithDefault("QDRANT_USE_TLS", "false") == "true"
+
+	// Embedding configs — auto-detect provider from available API keys if not set
+	Env.EmbeddingProvider = getEnvWithDefault("EMBEDDING_PROVIDER", "")
+	Env.EmbeddingModel = getEnvWithDefault("EMBEDDING_MODEL", "")
 
 	return validateConfig()
 }
@@ -250,6 +270,23 @@ func validateConfig() error {
 
 	// Log LLM model initialization status
 	constants.LogModelInitialization(Env.OpenAIAPIKey, Env.GeminiAPIKey, Env.ClaudeAPIKey, Env.OllamaBaseURL)
+
+	// Validate & resolve Embedding Provider + Model against supported constants
+	resolvedProvider, resolvedModel, embErr := constants.ValidateEmbeddingConfig(
+		Env.EmbeddingProvider,
+		Env.EmbeddingModel,
+		Env.OpenAIAPIKey,
+		Env.GeminiAPIKey,
+	)
+	if embErr != nil {
+		return embErr
+	}
+	// Write back the resolved (possibly auto-detected) values
+	Env.EmbeddingProvider = resolvedProvider
+	Env.EmbeddingModel = resolvedModel
+
+	// Log embedding initialization status
+	constants.LogEmbeddingInitialization(Env.EmbeddingProvider, Env.EmbeddingModel, Env.OpenAIAPIKey, Env.GeminiAPIKey)
 
 	return nil
 }
