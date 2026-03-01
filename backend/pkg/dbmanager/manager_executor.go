@@ -147,7 +147,6 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 				},
 			}
 		}
-		// log.Printf("Manager -> ExecuteQuery -> Result: %v", result)
 		if result.Error != nil {
 			queryErr = result.Error
 		}

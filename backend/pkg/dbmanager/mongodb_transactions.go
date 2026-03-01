@@ -1360,6 +1360,23 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			// If direct parsing fails, handle MongoDB syntax with unquoted keys
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
+			// Pre-clean the pipeline string before stage extraction to fix LLM formatting issues
+			// Fix double-quoted field names: ""$addFields"" → "$addFields"
+			preCleanPattern := regexp.MustCompile(`""([^"]+)""`)
+			paramsStr = preCleanPattern.ReplaceAllString(paramsStr, `"$1"`)
+
+			// Fix mangled MongoDB operators: {"sort"} → $sort
+			preMangledPattern := regexp.MustCompile(`"\{"([a-zA-Z_][a-zA-Z0-9_]*)"\}"`)
+			paramsStr = preMangledPattern.ReplaceAllString(paramsStr, `"$$$1"`)
+
+			log.Printf("MongoDBTransaction -> ExecuteQuery -> After pre-cleanup: %s", paramsStr)
+
+			// Try parsing again after pre-cleanup
+			if err := json.Unmarshal([]byte(paramsStr), &pipeline); err == nil {
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Successfully parsed pipeline after pre-cleanup with %d stages", len(pipeline))
+				goto pipelineParsed
+			}
+
 			// Use the new parser to properly extract stages
 			stages, parseErr := ParseAggregationPipeline(paramsStr)
 			if parseErr != nil {
@@ -1378,9 +1395,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 				// Trim any whitespace and trailing commas from the stage
 				stageContent = strings.TrimSpace(stageContent)
 				stageContent = strings.TrimSuffix(stageContent, ",")
-				
+
 				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processing stage %d: %s", i, stageContent)
-				
+
 				// Check if this is a $project stage
 				if strings.Contains(stageContent, "$project") {
 					log.Printf("MongoDBTransaction -> ExecuteQuery -> Detected $project stage in pipeline")
@@ -1400,12 +1417,12 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 				// Clean up the processed stage - remove any trailing commas or whitespace
 				processedStage = strings.TrimSpace(processedStage)
 				processedStage = strings.TrimSuffix(processedStage, ",")
-				
+
 				// Don't replace dates with placeholders - let processObjectIds handle them
 				// This preserves the date values for proper BSON conversion
 
 				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage %d: %s", i, processedStage)
-				
+
 				// Only add non-empty stages
 				if processedStage != "" && processedStage != "," {
 					processedStages = append(processedStages, processedStage)
@@ -1422,6 +1439,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			// This matches patterns like ""user.email"" and replaces them with "user.email"
 			fixFieldNamesPattern := regexp.MustCompile(`""([^"]+)""`)
 			jsonStr = fixFieldNamesPattern.ReplaceAllString(jsonStr, `"$1"`)
+
+			// Fix LLM-generated mangled MongoDB operators: {"key"} → $key
+			// Some LLMs (e.g., Gemini) output {"sort"} instead of $sort in aggregate pipelines
+			fixMangledOpsPattern := regexp.MustCompile(`"\{"([a-zA-Z_][a-zA-Z0-9_]*)"\}"`)
+			jsonStr = fixMangledOpsPattern.ReplaceAllString(jsonStr, `"$$$1"`)
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
@@ -1440,6 +1462,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
 
+	pipelineParsed:
 		// Process dot notation fields in the pipeline for improved support of
 		// accessing fields from joined documents after $lookup and $unwind
 		ProcessDotNotationFields(map[string]interface{}{"pipeline": pipeline})
@@ -1448,7 +1471,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 		if err := processDotNotationInAggregation(pipeline); err != nil {
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error processing dot notation in pipeline: %v", err)
 		}
-		
+
 		// Process ObjectIds and Dates in the pipeline
 		for _, stage := range pipeline {
 			if err := processObjectIds(stage); err != nil {
@@ -1460,11 +1483,11 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 		cursor, err := collection.Aggregate(ctx, pipeline)
 		if err != nil {
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Error executing aggregation: %v", err)
-			
+
 			// Log the actual pipeline that failed for debugging
 			pipelineJSON, _ := json.Marshal(pipeline)
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Failed pipeline: %s", string(pipelineJSON))
-			
+
 			// Check for specific MongoDB errors and provide better error messages
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "$dateToString is not allowed") {
@@ -1472,7 +1495,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			} else if strings.Contains(errMsg, "unknown operator") {
 				errMsg = fmt.Sprintf("MongoDB operator error: %v. Some operators may not be supported in your MongoDB version or deployment type.", err)
 			}
-			
+
 			return &QueryExecutionResult{
 				Error: &dtos.QueryError{
 					Message: errMsg,
