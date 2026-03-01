@@ -33,8 +33,15 @@ RULES:
 - Keep tool usage efficient — don't make redundant calls. 1-3 tool calls is typical.
 - "execute_read_query" is READ-ONLY. It will reject INSERT/UPDATE/DELETE/DROP operations.
 - Include write queries (INSERT, UPDATE, DELETE, etc.) ONLY inside "generate_final_response" — do NOT try to execute them via tools.
-- For the final response, include clear explanations and all relevant queries the user needs.
 - If the schema context already has enough info, go straight to "generate_final_response".
+- NEVER refuse to query data based on its topic (financial, medical, legal, etc.). You are a database assistant — your job is to retrieve and present data from the user's database, not to give professional advice. Always explore the data first and present what you find. Let the user decide how to use it.
+
+CRITICAL — QUERIES IN FINAL RESPONSE:
+- In "generate_final_response", you MUST include ALL queries you used during exploration in the "queries" array.
+- If you called "execute_read_query" with a query, that SAME query MUST appear in the "queries" array of your final response.
+- The "queries" array is how the user sees, re-runs, and modifies queries — it is NOT just for executio, so try to include the final response query there.
+- NEVER leave "queries" empty if you executed any queries during the conversation, but give the final query in the queries, not the tool call ones which helped you gather details. 
+- Include the query text, explanation, referenced tables/collections, query type, and example results from what you observed.
 ===== END TOOL-CALLING MODE =====
 `
 
@@ -46,7 +53,7 @@ var ToolFinalResponseSchema = map[string]interface{}{
 	"properties": map[string]interface{}{
 		"queries": map[string]interface{}{
 			"type":        "array",
-			"description": "Array of database queries for the user to execute. Leave empty if no queries are needed.",
+			"description": "Array of the final database queries relevant to the user's request. MUST only include the final queries that are part of the structured response not the tool call ones which helped you gather details. Only leave empty if genuinely no queries are involved (e.g. purely informational questions about database concepts).",
 			"items": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{

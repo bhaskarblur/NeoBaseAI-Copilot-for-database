@@ -491,7 +491,7 @@ func Initialize() {
 		}
 
 		// Initialize VectorizationService (nil if embedding or vectordb unavailable)
-		vectorizationSvc := services.NewVectorizationService(embeddingProvider, vectorClient, kbRepo)
+		vectorizationSvc := services.NewVectorizationService(embeddingProvider, vectorClient)
 
 		// Ensure Qdrant collection exists on startup
 		if vectorizationSvc != nil {
