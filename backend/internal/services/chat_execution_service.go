@@ -1848,9 +1848,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
 	if err := json.Unmarshal(resultJSON, &resultListFormatting); err != nil {
-		log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+		// Result is not an array — try parsing as a map (e.g. countDocuments returns {"count": N})
 		if err := json.Unmarshal(resultJSON, &resultMapFormatting); err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+			log.Printf("ChatService -> ExecuteQuery -> Warning: result is neither array nor map: %v", err)
 			// Try to unmarshal as a map
 			err = json.Unmarshal(resultJSON, &resultMapFormatting)
 			if err != nil {
