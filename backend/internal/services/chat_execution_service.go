@@ -3183,9 +3183,44 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get chat: %v", err)
 	}
 
-	// Check if schema is ready (connection has CurrentSchema)
-	if chat.Connection.CurrentSchema == nil || *chat.Connection.CurrentSchema == "" {
-		log.Printf("ChatService -> GetQueryRecommendations -> Schema not ready, skipping recommendation generation")
+	// Check if schema is ready (connection has CurrentSchema).
+	// Fallback: if CurrentSchema is empty but a KnowledgeBase exists for this chat,
+	// format KB table descriptions into a lightweight schema context. The KB contains
+	// the same table/field information that the schema would have.
+	schemaContext := ""
+	if chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
+		schemaContext = *chat.Connection.CurrentSchema
+	} else if s.kbRepo != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> CurrentSchema not ready, checking knowledge base fallback")
+		kb, kbErr := s.kbRepo.FindByChatID(ctx, chatObjID)
+		if kbErr == nil && kb != nil && len(kb.TableDescriptions) > 0 {
+			// Format KB table descriptions into a schema-like string
+			var sb strings.Builder
+			sb.WriteString("Database Schema (from Knowledge Base):\n\n")
+			for _, td := range kb.TableDescriptions {
+				sb.WriteString(fmt.Sprintf("Table: %s\n", td.TableName))
+				if td.Description != "" {
+					sb.WriteString(fmt.Sprintf("  Description: %s\n", td.Description))
+				}
+				for _, fd := range td.FieldDescriptions {
+					sb.WriteString(fmt.Sprintf("  - %s", fd.FieldName))
+					if fd.Description != "" {
+						sb.WriteString(fmt.Sprintf(": %s", fd.Description))
+					}
+					sb.WriteString("\n")
+				}
+				sb.WriteString("\n")
+			}
+			schemaContext = sb.String()
+			log.Printf("ChatService -> GetQueryRecommendations -> Using KB fallback as schema context (%d tables, %d chars)", len(kb.TableDescriptions), len(schemaContext))
+		} else {
+			log.Printf("ChatService -> GetQueryRecommendations -> No CurrentSchema and no KB found, skipping recommendation generation")
+			return &dtos.QueryRecommendationsResponse{
+				Recommendations: []dtos.QueryRecommendation{},
+			}, http.StatusOK, nil
+		}
+	} else {
+		log.Printf("ChatService -> GetQueryRecommendations -> Schema not ready and KB repo unavailable, skipping recommendation generation")
 		return &dtos.QueryRecommendationsResponse{
 			Recommendations: []dtos.QueryRecommendation{},
 		}, http.StatusOK, nil
@@ -3214,7 +3249,20 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		recoRAGContext, _, _ = s.performRAGSearch(ctx, chatID, userQuery)
 	}
 
-	llmMessages, err = s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type, recoRAGContext, false)
+	// If CurrentSchema is empty (KB fallback path), inject the KB-derived schemaContext
+	// as RAG context so convertMessagesToLLMFormat includes it in the system message.
+	useRAGOnlyForReco := false
+	if (chat.Connection.CurrentSchema == nil || *chat.Connection.CurrentSchema == "") && schemaContext != "" {
+		if recoRAGContext == "" {
+			recoRAGContext = schemaContext
+		} else {
+			recoRAGContext = schemaContext + "\n\n" + recoRAGContext
+		}
+		useRAGOnlyForReco = true
+		log.Printf("ChatService -> GetQueryRecommendations -> Injecting KB-derived schema as RAG context for recommendations")
+	}
+
+	llmMessages, err = s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type, recoRAGContext, useRAGOnlyForReco)
 	if err != nil {
 		log.Printf("ChatService -> GetQueryRecommendations -> Error converting messages: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert messages: %v", err)
