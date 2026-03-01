@@ -18,11 +18,7 @@ interface QueryRecommendationsResponse {
     };
 }
 
-// Make these TRULY GLOBAL - outside the chatService object to survive hot reloads
-// This ensures all imports of chatService share the same cache/pending requests
-const tablesCache: Record<string, {tables: any[], timestamp: number}> = {};
-const pendingRequests: Record<string, Promise<TablesResponse>> = {};
-const CACHE_TTL = 600000; // 10 minutes in milliseconds
+// No frontend tables caching — always fetch fresh from backend to avoid stale data.
 
 const chatService = {
     async createChat(connection: Connection, settings: ChatSettings): Promise<Chat> {
@@ -324,11 +320,6 @@ const chatService = {
                 throw new Error('Failed to update selected collections');
             }
 
-            // Clear the cache for this chat
-            delete tablesCache[chatId];
-            // Clear any pending requests
-            delete pendingRequests[chatId];
-
             return response.data.data;
         } catch (error: any) {
             console.error('Update selected collections error:', error);
@@ -388,96 +379,24 @@ const chatService = {
 
     async getTables(chatId: string): Promise<TablesResponse> {
         try {
-            // Get call stack to identify the caller
-            const stack = new Error().stack;
-            const callerLine = stack?.split('\n')[2]?.trim() || 'unknown';
-            console.log(`🔍 getTables called for ${chatId}`);
-            console.log(`  └─ From: ${callerLine}`);
-            console.log(`  └─ Cache keys: [${Object.keys(tablesCache).join(', ')}]`);
-            console.log(`  └─ Pending keys: [${Object.keys(pendingRequests).join(', ')}]`);
-            
-            // Check if we have a cached result that's still valid (do this first, before pending check)
-            const cachedResult = tablesCache[chatId];
-            const now = Date.now();
-            
-            if (cachedResult && (now - cachedResult.timestamp < CACHE_TTL)) {
-                console.log(`💾 Using cached data (age: ${(now - cachedResult.timestamp)/1000}s)`);
-                return { tables: cachedResult.tables };
+            const response = await axios.get<{success: boolean, data: TablesResponse}>(
+                `${API_URL}/chats/${chatId}/tables`,
+                {
+                    withCredentials: true,
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    timeout: 120000
+                }
+            );
+
+            if (!response.data.success) {
+                throw new Error('Failed to get tables');
             }
-            
-            // Atomic check-and-set: if no pending request exists, create and store it in one expression
-            const isNewRequest = !pendingRequests[chatId];
-            
-            const requestPromise = pendingRequests[chatId] || (pendingRequests[chatId] = (() => {
-                console.log(`🆕 Creating NEW request for ${chatId}`);
-                
-                let resolveRequest: (value: TablesResponse) => void;
-                let rejectRequest: (reason: any) => void;
-                
-                const promise = new Promise<TablesResponse>((resolve, reject) => {
-                    resolveRequest = resolve;
-                    rejectRequest = reject;
-                });
-                
-                // Start the async work
-                (async () => {
-                    try {
-                        console.log(`📡 Making HTTP request for ${chatId}`);
-                        
-                        const timeoutPromise = new Promise<never>((_, reject) => {
-                            setTimeout(() => reject(new Error('Request timeout')), 120000);
-                        });
-                        
-                        const fetchPromise = axios.get<{success: boolean, data: TablesResponse}>(
-                            `${API_URL}/chats/${chatId}/tables`,
-                            {
-                                withCredentials: true,
-                                headers: {
-                                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                                }
-                            }
-                        );
-                        
-                        const response = await Promise.race([fetchPromise, timeoutPromise]);
-        
-                        if (!response.data.success) {
-                            throw new Error('Failed to get tables');
-                        }
-        
-                        tablesCache[chatId] = {
-                            tables: response.data.data.tables,
-                            timestamp: now
-                        };
-                        console.log(`✅ Cached ${response.data.data.tables.length} tables for ${chatId}`);
-        
-                        resolveRequest!(response.data.data);
-                    } catch (error) {
-                        console.error(`❌ Error for ${chatId}:`, error);
-                        rejectRequest!(error);
-                    } finally {
-                        delete pendingRequests[chatId];
-                        console.log(`🧹 Cleaned up request for ${chatId}`);
-                    }
-                })();
-                
-                return promise;
-            })());
-            
-            if (!isNewRequest) {
-                console.log(`♻️ Reusing EXISTING promise for ${chatId}`);
-            }
-            
-            return await requestPromise;
+
+            return response.data.data;
         } catch (error: any) {
             console.error('Get tables error:', error);
-            delete pendingRequests[chatId];
-            
-            const cachedResult = tablesCache[chatId];
-            if (cachedResult) {
-                console.log(`Using stale cache for ${chatId}`);
-                return { tables: cachedResult.tables };
-            }
-            
             throw new Error(error.response?.data?.error || 'Failed to get tables');
         }
     },

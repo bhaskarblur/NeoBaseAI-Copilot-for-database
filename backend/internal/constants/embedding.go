@@ -50,6 +50,12 @@ func GetRagNoMatchingTablesFound(dbType string) string {
 		discoveryStep = "1. Start by using execute_read_query with the query `SHOW TABLES` to list all available tables in the MySQL database.\n" +
 			"2. Once you identify potentially relevant tables, call get_table_info with those specific table names to see their columns and structure.\n" +
 			"3. Use execute_read_query to run further exploratory queries as needed to understand the data.\n"
+	case DatabaseTypeSpreadsheet:
+		// Spreadsheet connections use a chat-specific PostgreSQL schema (conn_<chatID>),
+		// not the 'public' schema. Use current_schema() which resolves to the correct one.
+		discoveryStep = "1. Start by using execute_read_query with the query `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()` to list all available tables.\n" +
+			"2. Once you identify potentially relevant tables, call get_table_info with those specific table names to see their columns and structure.\n" +
+			"3. Use execute_read_query to run further exploratory queries as needed to understand the data.\n"
 	default:
 		// PostgreSQL, YugabyteDB, Spreadsheet, etc.
 		discoveryStep = "1. Start by using execute_read_query with the query `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'` to list all available tables.\n" +

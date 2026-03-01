@@ -2839,6 +2839,22 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
 
+			// Save formatted schema to chat.Connection.CurrentSchema so that
+			// GetQueryRecommendations (and other consumers) know the schema is ready.
+			// Previously this was missing — only HandleSchemaChange saved it, but
+			// RefreshSchema races with StartSchemaTracking and often the schema is
+			// already stored in Redis before doSchemaCheck runs, so HandleSchemaChange
+			// never fires, leaving CurrentSchema nil forever.
+			if schemaMsg != "" {
+				updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := s.chatRepo.UpdateConnectionSchema(updateCtx, chatObjID, schemaMsg); err != nil {
+					log.Printf("ChatService -> RefreshSchema -> Warning: Failed to save CurrentSchema: %v", err)
+				} else {
+					log.Printf("ChatService -> RefreshSchema -> Saved CurrentSchema to chat.Connection (length: %d)", len(schemaMsg))
+				}
+				updateCancel()
+			}
+
 			// Sync knowledge base descriptions via LLM FIRST (auto-generate from schema)
 			// so that KB descriptions are available when we build enriched schema chunks.
 			if schemaMsg != "" {
