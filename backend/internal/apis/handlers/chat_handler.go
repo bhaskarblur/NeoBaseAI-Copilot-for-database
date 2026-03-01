@@ -1096,3 +1096,77 @@ func (h *ChatHandler) GetImportMetadata(c *gin.Context) {
 func (h *ChatHandler) GetChatService() services.ChatService {
 	return h.chatService
 }
+
+// @Summary Get knowledge base for a chat
+// @Description Retrieve table/field descriptions for the knowledge base
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Success 200 {object} dtos.Response{data=dtos.KnowledgeBaseResponse}
+// @Router /api/chats/{id}/knowledge-base [get]
+func (h *ChatHandler) GetKnowledgeBase(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	kb, statusCode, err := h.chatService.GetKnowledgeBase(c.Request.Context(), userID, chatID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data: dtos.KnowledgeBaseResponse{
+			ChatID:            kb.ChatID.Hex(),
+			TableDescriptions: kb.TableDescriptions,
+			CreatedAt:         kb.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:         kb.UpdatedAt.Format(time.RFC3339),
+		},
+	})
+}
+
+// @Summary Update knowledge base for a chat
+// @Description Save or update table/field descriptions and trigger vectorization
+// @Accept json
+// @Produce json
+// @Param id path string true "Chat ID"
+// @Param body body dtos.UpdateKnowledgeBaseRequest true "Knowledge base data"
+// @Success 200 {object} dtos.Response{data=dtos.KnowledgeBaseResponse}
+// @Router /api/chats/{id}/knowledge-base [put]
+func (h *ChatHandler) UpdateKnowledgeBase(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	var req dtos.UpdateKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	kb, statusCode, err := h.chatService.UpdateKnowledgeBase(c.Request.Context(), userID, chatID, req.TableDescriptions)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(int(statusCode), dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data: dtos.KnowledgeBaseResponse{
+			ChatID:            kb.ChatID.Hex(),
+			TableDescriptions: kb.TableDescriptions,
+			CreatedAt:         kb.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:         kb.UpdatedAt.Format(time.RFC3339),
+		},
+	})
+}

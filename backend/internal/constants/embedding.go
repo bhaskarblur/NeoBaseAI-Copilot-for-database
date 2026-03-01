@@ -7,16 +7,6 @@ import (
 )
 
 const (
-	RagNoMatchingTablesFound = "\n\n⚠️ CRITICAL CONSTRAINT — NO MATCHING TABLES FOUND ⚠️\n" +
-		"A semantic search of the entire database schema found ZERO tables or collections related to the user's query.\n" +
-		"This means the database almost certainly does NOT contain data relevant to the user's question.\n\n" +
-		"YOU MUST follow these rules:\n" +
-		"1. Do NOT generate any queries. Leave the 'queries' array EMPTY.\n" +
-		"2. Do NOT guess, infer, or fabricate table/collection names — even if something in the schema looks vaguely similar.\n" +
-		"3. Respond ONLY with an assistantMessage explaining that no matching tables or collections were found for the user's request.\n" +
-		"4. Suggest the user rephrase their question, check the available tables, or refresh the knowledge base.\n" +
-		"Violating these rules will cause a runtime error."
-
 	// SchemaCollectionName is the Qdrant collection for schema + KB + relationship vectors.
 	SchemaCollectionName = "neobase_schema"
 
@@ -41,6 +31,42 @@ const (
 	// MessageRAGTopK is the default number of older relevant messages to retrieve.
 	MessageRAGTopK = 8
 )
+
+// GetRagNoMatchingTablesFound returns the RAG-no-match instruction string
+// customized per database type so the LLM knows the correct discovery commands.
+func GetRagNoMatchingTablesFound(dbType string) string {
+	// Build the DB-specific discovery step
+	var discoveryStep string
+	switch dbType {
+	case DatabaseTypeMongoDB:
+		discoveryStep = "1. Start by using execute_read_query with the query `db.getCollectionNames()` to list all available collections in the MongoDB database.\n" +
+			"2. Once you identify potentially relevant collections, call get_table_info with those specific collection names to see their fields and structure.\n" +
+			"3. Use execute_read_query to run further exploratory queries as needed (e.g. `db.collectionName.find({}).limit(5)` to see sample documents).\n"
+	case DatabaseTypeClickhouse:
+		discoveryStep = "1. Start by using execute_read_query with the query `SHOW TABLES` to list all available tables in the ClickHouse database.\n" +
+			"2. Once you identify potentially relevant tables, call get_table_info with those specific table names to see their columns and structure.\n" +
+			"3. Use execute_read_query to run further exploratory queries as needed to understand the data.\n"
+	case DatabaseTypeMySQL:
+		discoveryStep = "1. Start by using execute_read_query with the query `SHOW TABLES` to list all available tables in the MySQL database.\n" +
+			"2. Once you identify potentially relevant tables, call get_table_info with those specific table names to see their columns and structure.\n" +
+			"3. Use execute_read_query to run further exploratory queries as needed to understand the data.\n"
+	default:
+		// PostgreSQL, YugabyteDB, Spreadsheet, etc.
+		discoveryStep = "1. Start by using execute_read_query with the query `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'` to list all available tables.\n" +
+			"2. Once you identify potentially relevant tables, call get_table_info with those specific table names to see their columns and structure.\n" +
+			"3. Use execute_read_query to run further exploratory queries as needed to understand the data.\n"
+	}
+
+	return "\n\nℹ️ SCHEMA SEARCH NOTE:\n" +
+		"A semantic search of the database schema found no tables or collections that closely match the user's query.\n" +
+		"The full database schema is NOT provided in this context to keep token usage efficient.\n\n" +
+		"IMPORTANT — You MUST use tool-calling to discover the database structure:\n" +
+		discoveryStep +
+		"4. Do NOT guess or fabricate table/collection names — always verify by calling the tools first.\n" +
+		"5. If after exploring you confirm the data truly does not exist, explain that clearly to the user.\n" +
+		"6. Always include the FINAL user-facing queries in the 'queries' array of your generate_final_response. Do NOT include intermediate exploration queries (like listing tables or checking schema) that only helped you discover the database structure.\n" +
+		"7. Remember: You can also see the message history to know about the past interaction and the database structure from the messages."
+}
 
 // --- Embedding Provider Constants ---
 

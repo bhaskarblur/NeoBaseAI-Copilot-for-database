@@ -30,7 +30,7 @@ func SetupChatRoutes(router *gin.Engine) {
 		protected.POST("/:id/messages", chatHandler.CreateMessage)
 		protected.PATCH("/:id/messages/:messageId", chatHandler.UpdateMessage)
 		protected.DELETE("/:id/messages", chatHandler.DeleteMessages)
-		
+
 		// Message pinning
 		protected.POST("/:id/messages/:messageId/pin", chatHandler.PinMessage)
 		protected.DELETE("/:id/messages/:messageId/pin", chatHandler.UnpinMessage)
@@ -56,8 +56,12 @@ func SetupChatRoutes(router *gin.Engine) {
 
 		// Query recommendations
 		protected.GET("/:id/recommendations", chatHandler.GetQueryRecommendations)
-		
+
 		// Import metadata for spreadsheets and Google Sheets
 		protected.GET("/:id/import-metadata", chatHandler.GetImportMetadata)
+
+		// Knowledge Base
+		protected.GET("/:id/knowledge-base", chatHandler.GetKnowledgeBase)
+		protected.PUT("/:id/knowledge-base", chatHandler.UpdateKnowledgeBase)
 	}
 }
