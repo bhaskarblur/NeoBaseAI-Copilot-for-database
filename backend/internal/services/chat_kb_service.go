@@ -8,6 +8,7 @@ import (
 	"neobase-ai/internal/constants"
 	"neobase-ai/internal/models"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -193,8 +194,8 @@ func (s *chatService) syncKnowledgeBase(ctx context.Context, chatID string, form
 	log.Printf("ChatService -> syncKnowledgeBase -> KB sync completed for chatID: %s (%d table descriptions saved)", chatID, len(kb.TableDescriptions))
 }
 
-// generateKBDescriptionsViaLLM calls the LLM with the formatted schema to generate
-// table and field descriptions for the knowledge base.
+// generateKBDescriptionsViaLLM calls the LLM with the formatted schema to enrich the knowledge base descriptions.
+// It uses GenerateRawJSON to get the LLM to return raw KB JSON without the standard NeoBase response schema, which allows for more flexible output.
 func (s *chatService) generateKBDescriptionsViaLLM(ctx context.Context, formattedSchema string, preferredModel *string) ([]models.TableDescription, error) {
 	// Resolve LLM client
 	llmClient := s.llmClient
@@ -215,43 +216,36 @@ func (s *chatService) generateKBDescriptionsViaLLM(ctx context.Context, formatte
 		return nil, fmt.Errorf("no LLM client available")
 	}
 
-	// Build messages: system prompt + schema as user message
-	messages := []*models.LLMMessage{
-		{
-			Role: "user",
-			Content: map[string]interface{}{
-				"user_message": constants.KBDescriptionGenerationPrompt + "\n\nHere is the database schema:\n\n" + formattedSchema,
-			},
-		},
-	}
+	// Trim the schema for KB generation: strip long example values, deeply nested fields,
+	// and sensitive data to drastically reduce the token count and speed up the LLM call.
+	trimmedSchema := trimSchemaForKB(formattedSchema)
+	log.Printf("ChatService -> generateKBDescriptionsViaLLM -> Schema trimmed from %d to %d chars (%.1f%% reduction)",
+		len(formattedSchema), len(trimmedSchema), (1-float64(len(trimmedSchema))/float64(len(formattedSchema)))*100)
 
-	// Use GenerateResponse (single-shot, not tool-calling) — this is a simple generation task
-	// We use "postgresql" as dbType since we want raw JSON back, not DB-specific queries
-	response, err := llmClient.GenerateResponse(ctx, messages, "postgresql", false, modelID)
+	// Build the user message: KB prompt + trimmed schema
+	kbUserMessage := constants.KBDescriptionGenerationPrompt + "\n\nHere is the database schema:\n\n" + trimmedSchema
+
+	// Use GenerateRawJSON (not GenerateResponse) — this bypasses the standard NeoBase
+	// response schema so the LLM returns raw KB JSON instead of assistantMessage/queries format.
+	response, err := llmClient.GenerateRawJSON(ctx, constants.KBDescriptionGenerationPrompt, kbUserMessage, modelID)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %v", err)
 	}
 
 	log.Printf("ChatService -> generateKBDescriptionsViaLLM -> Raw response length: %d", len(response))
 
-	// The response is wrapped in the LLMResponse schema with assistantMessage.
-	// Try to extract the JSON from assistantMessage first
+	// The response should be raw KB JSON from GenerateRawJSON.
+	// Try to extract JSON from the text (may contain markdown code blocks).
+	kbJSON := extractJSONFromText(response)
+
+	// Fallback: if the response was wrapped in an assistantMessage envelope (e.g. if the
+	// LLM still returned the standard format), extract the inner JSON.
 	var llmResp map[string]interface{}
-	if err := json.Unmarshal([]byte(response), &llmResp); err != nil {
-		return nil, fmt.Errorf("failed to parse LLM response: %v", err)
+	if err := json.Unmarshal([]byte(kbJSON), &llmResp); err == nil {
+		if msg, ok := llmResp["assistantMessage"].(string); ok && msg != "" {
+			kbJSON = extractJSONFromText(msg)
+		}
 	}
-
-	// The KB JSON might be in assistantMessage or directly in the response
-	var kbJSON string
-	if msg, ok := llmResp["assistantMessage"].(string); ok && msg != "" {
-		kbJSON = msg
-	} else {
-		// Try the raw response
-		kbJSON = response
-	}
-
-	// Try to extract JSON from the text (may contain markdown code blocks)
-	kbJSON = extractJSONFromText(kbJSON)
 
 	// Parse the KB descriptions
 	var kbResp struct {
@@ -287,6 +281,125 @@ func (s *chatService) generateKBDescriptionsViaLLM(ctx context.Context, formatte
 
 	log.Printf("ChatService -> generateKBDescriptionsViaLLM -> Generated descriptions for %d tables", len(result))
 	return result, nil
+}
+
+// trimSchemaForKB reduces the formatted schema size for KB generation by:
+// 1. Truncating long example record values to short previews
+// 2. Removing deeply nested fields (3+ levels) from the column listing
+// 3. Stripping sensitive-looking data (tokens, passwords, encrypted values)
+// 4. Limiting example records to 1 per table
+// This can reduce a 1.3M schema to ~100-200K, cutting LLM response time by 5-10x.
+func trimSchemaForKB(schema string) string {
+	lines := strings.Split(schema, "\n")
+	var result strings.Builder
+	result.Grow(len(schema) / 4) // Pre-allocate ~25% of original
+
+	inExampleRecords := false
+	recordCount := 0
+	skipUntilNextSection := false
+
+	// Regex patterns for sensitive data
+	sensitivePatterns := regexp.MustCompile(`(?i)(token|password|secret|apikey|api_key|refresh_token|access_token|google_access|google_refresh|ssl_cert|ssl_key|ssl_root)`)
+	encryptedPattern := regexp.MustCompile(`^ENC:[A-Za-z0-9+/=]+$`)
+	base64LikePattern := regexp.MustCompile(`^[A-Za-z0-9+/]{40,}={0,2}$`)
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Detect example records section
+		if trimmedLine == "Example Records:" {
+			inExampleRecords = true
+			recordCount = 0
+			skipUntilNextSection = false
+			result.WriteString(line)
+			result.WriteString("\n")
+			continue
+		}
+
+		// Detect start of a new record
+		if inExampleRecords && strings.HasPrefix(trimmedLine, "Record ") && strings.HasSuffix(trimmedLine, ":") {
+			recordCount++
+			if recordCount > 1 {
+				// Skip records after the first one
+				skipUntilNextSection = true
+				continue
+			}
+			skipUntilNextSection = false
+			result.WriteString(line)
+			result.WriteString("\n")
+			continue
+		}
+
+		// Detect end of example records (new table or section)
+		if inExampleRecords && (strings.HasPrefix(trimmedLine, "Table:") ||
+			strings.HasPrefix(trimmedLine, "Row Count:") ||
+			strings.HasPrefix(trimmedLine, "View:") ||
+			(trimmedLine == "" && skipUntilNextSection)) {
+			if strings.HasPrefix(trimmedLine, "Table:") || strings.HasPrefix(trimmedLine, "View:") {
+				inExampleRecords = false
+				skipUntilNextSection = false
+			}
+			if skipUntilNextSection && trimmedLine == "" {
+				continue // Skip blank lines between skipped records
+			}
+			result.WriteString(line)
+			result.WriteString("\n")
+			continue
+		}
+
+		if skipUntilNextSection {
+			continue
+		}
+
+		// Skip deeply nested field definitions (3+ dots = 3+ nesting levels)
+		// e.g. "  - candidate.resume.education.location.city (String)" → skip
+		if strings.HasPrefix(trimmedLine, "- ") && strings.Contains(trimmedLine, "(") {
+			fieldPart := strings.TrimPrefix(trimmedLine, "- ")
+			fieldName := strings.Split(fieldPart, " ")[0]
+			if strings.Count(fieldName, ".") >= 3 {
+				continue // Skip deeply nested fields
+			}
+		}
+
+		// Inside example records: truncate long values
+		if inExampleRecords && strings.Contains(line, ": ") {
+			parts := strings.SplitN(line, ": ", 2)
+			if len(parts) == 2 {
+				key := parts[0]
+				value := parts[1]
+				fieldName := strings.TrimSpace(key)
+
+				// Strip sensitive fields entirely
+				if sensitivePatterns.MatchString(fieldName) {
+					result.WriteString(key)
+					result.WriteString(": \"[REDACTED]\"\n")
+					continue
+				}
+
+				// Strip encrypted/base64 values
+				cleanVal := strings.Trim(strings.TrimSpace(value), "\"")
+				if encryptedPattern.MatchString(cleanVal) || base64LikePattern.MatchString(cleanVal) {
+					result.WriteString(key)
+					result.WriteString(": \"[ENCRYPTED]\"\n")
+					continue
+				}
+
+				// Truncate long string values (>200 chars)
+				if len(value) > 200 {
+					result.WriteString(key)
+					result.WriteString(": ")
+					result.WriteString(value[:200])
+					result.WriteString("...[truncated]\"\n")
+					continue
+				}
+			}
+		}
+
+		result.WriteString(line)
+		result.WriteString("\n")
+	}
+
+	return result.String()
 }
 
 // extractJSONFromText tries to extract a JSON object from text that may contain
