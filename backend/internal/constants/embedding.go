@@ -18,14 +18,17 @@ const (
 
 	// DefaultTopK is the default number of schema results to retrieve.
 	DefaultTopK = 10
-	// DefaultScoreThreshold is the minimum similarity score for schema/KB search.
-	DefaultScoreThreshold = 0.65
+	// DefaultScoreThreshold is the minimum similarity score for the vector leg of schema search.
+	// Set relatively low because RRF fusion with the keyword leg handles relevance ranking.
+	// The keyword match leg has no threshold — if a table name appears in the query, it's included.
+	// This ensures tables with even moderate semantic similarity are not dropped prematurely.
+	DefaultScoreThreshold = 0.5
 
 	// --- Message search defaults ---
 
 	// MessageScoreThreshold is the minimum similarity for message retrieval.
 	// Higher than schema threshold because we want highly relevant conversation context.
-	MessageScoreThreshold = 0.65
+	MessageScoreThreshold = 0.55
 	// SlidingWindowSize is the number of recent messages always included verbatim.
 	SlidingWindowSize = 20
 	// MessageRAGTopK is the default number of older relevant messages to retrieve.

@@ -171,8 +171,14 @@ func (v *vectorizationService) VectorizeSchema(ctx context.Context, chatID strin
 	relationshipMeta := make([]map[string]interface{}, 0)
 
 	for i, chunk := range chunks {
-		// Schema vector
-		pointID := vectordb.PointID(fmt.Sprintf("schema_%s_%s", chatID, chunk.TableName))
+		// Schema vector — include part_index for sub-chunked tables to ensure unique IDs
+		partIndex := chunk.Metadata["part_index"]
+		var pointID vectordb.PointID
+		if partIndex != "" && partIndex != "1" {
+			pointID = vectordb.PointID(fmt.Sprintf("schema_%s_%s_p%s", chatID, chunk.TableName, partIndex))
+		} else {
+			pointID = vectordb.PointID(fmt.Sprintf("schema_%s_%s", chatID, chunk.TableName))
+		}
 
 		payload := map[string]interface{}{
 			"chat_id":    chatID,
@@ -407,7 +413,10 @@ func (v *vectorizationService) CopyVectorsForChat(ctx context.Context, sourceCha
 	return nil
 }
 
-// SearchSchema performs similarity search across schema + KB vectors for a chat.
+// SearchSchema performs a hybrid search (vector similarity + full-text keyword matching)
+// across schema + KB vectors for a chat. Both legs run server-side in Qdrant via
+// Reciprocal Rank Fusion (RRF), so tables matching both semantically AND by keyword
+// are ranked significantly higher.
 // Logs detailed results (table names, types, scores) for manual quality assessment.
 func (v *vectorizationService) SearchSchema(ctx context.Context, chatID string, query string, topK int) ([]vectordb.SearchResult, error) {
 	if topK <= 0 {
@@ -416,23 +425,42 @@ func (v *vectorizationService) SearchSchema(ctx context.Context, chatID string, 
 
 	log.Printf("VectorizationService -> SearchSchema -> chat=%s | topK=%d | query=\"%s\"", chatID, topK, truncateForLog(query, 200))
 
-	// Embed the query
-	queryVector, err := v.embeddingProvider.Embed(ctx, query)
+	// Embed the query with RETRIEVAL_QUERY task type for optimal asymmetric retrieval
+	queryVector, err := v.embeddingProvider.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
 
-	// Search the schema collection with chat_id filter
-	results, err := v.vectorClient.Search(ctx, constants.SchemaCollectionName, vectordb.SearchRequest{
+	// Extract keywords for the full-text leg of hybrid search.
+	// We pass the raw query directly — Qdrant's full-text engine tokenizes it and
+	// performs token-level matching against the indexed "content" field.
+	textQuery := query
+
+	// Use hybrid search: vector similarity + full-text keyword match, fused via RRF on the DB side
+	results, err := v.vectorClient.HybridSearch(ctx, constants.SchemaCollectionName, vectordb.HybridSearchRequest{
 		Vector: queryVector,
 		Filter: map[string]string{
 			"chat_id": chatID,
 		},
 		TopK:           topK,
 		ScoreThreshold: float32(constants.DefaultScoreThreshold),
+		TextQuery:      textQuery,
+		TextField:      "content",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to search schema: %w", err)
+		// Fall back to plain vector search if hybrid fails (e.g., text index not yet created)
+		log.Printf("VectorizationService -> SearchSchema -> Hybrid search failed, falling back to vector-only: %v", err)
+		results, err = v.vectorClient.Search(ctx, constants.SchemaCollectionName, vectordb.SearchRequest{
+			Vector: queryVector,
+			Filter: map[string]string{
+				"chat_id": chatID,
+			},
+			TopK:           topK,
+			ScoreThreshold: float32(constants.DefaultScoreThreshold),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to search schema: %w", err)
+		}
 	}
 
 	// --- Detailed logging for quality assessment ---
@@ -553,7 +581,7 @@ func (v *vectorizationService) SearchMessages(ctx context.Context, chatID string
 		topK = 5 // default for message retrieval
 	}
 
-	queryVector, err := v.embeddingProvider.Embed(ctx, query)
+	queryVector, err := v.embeddingProvider.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed message search query: %w", err)
 	}
@@ -606,7 +634,11 @@ func SchemaInfoToChunks(tables map[string]SchemaTable, dbType string) []SchemaCh
 // BuildEnrichedSchemaChunks converts tables into SchemaChunks, optionally enriching each chunk
 // with KB descriptions and example records from the enrichment map.
 // If enrichments is nil, produces the same output as SchemaInfoToChunks.
+// Large tables (>maxColumnsPerChunk columns) are automatically split into multiple sub-chunks
+// so that each chunk stays within embedding model token limits (~2048 tokens for Gemini).
 func BuildEnrichedSchemaChunks(tables map[string]SchemaTable, dbType string, enrichments map[string]*TableEnrichment) []SchemaChunk {
+	const maxColumnsPerChunk = 50 // ~50 cols × ~40 chars ≈ 2000 chars ≈ 500 tokens, leaves room for header/indexes/examples
+
 	chunks := make([]SchemaChunk, 0, len(tables))
 
 	for tableName, table := range tables {
@@ -614,7 +646,6 @@ func BuildEnrichedSchemaChunks(tables map[string]SchemaTable, dbType string, enr
 		if enrichments != nil {
 			enrichment = enrichments[tableName]
 		}
-		content := buildSchemaChunkText(tableName, table, dbType, enrichment)
 
 		columnNames := make([]string, 0, len(table.Columns))
 		for _, col := range table.Columns {
@@ -626,16 +657,86 @@ func BuildEnrichedSchemaChunks(tables map[string]SchemaTable, dbType string, enr
 			fkTables = append(fkTables, fk.RefTable)
 		}
 
-		chunks = append(chunks, SchemaChunk{
-			TableName:   tableName,
-			Content:     content,
-			ColumnNames: columnNames,
-			ForeignKeys: fkTables,
-			RowCount:    table.RowCount,
-			Metadata: map[string]string{
-				"db_type": dbType,
-			},
-		})
+		if len(table.Columns) <= maxColumnsPerChunk {
+			// Small table — single chunk (original behavior)
+			content := buildSchemaChunkText(tableName, table, dbType, enrichment)
+			chunks = append(chunks, SchemaChunk{
+				TableName:   tableName,
+				Content:     content,
+				ColumnNames: columnNames,
+				ForeignKeys: fkTables,
+				RowCount:    table.RowCount,
+				Metadata: map[string]string{
+					"db_type": dbType,
+				},
+			})
+		} else {
+			// Large table — split into sub-chunks by column groups.
+			// Each sub-chunk includes the header (table name, description, engine note)
+			// plus a subset of columns so the embedding model processes all fields.
+			totalCols := len(table.Columns)
+			partIndex := 0
+			for start := 0; start < totalCols; start += maxColumnsPerChunk {
+				end := start + maxColumnsPerChunk
+				if end > totalCols {
+					end = totalCols
+				}
+				partIndex++
+
+				// Build a sub-table with the column slice
+				subTable := SchemaTable{
+					Name:     table.Name,
+					Comment:  table.Comment,
+					RowCount: table.RowCount,
+					Columns:  table.Columns[start:end],
+				}
+				// Only include indexes and FKs in the first sub-chunk
+				if start == 0 {
+					subTable.Indexes = table.Indexes
+					subTable.ForeignKeys = table.ForeignKeys
+				}
+
+				// Only include enrichment (example records, table description) in the first sub-chunk
+				var subEnrichment *TableEnrichment
+				if start == 0 {
+					subEnrichment = enrichment
+				} else if enrichment != nil {
+					// For continuation chunks, include field descriptions but skip examples/table desc
+					subEnrichment = &TableEnrichment{
+						FieldDescriptions: enrichment.FieldDescriptions,
+					}
+				}
+
+				content := buildSchemaChunkText(tableName, subTable, dbType, subEnrichment)
+
+				// Add a part indicator for continuation chunks
+				if partIndex > 1 {
+					content = fmt.Sprintf("[%s: %s — fields %d-%d of %d]\n%s",
+						getDBTerminology(dbType).EntityLabel, tableName, start+1, end, totalCols, content)
+				}
+
+				subColumnNames := make([]string, 0, len(subTable.Columns))
+				for _, col := range subTable.Columns {
+					subColumnNames = append(subColumnNames, col.Name)
+				}
+
+				chunks = append(chunks, SchemaChunk{
+					TableName:   tableName,
+					Content:     content,
+					ColumnNames: subColumnNames,
+					ForeignKeys: fkTables,
+					RowCount:    table.RowCount,
+					Metadata: map[string]string{
+						"db_type":    dbType,
+						"part_index": fmt.Sprintf("%d", partIndex),
+						"total_cols": fmt.Sprintf("%d", totalCols),
+					},
+				})
+			}
+
+			log.Printf("BuildEnrichedSchemaChunks -> Split table %s (%d columns) into %d sub-chunks",
+				tableName, totalCols, partIndex)
+		}
 	}
 
 	return chunks

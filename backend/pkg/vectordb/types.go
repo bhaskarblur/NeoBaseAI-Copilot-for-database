@@ -20,6 +20,17 @@ type SearchRequest struct {
 	ScoreThreshold float32           `json:"score_threshold"` // Minimum similarity score (0-1)
 }
 
+// HybridSearchRequest defines parameters for a hybrid (vector + full-text) search.
+// Qdrant executes both legs server-side and fuses results via Reciprocal Rank Fusion.
+type HybridSearchRequest struct {
+	Vector         []float32         `json:"vector"`
+	Filter         map[string]string `json:"filter"`           // Key-value payload filter applied to BOTH legs
+	TopK           int               `json:"top_k"`            // Max results to return after fusion
+	ScoreThreshold float32           `json:"score_threshold"`  // Minimum similarity score for vector leg
+	TextQuery      string            `json:"text_query"`       // Full-text search query (matched against text-indexed payload fields)
+	TextField      string            `json:"text_field"`       // Payload field to run full-text match on (must have text index)
+}
+
 // SearchResult represents a single search result from the vector database.
 type SearchResult struct {
 	ID      string                 `json:"id"`
@@ -52,6 +63,11 @@ type Client interface {
 
 	// Search performs similarity search within a collection.
 	Search(ctx context.Context, collection string, req SearchRequest) ([]SearchResult, error)
+
+	// HybridSearch performs a hybrid search combining dense vector similarity and full-text keyword matching.
+	// Uses Qdrant's Query API with two prefetch legs fused via Reciprocal Rank Fusion (RRF).
+	// All computation happens server-side in Qdrant — no application-side post-processing.
+	HybridSearch(ctx context.Context, collection string, req HybridSearchRequest) ([]SearchResult, error)
 
 	// Delete removes points by their IDs from a collection.
 	Delete(ctx context.Context, collection string, ids []PointID) error
