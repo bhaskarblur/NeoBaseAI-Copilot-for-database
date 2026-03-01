@@ -1109,29 +1109,41 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	// Extract action buttons from the LLM response
 	var actionButtons []models.ActionButton
 	if jsonResponse["actionButtons"] != nil {
-		actionButtonsArray := jsonResponse["actionButtons"].([]interface{})
-		if len(actionButtonsArray) > 0 {
+		if actionButtonsArray, ok := jsonResponse["actionButtons"].([]interface{}); ok && len(actionButtonsArray) > 0 {
 			actionButtons = make([]models.ActionButton, 0, len(actionButtonsArray))
 			for _, btn := range actionButtonsArray {
-				btnMap := btn.(map[string]interface{})
+				btnMap, ok := btn.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				label, _ := btnMap["label"].(string)
+				// LLMs sometimes return "prompt" instead of "action"
+				action, _ := btnMap["action"].(string)
+				if action == "" {
+					action, _ = btnMap["prompt"].(string)
+				}
+				isPrimary, _ := btnMap["isPrimary"].(bool)
+				if label == "" || action == "" {
+					log.Printf("processLLMResponse -> skipping action button with missing label or action: %v", btnMap)
+					continue
+				}
 				actionButton := models.ActionButton{
 					ID:        primitive.NewObjectID(),
-					Label:     btnMap["label"].(string),
-					Action:    btnMap["action"].(string),
-					IsPrimary: btnMap["isPrimary"].(bool),
+					Label:     label,
+					Action:    action,
+					IsPrimary: isPrimary,
 				}
 				actionButtons = append(actionButtons, actionButton)
 			}
 		}
-	} else {
+	}
+	if actionButtons == nil {
 		actionButtons = []models.ActionButton{}
 	}
 
 	assistantMessage := ""
-	if jsonResponse["assistantMessage"] != nil {
-		assistantMessage = jsonResponse["assistantMessage"].(string)
-	} else {
-		assistantMessage = ""
+	if am, ok := jsonResponse["assistantMessage"].(string); ok {
+		assistantMessage = am
 	}
 
 	// Find existing AI response message
@@ -2198,8 +2210,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case primitive.A:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-							rollbackQuery = qMap["rollback_query"].(string)
+						qQuery, _ := qMap["query"].(string)
+						if strings.Replace(qQuery, "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
+							if rq, ok := qMap["rollback_query"].(string); ok {
+								rollbackQuery = rq
+							}
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
 							v[i] = qMap
@@ -2211,8 +2226,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case []interface{}:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-							rollbackQuery = qMap["rollback_query"].(string)
+						qQuery, _ := qMap["query"].(string)
+						if strings.Replace(qQuery, "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
+							if rq, ok := qMap["rollback_query"].(string); ok {
+								rollbackQuery = rq
+							}
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
 							v[i] = qMap
