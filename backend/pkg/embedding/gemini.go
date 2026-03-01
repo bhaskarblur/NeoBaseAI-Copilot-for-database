@@ -42,6 +42,7 @@ func getGeminiBaseURL(model string) string {
 type geminiEmbedRequest struct {
 	Model                string             `json:"model"`
 	Content              geminiEmbedContent `json:"content"`
+	TaskType             string             `json:"taskType,omitempty"`
 	OutputDimensionality int                `json:"outputDimensionality,omitempty"`
 }
 
@@ -97,8 +98,20 @@ func NewGeminiProvider(apiKey string, model string) (*GeminiProvider, error) {
 	}, nil
 }
 
-// Embed generates a vector embedding for a single text input.
+// Embed generates a vector embedding for a single text input (document/storage context).
+// Uses RETRIEVAL_DOCUMENT task type so embeddings are optimized for being retrieved.
 func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	return p.embedWithTaskType(ctx, text, "RETRIEVAL_DOCUMENT")
+}
+
+// EmbedQuery generates a vector embedding optimized for search/retrieval queries.
+// Uses RETRIEVAL_QUERY task type so the embedding is optimized for finding relevant documents.
+func (p *GeminiProvider) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	return p.embedWithTaskType(ctx, text, "RETRIEVAL_QUERY")
+}
+
+// embedWithTaskType is the internal implementation that accepts a Gemini task type.
+func (p *GeminiProvider) embedWithTaskType(ctx context.Context, text string, taskType string) ([]float32, error) {
 	if text == "" {
 		return nil, fmt.Errorf("text cannot be empty")
 	}
@@ -108,6 +121,7 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 		Content: geminiEmbedContent{
 			Parts: []geminiEmbedPart{{Text: text}},
 		},
+		TaskType:             taskType,
 		OutputDimensionality: p.GetDimension(),
 	}
 
@@ -178,6 +192,7 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 				Content: geminiEmbedContent{
 					Parts: []geminiEmbedPart{{Text: text}},
 				},
+				TaskType:             "RETRIEVAL_DOCUMENT",
 				OutputDimensionality: p.GetDimension(),
 			})
 		}

@@ -90,6 +90,12 @@ func (p *OpenAIProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	return allEmbeddings, nil
 }
 
+// EmbedQuery generates a vector embedding optimized for search queries.
+// OpenAI doesn't distinguish between document and query embeddings, so this is identical to Embed.
+func (p *OpenAIProvider) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	return p.Embed(ctx, text)
+}
+
 // GetDimension returns the dimensionality of embeddings produced by this provider.
 // Looks up the dimension from the centralized embedding model definitions in constants.
 func (p *OpenAIProvider) GetDimension() int {

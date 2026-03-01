@@ -88,10 +88,22 @@ func (q *QdrantClient) EnsureCollection(ctx context.Context, collection string, 
 	return q.ensureCollectionWithIndexes(ctx, collection, dimension, nil)
 }
 
-// EnsureSchemaCollection creates the schema collection with schema-specific payload indexes.
+// EnsureSchemaCollection creates the schema collection with schema-specific payload indexes,
+// including a full-text index on the "content" field for hybrid search.
 func (q *QdrantClient) EnsureSchemaCollection(ctx context.Context, dimension int) error {
 	indexes := []string{"chat_id", "type", "table_name"}
-	return q.ensureCollectionWithIndexes(ctx, constants.SchemaCollectionName, dimension, indexes)
+	if err := q.ensureCollectionWithIndexes(ctx, constants.SchemaCollectionName, dimension, indexes); err != nil {
+		return err
+	}
+	// Create full-text index on "content" for hybrid keyword search (idempotent)
+	if err := q.ensureTextIndex(ctx, constants.SchemaCollectionName, "content"); err != nil {
+		log.Printf("VectorDB -> Warning: failed to create text index on 'content' in schema collection: %v", err)
+	}
+	// Create full-text index on "table_name" for direct table name matching
+	if err := q.ensureTextIndex(ctx, constants.SchemaCollectionName, "table_name"); err != nil {
+		log.Printf("VectorDB -> Warning: failed to create text index on 'table_name' in schema collection: %v", err)
+	}
+	return nil
 }
 
 // EnsureMessageCollection creates the message collection with message-specific payload indexes.
@@ -155,6 +167,34 @@ func (q *QdrantClient) ensureCollectionWithIndexes(ctx context.Context, collecti
 		}
 	}
 
+	return nil
+}
+
+// ensureTextIndex creates a full-text payload index on a field (idempotent).
+// Uses word tokenizer with lowercase for best keyword matching.
+func (q *QdrantClient) ensureTextIndex(ctx context.Context, collection string, fieldName string) error {
+	boolTrue := true
+	lowercase := true
+	fieldType := pb.FieldType_FieldTypeText
+
+	_, err := q.pointsClient.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
+		CollectionName: collection,
+		FieldName:      fieldName,
+		FieldType:      &fieldType,
+		Wait:           &boolTrue,
+		FieldIndexParams: &pb.PayloadIndexParams{
+			IndexParams: &pb.PayloadIndexParams_TextIndexParams{
+				TextIndexParams: &pb.TextIndexParams{
+					Tokenizer: pb.TokenizerType_Word,
+					Lowercase: &lowercase,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create text index '%s' on '%s': %w", fieldName, collection, err)
+	}
+	log.Printf("VectorDB -> Ensured text index '%s' on collection '%s'", fieldName, collection)
 	return nil
 }
 
@@ -242,6 +282,107 @@ func (q *QdrantClient) Search(ctx context.Context, collection string, req Search
 	resp, err := q.pointsClient.Search(ctx, searchReq)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant search error: %w", err)
+	}
+
+	results := make([]SearchResult, 0, len(resp.GetResult()))
+	for _, r := range resp.GetResult() {
+		payload := make(map[string]interface{})
+		for k, v := range r.GetPayload() {
+			payload[k] = fromQdrantValue(v)
+		}
+
+		pointID := ""
+		if r.GetId().GetUuid() != "" {
+			pointID = r.GetId().GetUuid()
+		}
+
+		results = append(results, SearchResult{
+			ID:      pointID,
+			Score:   r.GetScore(),
+			Payload: payload,
+		})
+	}
+
+	return results, nil
+}
+
+// HybridSearch performs a server-side hybrid search using Qdrant's Query API.
+// It runs two independent retrieval legs and fuses them via Reciprocal Rank Fusion (RRF):
+//
+//	Leg 1 (Semantic): Dense vector similarity search with score threshold.
+//	Leg 2 (Keyword):  Dense vector search constrained by a full-text match filter on the text field.
+//
+// Both legs run inside Qdrant — zero application-side post-processing.
+// Points that appear in BOTH legs get a significant RRF score boost.
+func (q *QdrantClient) HybridSearch(ctx context.Context, collection string, req HybridSearchRequest) ([]SearchResult, error) {
+	topK := uint64(req.TopK)
+	if topK == 0 {
+		topK = uint64(constants.DefaultTopK)
+	}
+
+	// --- Build shared filter (e.g., chat_id) ---
+	var sharedConditions []*pb.Condition
+	for key, value := range req.Filter {
+		sharedConditions = append(sharedConditions, &pb.Condition{
+			ConditionOneOf: &pb.Condition_Field{
+				Field: &pb.FieldCondition{
+					Key: key,
+					Match: &pb.Match{
+						MatchValue: &pb.Match_Keyword{
+							Keyword: value,
+						},
+					},
+				},
+			},
+		})
+	}
+
+	var sharedFilter *pb.Filter
+	if len(sharedConditions) > 0 {
+		sharedFilter = &pb.Filter{Must: sharedConditions}
+	}
+
+	// --- Prefetch Leg 1: Pure semantic vector search (broad) ---
+	prefetchLimit := topK * 3 // fetch more candidates for better fusion
+	semanticPrefetch := &pb.PrefetchQuery{
+		Query:          pb.NewQueryDense(req.Vector),
+		Filter:         sharedFilter,
+		Limit:          &prefetchLimit,
+		ScoreThreshold: &req.ScoreThreshold,
+	}
+
+	prefetches := []*pb.PrefetchQuery{semanticPrefetch}
+
+	// --- Prefetch Leg 2: Keyword-constrained vector search ---
+	if req.TextQuery != "" && req.TextField != "" {
+		// Build a filter that requires full-text match AND the shared filter conditions
+		textConditions := make([]*pb.Condition, 0, len(sharedConditions)+1)
+		textConditions = append(textConditions, sharedConditions...)
+		textConditions = append(textConditions, pb.NewMatchText(req.TextField, req.TextQuery))
+
+		textFilter := &pb.Filter{Must: textConditions}
+
+		keywordPrefetch := &pb.PrefetchQuery{
+			Query:  pb.NewQueryDense(req.Vector),
+			Filter: textFilter,
+			Limit:  &prefetchLimit,
+			// No score threshold for keyword leg — if the text matches, it's relevant
+		}
+		prefetches = append(prefetches, keywordPrefetch)
+	}
+
+	// --- Top-level: RRF Fusion ---
+	queryReq := &pb.QueryPoints{
+		CollectionName: collection,
+		Prefetch:       prefetches,
+		Query:          pb.NewQueryFusion(pb.Fusion_RRF),
+		Limit:          &topK,
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+	}
+
+	resp, err := q.pointsClient.Query(ctx, queryReq)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant hybrid search error: %w", err)
 	}
 
 	results := make([]SearchResult, 0, len(resp.GetResult()))

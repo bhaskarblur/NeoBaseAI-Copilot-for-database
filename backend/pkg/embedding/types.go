@@ -5,12 +5,18 @@ import "context"
 // Provider defines the interface for text embedding services.
 // Implementations exist for OpenAI and Gemini.
 type Provider interface {
-	// Embed generates a vector embedding for a single text input.
+	// Embed generates a vector embedding for a single text input (document/storage context).
+	// For indexing documents — uses RETRIEVAL_DOCUMENT task type where supported.
 	Embed(ctx context.Context, text string) ([]float32, error)
 
-	// EmbedBatch generates vector embeddings for multiple texts in a single API call.
-	// More efficient than calling Embed in a loop.
+	// EmbedBatch generates vector embeddings for multiple texts in a single API call (document/storage context).
+	// More efficient than calling Embed in a loop. Uses RETRIEVAL_DOCUMENT task type where supported.
 	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+
+	// EmbedQuery generates a vector embedding optimized for search/retrieval queries.
+	// Uses RETRIEVAL_QUERY task type where supported (e.g., Gemini).
+	// For providers that don't distinguish (e.g., OpenAI), this is identical to Embed.
+	EmbedQuery(ctx context.Context, text string) ([]float32, error)
 
 	// GetDimension returns the dimensionality of embedding vectors produced by this provider.
 	GetDimension() int

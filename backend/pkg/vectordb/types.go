@@ -24,11 +24,11 @@ type SearchRequest struct {
 // Qdrant executes both legs server-side and fuses results via Reciprocal Rank Fusion.
 type HybridSearchRequest struct {
 	Vector         []float32         `json:"vector"`
-	Filter         map[string]string `json:"filter"`           // Key-value payload filter applied to BOTH legs
-	TopK           int               `json:"top_k"`            // Max results to return after fusion
-	ScoreThreshold float32           `json:"score_threshold"`  // Minimum similarity score for vector leg
-	TextQuery      string            `json:"text_query"`       // Full-text search query (matched against text-indexed payload fields)
-	TextField      string            `json:"text_field"`       // Payload field to run full-text match on (must have text index)
+	Filter         map[string]string `json:"filter"`          // Key-value payload filter applied to BOTH legs
+	TopK           int               `json:"top_k"`           // Max results to return after fusion
+	ScoreThreshold float32           `json:"score_threshold"` // Minimum similarity score for vector leg
+	TextQuery      string            `json:"text_query"`      // Full-text search query (matched against text-indexed payload fields)
+	TextField      string            `json:"text_field"`      // Payload field to run full-text match on (must have text index)
 }
 
 // SearchResult represents a single search result from the vector database.
