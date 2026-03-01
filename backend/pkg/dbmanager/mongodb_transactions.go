@@ -1355,6 +1355,20 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 
 		var pipeline []bson.M
 
+		// Pre-clean: Fix Python-style booleans and None that LLMs sometimes generate
+		// Must use word-boundary-safe replacements to avoid mangling field names
+		pythonBoolPattern := regexp.MustCompile(`:\s*True\b`)
+		paramsStr = pythonBoolPattern.ReplaceAllString(paramsStr, ": true")
+		pythonFalsePattern := regexp.MustCompile(`:\s*False\b`)
+		paramsStr = pythonFalsePattern.ReplaceAllString(paramsStr, ": false")
+		pythonNonePattern := regexp.MustCompile(`:\s*None\b`)
+		paramsStr = pythonNonePattern.ReplaceAllString(paramsStr, ": null")
+
+		// Pre-clean: Fix single-quoted MongoDB operators from LLM retry responses
+		// e.g., "'$match'" → "$match", "'$group'" → "$group"
+		singleQuotedOpPattern := regexp.MustCompile(`"'(\$[a-zA-Z_][a-zA-Z0-9_]*)'"`)
+		paramsStr = singleQuotedOpPattern.ReplaceAllString(paramsStr, `"$1"`)
+
 		// Try to parse the pipeline directly as a JSON array
 		if err := json.Unmarshal([]byte(paramsStr), &pipeline); err != nil {
 			// If direct parsing fails, handle MongoDB syntax with unquoted keys
@@ -1444,6 +1458,18 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			// Some LLMs (e.g., Gemini) output {"sort"} instead of $sort in aggregate pipelines
 			fixMangledOpsPattern := regexp.MustCompile(`"\{"([a-zA-Z_][a-zA-Z0-9_]*)"\}"`)
 			jsonStr = fixMangledOpsPattern.ReplaceAllString(jsonStr, `"$$$1"`)
+
+			// Fix Python-style booleans that may have survived stage processing
+			fixTruePattern := regexp.MustCompile(`:\s*True\b`)
+			jsonStr = fixTruePattern.ReplaceAllString(jsonStr, ": true")
+			fixFalsePattern := regexp.MustCompile(`:\s*False\b`)
+			jsonStr = fixFalsePattern.ReplaceAllString(jsonStr, ": false")
+			fixNonePattern := regexp.MustCompile(`:\s*None\b`)
+			jsonStr = fixNonePattern.ReplaceAllString(jsonStr, ": null")
+
+			// Fix single-quoted MongoDB operators from LLM retry responses
+			fixSingleQuotedOpPattern := regexp.MustCompile(`"'(\$[a-zA-Z_][a-zA-Z0-9_]*)'"`)
+			jsonStr = fixSingleQuotedOpPattern.ReplaceAllString(jsonStr, `"$1"`)
 
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
