@@ -141,6 +141,54 @@ func TryParseTextToolCall(textContent string) (string, bool) {
 		}
 	}
 
+	// Pattern 1b: Extract JSON from markdown code fences (```json ... ``` or ``` ... ```)
+	// LLMs sometimes emit the tool call as a markdown code block instead of native function calling.
+	if idx := indexOfCodeFenceJSON(textContent); idx >= 0 {
+		// Find the end of the code fence
+		endFence := strings.Index(textContent[idx:], "\n```")
+		if endFence < 0 {
+			endFence = strings.Index(textContent[idx:], "\r\n```")
+		}
+		if endFence > 0 {
+			jsonCandidate := strings.TrimSpace(textContent[idx : idx+endFence])
+			var testJSON map[string]interface{}
+			if json.Unmarshal([]byte(jsonCandidate), &testJSON) == nil {
+				if _, hasMsg := testJSON["assistantMessage"]; hasMsg {
+					log.Printf("TryParseTextToolCall -> Extracted response from markdown code fence")
+					responseJSON, err := json.Marshal(testJSON)
+					if err == nil {
+						return string(responseJSON), true
+					}
+				}
+			}
+		}
+	}
+
+	// Pattern 1c: Pretty-printed JSON with whitespace between { and "assistantMessage"
+	// e.g., "{\n  \"assistantMessage\": ..."
+	if idx := strings.Index(textContent, `"assistantMessage"`); idx > 0 {
+		// Walk backwards from "assistantMessage" to find the opening {
+		for i := idx - 1; i >= 0; i-- {
+			ch := textContent[i]
+			if ch == '{' {
+				candidate := textContent[i:]
+				if extracted := extractJSONObject(candidate); extracted != "" {
+					var testJSON map[string]interface{}
+					if json.Unmarshal([]byte(extracted), &testJSON) == nil {
+						if _, hasMsg := testJSON["assistantMessage"]; hasMsg {
+							log.Printf("TryParseTextToolCall -> Extracted response from pretty-printed JSON")
+							return extracted, true
+						}
+					}
+				}
+				break
+			}
+			if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+				break // Non-whitespace before "assistantMessage" means { isn't immediately preceding
+			}
+		}
+	}
+
 	// Pattern 2: Python-style generate_final_response(...) call
 	// Extract the keyword arguments and convert to JSON
 	fnName := "generate_final_response("
@@ -217,6 +265,27 @@ func extractJSONObject(s string) string {
 		}
 	}
 	return ""
+}
+
+// indexOfCodeFenceJSON finds the start of JSON content inside a markdown code fence.
+// Returns the index of the JSON content (after the fence opener), or -1 if not found.
+func indexOfCodeFenceJSON(text string) int {
+	// Look for ```json\n{ or ```\n{
+	patterns := []string{"```json\n", "```json\r\n", "```\n", "```\r\n"}
+	for _, pat := range patterns {
+		idx := strings.Index(text, pat)
+		if idx >= 0 {
+			contentStart := idx + len(pat)
+			// Skip leading whitespace to find the JSON object start
+			for contentStart < len(text) && (text[contentStart] == ' ' || text[contentStart] == '\t' || text[contentStart] == '\n' || text[contentStart] == '\r') {
+				contentStart++
+			}
+			if contentStart < len(text) && text[contentStart] == '{' {
+				return contentStart
+			}
+		}
+	}
+	return -1
 }
 
 // extractPythonStringArg extracts the value of a keyword argument like assistantMessage='...'
