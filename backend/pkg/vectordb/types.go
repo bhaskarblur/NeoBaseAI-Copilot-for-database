@@ -62,6 +62,10 @@ type Client interface {
 	// Count returns the number of points matching the filter in a collection.
 	Count(ctx context.Context, collection string, filters []FilterCondition) (int64, error)
 
+	// ScrollByFilter retrieves all points matching the filter, including their vectors.
+	// Used for copying vectors between chats (e.g., chat duplication).
+	ScrollByFilter(ctx context.Context, collection string, filters []FilterCondition, withVectors bool) ([]VectorPoint, error)
+
 	// Close cleans up the connection.
 	Close() error
 }

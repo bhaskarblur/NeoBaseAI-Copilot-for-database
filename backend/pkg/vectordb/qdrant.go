@@ -378,6 +378,88 @@ func (q *QdrantClient) Count(ctx context.Context, collection string, filters []F
 	return int64(resp.GetResult().GetCount()), nil
 }
 
+// ScrollByFilter retrieves all points matching the filter from a collection.
+// When withVectors is true, the response includes the embedding vectors (needed for copying).
+func (q *QdrantClient) ScrollByFilter(ctx context.Context, collection string, filters []FilterCondition, withVectors bool) ([]VectorPoint, error) {
+	if len(filters) == 0 {
+		return nil, fmt.Errorf("at least one filter condition is required for ScrollByFilter")
+	}
+
+	conditions := make([]*pb.Condition, 0, len(filters))
+	for _, f := range filters {
+		conditions = append(conditions, &pb.Condition{
+			ConditionOneOf: &pb.Condition_Field{
+				Field: &pb.FieldCondition{
+					Key: f.Key,
+					Match: &pb.Match{
+						MatchValue: &pb.Match_Keyword{
+							Keyword: f.Value,
+						},
+					},
+				},
+			},
+		})
+	}
+
+	var allPoints []VectorPoint
+	var offset *pb.PointId
+	batchSize := uint32(100)
+
+	for {
+		scrollReq := &pb.ScrollPoints{
+			CollectionName: collection,
+			Filter:         &pb.Filter{Must: conditions},
+			Limit:          &batchSize,
+			WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
+			WithVectors: &pb.WithVectorsSelector{
+				SelectorOptions: &pb.WithVectorsSelector_Enable{Enable: withVectors},
+			},
+		}
+		if offset != nil {
+			scrollReq.Offset = offset
+		}
+
+		resp, err := q.pointsClient.Scroll(ctx, scrollReq)
+		if err != nil {
+			return nil, fmt.Errorf("qdrant scroll error: %w", err)
+		}
+
+		for _, r := range resp.GetResult() {
+			payload := make(map[string]interface{})
+			for k, v := range r.GetPayload() {
+				payload[k] = fromQdrantValue(v)
+			}
+
+			pt := VectorPoint{
+				Payload: payload,
+			}
+
+			// Extract point ID
+			if r.GetId().GetUuid() != "" {
+				pt.ID = PointID(r.GetId().GetUuid())
+			}
+
+			// Extract vector if requested
+			if withVectors {
+				if vec := r.GetVectors().GetVector(); vec != nil {
+					pt.Vector = vec.GetData()
+				}
+			}
+
+			allPoints = append(allPoints, pt)
+		}
+
+		// Check if there's a next page
+		nextPage := resp.GetNextPageOffset()
+		if nextPage == nil {
+			break
+		}
+		offset = nextPage
+	}
+
+	return allPoints, nil
+}
+
 // Close cleans up the gRPC connection.
 func (q *QdrantClient) Close() error {
 	if q.conn != nil {
