@@ -2322,12 +2322,12 @@ export default function MessageTile({
     const removeDuplicateContent = (content: string): string => {
         if (!content) return '';
         
-        // Check for exact duplication of the entire content
+        // Check for exact duplication of the entire content.
+        // Some LLMs repeat the whole response verbatim.
         const contentLength = content.length;
-        if (contentLength > 20) { // Only check for longer content
+        if (contentLength > 20) {
             const halfPoint = Math.floor(contentLength / 2);
             
-            // Try different split points around the middle
             for (let offset = -10; offset <= 10; offset++) {
                 const splitPoint = halfPoint + offset;
                 if (splitPoint <= 0 || splitPoint >= contentLength) continue;
@@ -2335,28 +2335,30 @@ export default function MessageTile({
                 const firstPart = content.substring(0, splitPoint).trim();
                 const secondPart = content.substring(splitPoint).trim();
                 
-                // If the second part starts with the same text as the first part
                 if (secondPart.startsWith(firstPart.substring(0, Math.min(20, firstPart.length)))) {
                     return firstPart;
                 }
             }
         }
         
-        // If not an exact duplication, handle sentence by sentence
-        const sentences = content.split(/(?<=[.!?])\s+/);
-        const uniqueSentences: string[] = [];
+        // Deduplicate at paragraph level to preserve markdown structure.
+        // Split by double newlines (paragraph boundaries) so list blocks,
+        // code blocks, and other multi-line structures stay intact.
+        const paragraphs = content.split(/\n\n+/);
+        const uniqueParagraphs: string[] = [];
         const seen = new Set<string>();
         
-        for (const sentence of sentences) {
-            const trimmed = sentence.trim();
-            // Skip empty sentences and check for duplicates (case insensitive)
-            if (trimmed && !seen.has(trimmed.toLowerCase())) {
-                seen.add(trimmed.toLowerCase());
-                uniqueSentences.push(sentence);
+        for (const paragraph of paragraphs) {
+            const trimmed = paragraph.trim();
+            if (!trimmed) continue;
+            const key = trimmed.toLowerCase();
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueParagraphs.push(paragraph);
             }
         }
         
-        return uniqueSentences.join(' ');
+        return uniqueParagraphs.join('\n\n');
     };
 
     // Add this function to handle data export
