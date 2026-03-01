@@ -166,9 +166,9 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
                                 <div key={column.name} className="flex items-start p-1.5 rounded-md hover:bg-gray-50">
                               <div className="flex-1">
                                     <span className="font-medium text-sm inline-block">{column.name}</span>
-                                <span className="text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded ml-2">{column.type}</span>
+                                <span className="text-xs bg-green-100 text-gray-700 px-1.5 py-0.5 rounded ml-2">{column.type.charAt(0).toUpperCase() + column.type.slice(1)}</span>
                                       {column.is_nullable && (
-                                        <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded ml-1">nullable</span>
+                                        <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded ml-1">Nullable</span>
                                       )}
                                     </div>
                                   </div>
@@ -184,7 +184,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
 
           <div className="mt-6">
             <p className="text-gray-500 text-sm text-center">
-              When tables selection is updated, knowledge base will be automatically refreshed in the background which may take 1-2 minutes depending on the size of your data.
+              When tables selection is updated, knowledge base will be automatically refreshed in the background which may take 2-3 minutes depending on the size of your data.
             </p>
           </div>
         </div>
