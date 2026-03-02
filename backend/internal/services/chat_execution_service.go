@@ -169,7 +169,7 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 	llmMessages := make([]*models.LLMMessage, 0, len(messages)+1)
 	llmMessages = append(llmMessages, systemMessage) // Prepend schema
 
-	for _, msg := range messages {
+	for idx, msg := range messages {
 		var contentMap map[string]interface{}
 
 		if string(msg.Type) == string(constants.MessageTypeUser) {
@@ -207,6 +207,38 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 				}
 				if buttons, ok := parsedContent["button_prompts"]; ok {
 					contentMap["buttons"] = buttons
+				}
+			}
+
+			// Context continuity: for the LAST assistant message in the window,
+			// inject a compact summary of query execution results so the LLM can
+			// reference actual data from the previous interaction in follow-up questions.
+			// This prevents the LLM from ignoring prior context (e.g., knowing that
+			// a "status" field exists because the previous query returned it).
+			if idx == len(messages)-1 && msg.Queries != nil && len(*msg.Queries) > 0 {
+				var resultSummaries []map[string]interface{}
+				for _, q := range *msg.Queries {
+					if q.IsExecuted && q.ExecutionResult != nil && *q.ExecutionResult != "" {
+						// Parse the execution result and take a compact summary
+						var execResult interface{}
+						if json.Unmarshal([]byte(*q.ExecutionResult), &execResult) == nil {
+							summary := map[string]interface{}{
+								"query":       q.Query,
+								"description": q.Description,
+							}
+							// Truncate large results to avoid token bloat
+							resultStr := *q.ExecutionResult
+							if len(resultStr) > 2000 {
+								resultStr = resultStr[:2000] + "...(truncated)"
+							}
+							summary["result_preview"] = resultStr
+							resultSummaries = append(resultSummaries, summary)
+						}
+					}
+				}
+				if len(resultSummaries) > 0 {
+					contentMap["previous_query_results"] = resultSummaries
+					log.Printf("convertMessagesToLLMFormat -> Injected %d execution result(s) from last assistant message for context continuity", len(resultSummaries))
 				}
 			}
 		}
@@ -330,9 +362,14 @@ func isExplorationQuery(upperQuery string) bool {
 		"SHOW COLLECTIONS",
 		"DB.GETCOMMAND",
 		"DB.GETCOLLECTIONNAMES",
+		"DB.GETCOLLECTIONNAMES()",
 		"SYSTEM.TABLES",
 		"SYSTEM.COLUMNS",
 		"SYSTEM.DATABASES",
+		"LISTCOLLECTIONS",
+		".FIND({}).LIMIT(1)", // Schema sampling query
+		".FIND({}).LIMIT(5)", // Schema sampling query
+		".FINDONE()",         // Schema sampling
 	}
 	for _, pattern := range explorationPatterns {
 		if strings.Contains(upperQuery, pattern) {
@@ -443,13 +480,18 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	}
 
 	// Fetch all regular messages from the chat
-	regularMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1000) // Get up to 1000 messages
+	regularMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 50) // Get up to 50 messages
 	if err != nil {
 		s.handleError(ctx, chatID, err)
 		return nil, fmt.Errorf("failed to fetch messages: %v", err)
 	}
 
-	// Filter messages up to the edited message
+	// Reverse to chronological order (oldest first) since FindMessagesByChat returns newest first
+	for i, j := 0, len(regularMessages)-1; i < j; i, j = i+1, j-1 {
+		regularMessages[i], regularMessages[j] = regularMessages[j], regularMessages[i]
+	}
+
+	// Filter messages up to the current user message (inclusive)
 	filteredRegularMessages := make([]*models.Message, 0)
 	for _, msg := range regularMessages {
 		filteredRegularMessages = append(filteredRegularMessages, msg)
@@ -669,6 +711,29 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			ragContext = constants.GetRagNoMatchingTablesFound(connInfo.Config.Type)
 			useRAGOnly = true
 			log.Printf("processLLMResponse -> No RAG tables found. Using tool-calling discovery mode (no full schema sent). dbType=%s", connInfo.Config.Type)
+		}
+	} else if s.vectorizationSvc != nil && !s.vectorizationSvc.IsAvailable(ctx) {
+		// The LLM sees table names + descriptions and can use get_table_info for details.
+		log.Printf("processLLMResponse -> Qdrant unavailable. Attempting lightweight KB fallback.")
+		chatObjIDForKB, _ := primitive.ObjectIDFromHex(chatID)
+		if s.kbRepo != nil {
+			kb, kbErr := s.kbRepo.FindByChatID(ctx, chatObjIDForKB)
+			if kbErr == nil && kb != nil && len(kb.TableDescriptions) > 0 {
+				var sb strings.Builder
+				for _, td := range kb.TableDescriptions {
+					sb.WriteString(fmt.Sprintf("- %s", td.TableName))
+					if td.Description != "" {
+						sb.WriteString(fmt.Sprintf(": %s", td.Description))
+					}
+					sb.WriteString("\n")
+				}
+				ragContext = constants.GetRagQdrantUnavailable(connInfo.Config.Type, sb.String())
+				useRAGOnly = true
+				log.Printf("processLLMResponse -> Qdrant unavailable → using KB lightweight fallback (%d tables, %d chars). Skipping full schema.",
+					len(kb.TableDescriptions), len(ragContext))
+			} else {
+				log.Printf("processLLMResponse -> Qdrant unavailable and no KB found. Falling back to full schema.")
+			}
 		}
 	}
 
@@ -2536,7 +2601,10 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {
-					if query.Query != "" && !query.IsCritical {
+					// Gate auto-execution: skip critical queries, empty queries,
+					// and exploration-only queries (e.g., SHOW TABLES, db.getCollectionNames())
+					// that only discover schema metadata and aren't useful as auto-executed results.
+					if query.Query != "" && !query.IsCritical && !isExplorationQuery(strings.ToUpper(strings.TrimSpace(query.Query))) {
 						executionResult, _, queryErr := s.ExecuteQuery(ctx, userID, chatID, &dtos.ExecuteQueryRequest{
 							MessageID: msgResp.ID,
 							QueryID:   query.ID,
