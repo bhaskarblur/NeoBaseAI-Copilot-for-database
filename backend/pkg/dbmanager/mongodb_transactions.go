@@ -152,6 +152,7 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 	startTime := time.Now()
 
 	// Sanitize operator spacing in the query (fix LLM-generated spacing issues)
+	query = strings.TrimSpace(query)
 	query = sanitizeMongoOperatorSpacing(query)
 
 	// Check if the session is nil (which can happen if there was an error creating the transaction)

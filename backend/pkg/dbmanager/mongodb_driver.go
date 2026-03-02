@@ -877,6 +877,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 	// Sanitize MongoDB operator spacing.
 	// LLMs (especially Gemini) sometimes generate operators with extra whitespace
 	// like ' $project ' or '{ $match ' which MongoDB rejects. Strip spaces around $ operators.
+	query = strings.TrimSpace(query)
 	query = sanitizeMongoOperatorSpacing(query)
 
 	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
