@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"neobase-ai/internal/constants"
+	"sync"
 	"time"
 
 	pb "github.com/qdrant/go-client/qdrant"
@@ -29,7 +30,26 @@ type QdrantClient struct {
 	pointsClient      pb.PointsClient
 	collectionsClient pb.CollectionsClient
 	qdrantClient      pb.QdrantClient
+
+	// Cached health status to avoid calling Qdrant on every request.
+	healthMu      sync.RWMutex
+	healthCached  bool // last known health status
+	healthChecked time.Time
 }
+
+const (
+	// healthCacheTTL controls how long a positive health check result is trusted.
+	// During this window, IsHealthy returns the cached result without a gRPC call.
+	healthCacheTTL = 60 * time.Second
+
+	// healthCacheNegativeTTL is shorter so we re-check sooner after a failure,
+	// allowing quick recovery once Qdrant comes back.
+	healthCacheNegativeTTL = 10 * time.Second
+
+	// healthCheckTimeout is the per-attempt timeout for the gRPC HealthCheck call.
+	// Increased from 3s → 5s to handle cloud-hosted Qdrant cold-starts.
+	healthCheckTimeout = 5 * time.Second
+)
 
 // NewQdrantClient creates a new Qdrant gRPC client.
 func NewQdrantClient(cfg QdrantConfig) (*QdrantClient, error) {
@@ -38,7 +58,7 @@ func NewQdrantClient(cfg QdrantConfig) (*QdrantClient, error) {
 	opts := []grpc.DialOption{
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                10 * time.Second,
-			Timeout:             3 * time.Second,
+			Timeout:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
 	}
@@ -70,12 +90,60 @@ func NewQdrantClient(cfg QdrantConfig) (*QdrantClient, error) {
 	return client, nil
 }
 
-// IsHealthy checks if Qdrant is reachable.
+// IsHealthy checks if Qdrant is reachable, with cached results to avoid
+// hammering the server on every request. Positive results are cached for 60s,
+// negative results for 10s (to allow quick recovery). Includes a single retry
+// with a short backoff on failure.
 func (q *QdrantClient) IsHealthy(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	q.healthMu.RLock()
+	if !q.healthChecked.IsZero() {
+		ttl := healthCacheTTL
+		if !q.healthCached {
+			ttl = healthCacheNegativeTTL
+		}
+		if time.Since(q.healthChecked) < ttl {
+			cached := q.healthCached
+			q.healthMu.RUnlock()
+			return cached
+		}
+	}
+	q.healthMu.RUnlock()
+
+	// Perform the actual health check (with one retry on failure).
+	healthy := q.doHealthCheck(ctx)
+
+	q.healthMu.Lock()
+	q.healthCached = healthy
+	q.healthChecked = time.Now()
+	q.healthMu.Unlock()
+
+	return healthy
+}
+
+// doHealthCheck performs the gRPC health check with a single retry + backoff.
+func (q *QdrantClient) doHealthCheck(ctx context.Context) bool {
+	if q.tryHealthCheck(ctx) {
+		return true
+	}
+
+	// First attempt failed — retry once after a short backoff.
+	// This handles transient network blips and Qdrant cold-start latency.
+	time.Sleep(500 * time.Millisecond)
+
+	if q.tryHealthCheck(ctx) {
+		log.Printf("VectorDB -> Qdrant health check succeeded on retry")
+		return true
+	}
+
+	return false
+}
+
+// tryHealthCheck performs a single gRPC HealthCheck call with timeout.
+func (q *QdrantClient) tryHealthCheck(ctx context.Context) bool {
+	hcCtx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 
-	_, err := q.qdrantClient.HealthCheck(ctx, &pb.HealthCheckRequest{})
+	_, err := q.qdrantClient.HealthCheck(hcCtx, &pb.HealthCheckRequest{})
 	if err != nil {
 		log.Printf("VectorDB -> Qdrant health check failed: %v", err)
 		return false
