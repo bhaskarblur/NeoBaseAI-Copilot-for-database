@@ -30,7 +30,7 @@ const (
 
 	// MessageScoreThreshold is the minimum similarity for message retrieval.
 	// Higher than schema threshold because we want highly relevant conversation context.
-	MessageScoreThreshold = 0.55
+	MessageScoreThreshold = 0.50
 	// SlidingWindowSize is the number of recent messages always included verbatim.
 	SlidingWindowSize = 20
 	// MessageRAGTopK is the default number of older relevant messages to retrieve.
