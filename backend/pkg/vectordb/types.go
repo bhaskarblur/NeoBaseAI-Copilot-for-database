@@ -20,15 +20,24 @@ type SearchRequest struct {
 	ScoreThreshold float32           `json:"score_threshold"` // Minimum similarity score (0-1)
 }
 
+// TextSearchLeg defines an additional full-text matching leg for hybrid search.
+// Each leg creates a separate RRF prefetch query that matches the Query against the Field,
+// enabling multi-signal retrieval (e.g., match content AND table names independently).
+type TextSearchLeg struct {
+	Query string `json:"query"` // Text to match (tokenized by Qdrant's word tokenizer)
+	Field string `json:"field"` // Payload field to match against (must have a text index)
+}
+
 // HybridSearchRequest defines parameters for a hybrid (vector + full-text) search.
-// Qdrant executes both legs server-side and fuses results via Reciprocal Rank Fusion.
+// Qdrant executes all legs server-side and fuses results via Reciprocal Rank Fusion.
 type HybridSearchRequest struct {
 	Vector         []float32         `json:"vector"`
-	Filter         map[string]string `json:"filter"`          // Key-value payload filter applied to BOTH legs
+	Filter         map[string]string `json:"filter"`          // Key-value payload filter applied to ALL legs
 	TopK           int               `json:"top_k"`           // Max results to return after fusion
 	ScoreThreshold float32           `json:"score_threshold"` // Minimum similarity score for vector leg
-	TextQuery      string            `json:"text_query"`      // Full-text search query (matched against text-indexed payload fields)
-	TextField      string            `json:"text_field"`      // Payload field to run full-text match on (must have text index)
+	TextQuery      string            `json:"text_query"`      // Primary full-text query for keyword matching leg
+	TextField      string            `json:"text_field"`      // Primary payload field for text matching (e.g., "content")
+	ExtraTextLegs  []TextSearchLeg   `json:"extra_text_legs"` // Additional text matching legs (e.g., table_name matching)
 }
 
 // SearchResult represents a single search result from the vector database.

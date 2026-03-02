@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
+	"time"
+
 	"neobase-ai/internal/constants"
 	"neobase-ai/pkg/embedding"
 	"neobase-ai/pkg/vectordb"
-	"strings"
-	"time"
 )
 
 // VectorizationService handles embedding and vector storage for schema, knowledge base, and messages.
@@ -436,16 +438,25 @@ func (v *vectorizationService) SearchSchema(ctx context.Context, chatID string, 
 	// performs token-level matching against the indexed "content" field.
 	textQuery := query
 
-	// Use hybrid search: vector similarity + full-text keyword match, fused via RRF on the DB side
+	// Overfetch to get enough candidates for post-processing (dedup, diversity filtering).
+	// After per-table capping and reranking, we trim down to topK.
+	fetchTopK := topK * constants.SchemaSearchOverfetch
+
+	// Use hybrid search: vector similarity + full-text keyword match + table-name match,
+	// all fused via RRF on the DB side. The table_name leg gives a strong RRF boost
+	// when the user mentions a table name directly (e.g., "users", "resumes").
 	results, err := v.vectorClient.HybridSearch(ctx, constants.SchemaCollectionName, vectordb.HybridSearchRequest{
 		Vector: queryVector,
 		Filter: map[string]string{
 			"chat_id": chatID,
 		},
-		TopK:           topK,
+		TopK:           fetchTopK,
 		ScoreThreshold: float32(constants.DefaultScoreThreshold),
 		TextQuery:      textQuery,
 		TextField:      "content",
+		ExtraTextLegs: []vectordb.TextSearchLeg{
+			{Query: textQuery, Field: "table_name"},
+		},
 	})
 	if err != nil {
 		// Fall back to plain vector search if hybrid fails (e.g., text index not yet created)
@@ -455,13 +466,16 @@ func (v *vectorizationService) SearchSchema(ctx context.Context, chatID string, 
 			Filter: map[string]string{
 				"chat_id": chatID,
 			},
-			TopK:           topK,
+			TopK:           fetchTopK,
 			ScoreThreshold: float32(constants.DefaultScoreThreshold),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to search schema: %w", err)
 		}
 	}
+
+	// Post-process: per-table dedup, deprioritize empty tables, diversity interleaving, cap at topK
+	results = postProcessSchemaResults(results, topK, constants.MaxChunksPerTable)
 
 	// --- Detailed logging for quality assessment ---
 	if len(results) == 0 {
@@ -525,6 +539,160 @@ func truncateForLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// postProcessSchemaResults deduplicates, re-ranks, and trims schema search results.
+//
+// Problems solved:
+//   - Chunk dominance: Large tables split into many chunks can claim all RAG slots.
+//     Fix: max `maxChunksPerTable` chunks per table (keeps the highest-scored).
+//   - Empty table noise: Tables with 0 rows waste context tokens.
+//     Fix: non-empty tables are prioritized; empty ones fill remaining capacity.
+//   - Diversity: Interleaved output ensures a variety of tables are represented.
+//     Fix: round-robin across tables — best chunk from each table first, then second, etc.
+func postProcessSchemaResults(results []vectordb.SearchResult, topK int, maxChunksPerTable int) []vectordb.SearchResult {
+	if len(results) == 0 {
+		return results
+	}
+
+	// --- Phase 1: Group by table name, cap chunks per table ---
+	type tableGroup struct {
+		tableName string
+		chunks    []vectordb.SearchResult
+		bestScore float32
+		hasRows   bool // true if any chunk in this group has row_count > 0
+	}
+
+	groups := make(map[string]*tableGroup)
+	order := make([]string, 0) // preserves first-seen order (= RRF rank order)
+
+	for _, r := range results {
+		tableName := extractResultTableName(r)
+		if tableName == "" {
+			continue
+		}
+
+		g, exists := groups[tableName]
+		if !exists {
+			g = &tableGroup{tableName: tableName}
+			groups[tableName] = g
+			order = append(order, tableName)
+		}
+
+		// Keep only the top maxChunksPerTable chunks per table.
+		// Results arrive sorted by RRF score, so the first ones are the best.
+		if len(g.chunks) < maxChunksPerTable {
+			g.chunks = append(g.chunks, r)
+		}
+		if r.Score > g.bestScore {
+			g.bestScore = r.Score
+		}
+		if extractResultRowCount(r) > 0 {
+			g.hasRows = true
+		}
+	}
+
+	// --- Phase 2: Sort tables — non-empty first, then by best score ---
+	sort.SliceStable(order, func(i, j int) bool {
+		gi, gj := groups[order[i]], groups[order[j]]
+		// Non-empty tables first
+		if gi.hasRows != gj.hasRows {
+			return gi.hasRows
+		}
+		// Higher score first
+		return gi.bestScore > gj.bestScore
+	})
+
+	// --- Phase 3: Score-based pruning ---
+	// After sorting by score, apply two filters to remove irrelevant noise:
+	// (a) Score cliff detection: if consecutive table scores drop by > ScoreCliffRatio, cut off
+	// (b) Relative threshold: drop tables scoring < MinRelativeScore * top_score
+	// Always keep at least MinSchemaResults tables.
+	if len(order) > constants.MinSchemaResults {
+		topScore := groups[order[0]].bestScore
+		minAbsScore := topScore * float32(constants.MinRelativeScore)
+		cutoffIdx := len(order)
+
+		for i := 1; i < len(order); i++ {
+			currScore := groups[order[i]].bestScore
+			prevScore := groups[order[i-1]].bestScore
+
+			// (a) Cliff detection: dramatic drop between consecutive tables
+			if prevScore > 0 && i >= constants.MinSchemaResults {
+				ratio := currScore / prevScore
+				if ratio < float32(constants.ScoreCliffRatio) {
+					log.Printf("VectorizationService -> postProcessSchemaResults -> Score cliff at position %d: %.4f -> %.4f (ratio=%.2f < %.2f), cutting off",
+						i, prevScore, currScore, ratio, constants.ScoreCliffRatio)
+					cutoffIdx = i
+					break
+				}
+			}
+
+			// (b) Relative threshold: too low compared to top result
+			if i >= constants.MinSchemaResults && currScore < minAbsScore {
+				log.Printf("VectorizationService -> postProcessSchemaResults -> Score %.4f below relative threshold %.4f (top=%.4f * %.2f), cutting at position %d",
+					currScore, minAbsScore, topScore, constants.MinRelativeScore, i)
+				cutoffIdx = i
+				break
+			}
+		}
+
+		if cutoffIdx < len(order) {
+			dropped := len(order) - cutoffIdx
+			order = order[:cutoffIdx]
+			log.Printf("VectorizationService -> postProcessSchemaResults -> Pruned %d low-scoring tables, keeping %d", dropped, len(order))
+		}
+	}
+
+	// --- Phase 4: Interleave — round-robin across tables for maximum diversity ---
+	// Round 0: take the best chunk from each table
+	// Round 1: take the second-best chunk from each table (if it exists)
+	// This ensures we see diverse tables before seeing a second chunk from the same table.
+	output := make([]vectordb.SearchResult, 0, topK)
+outer:
+	for round := 0; round < maxChunksPerTable; round++ {
+		for _, tableName := range order {
+			g := groups[tableName]
+			if round < len(g.chunks) {
+				output = append(output, g.chunks[round])
+				if len(output) >= topK {
+					break outer
+				}
+			}
+		}
+	}
+
+	log.Printf("VectorizationService -> postProcessSchemaResults -> %d candidates → %d results (%d unique tables after pruning, max %d chunks/table)",
+		len(results), len(output), len(order), maxChunksPerTable)
+
+	return output
+}
+
+// extractResultTableName returns the table name from a search result payload.
+// Handles both schema vectors (table_name) and relationship vectors (source_table).
+func extractResultTableName(r vectordb.SearchResult) string {
+	if tn, ok := r.Payload["table_name"].(string); ok && tn != "" {
+		return tn
+	}
+	if st, ok := r.Payload["source_table"].(string); ok && st != "" {
+		return st
+	}
+	return ""
+}
+
+// extractResultRowCount returns the row count from a search result payload.
+func extractResultRowCount(r vectordb.SearchResult) int {
+	if rc, ok := r.Payload["row_count"]; ok {
+		switch v := rc.(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		case int64:
+			return int(v)
+		}
+	}
+	return 0
 }
 
 // VectorizeMessage embeds a single chat message and upserts it to Qdrant.

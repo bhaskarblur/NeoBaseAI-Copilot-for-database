@@ -371,6 +371,29 @@ func (q *QdrantClient) HybridSearch(ctx context.Context, collection string, req 
 		prefetches = append(prefetches, keywordPrefetch)
 	}
 
+	// --- Additional text-matching legs (e.g., table_name matching) ---
+	// Each extra leg creates a prefetch that requires a full-text match on a different field.
+	// When a table name appears directly in the query, this gives it a strong RRF boost
+	// (appearing in 3+ fusion inputs instead of just 1-2).
+	for _, leg := range req.ExtraTextLegs {
+		if leg.Query == "" || leg.Field == "" {
+			continue
+		}
+		legConditions := make([]*pb.Condition, 0, len(sharedConditions)+1)
+		legConditions = append(legConditions, sharedConditions...)
+		legConditions = append(legConditions, pb.NewMatchText(leg.Field, leg.Query))
+
+		legFilter := &pb.Filter{Must: legConditions}
+
+		legPrefetch := &pb.PrefetchQuery{
+			Query:  pb.NewQueryDense(req.Vector),
+			Filter: legFilter,
+			Limit:  &prefetchLimit,
+			// No score threshold — if the text matches, the item is relevant
+		}
+		prefetches = append(prefetches, legPrefetch)
+	}
+
 	// --- Top-level: RRF Fusion ---
 	queryReq := &pb.QueryPoints{
 		CollectionName: collection,

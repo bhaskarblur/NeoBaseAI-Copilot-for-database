@@ -17,7 +17,9 @@ const (
 	// --- Schema search defaults ---
 
 	// DefaultTopK is the default number of schema results to retrieve.
-	DefaultTopK = 10
+	// Reduced from 10 → 6: most queries need 1-3 tables; 6 gives headroom
+	// without wasting context tokens on irrelevant tables.
+	DefaultTopK = 6
 	// DefaultScoreThreshold is the minimum similarity score for the vector leg of schema search.
 	// Set relatively low because RRF fusion with the keyword leg handles relevance ranking.
 	// The keyword match leg has no threshold — if a table name appears in the query, it's included.
@@ -33,6 +35,37 @@ const (
 	SlidingWindowSize = 20
 	// MessageRAGTopK is the default number of older relevant messages to retrieve.
 	MessageRAGTopK = 8
+
+	// --- Search post-processing constants ---
+
+	// MaxChunksPerTable is the maximum number of chunks from the same table in search results.
+	// Prevents large (chunk-split) tables from dominating all RAG slots.
+	// Set to 2 so large tables get their first chunk (header + key columns) plus one continuation.
+	MaxChunksPerTable = 2
+
+	// SchemaSearchOverfetch is the multiplier applied to topK when fetching from Qdrant.
+	// We fetch more candidates than needed so that per-table dedup and diversity filtering
+	// can operate on a richer candidate set while still producing topK final results.
+	SchemaSearchOverfetch = 3
+
+	// --- Score-based filtering (post-RRF) ---
+
+	// ScoreCliffRatio is the minimum ratio between consecutive RRF scores.
+	// If score[i+1] / score[i] < this ratio, all results from i+1 onward are dropped.
+	// Detects the "relevance cliff" where scores plummet from meaningful to noise.
+	// Example: 0.50 → 0.12 has ratio 0.24, below 0.30, so 0.12 and below are cut.
+	ScoreCliffRatio = 0.30
+
+	// MinRelativeScore is the minimum score as a fraction of the top result's score.
+	// Results scoring below top_score * MinRelativeScore are dropped.
+	// Prevents very low-scoring noise from filling RAG context.
+	// Example: if top score is 0.50, anything below 0.50 * 0.20 = 0.10 is dropped.
+	MinRelativeScore = 0.20
+
+	// MinSchemaResults is the minimum number of tables to always return,
+	// even if score thresholds would eliminate them. Ensures the LLM always
+	// has some context to work with.
+	MinSchemaResults = 2
 )
 
 // GetRagNoMatchingTablesFound returns the RAG-no-match instruction string
