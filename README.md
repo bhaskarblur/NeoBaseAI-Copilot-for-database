@@ -14,7 +14,8 @@
 
 ## Features
 
-- **AI-Powered Queries**: Generate and optimize SQL queries using natural language prompts.
+- **AI-Powered Queries with Agentic Tool Calling**: Generate and optimize SQL & NoSQL queries using natural language prompts through an intelligent agentic system. The AI autonomously executes queries, analyzes results, and iteratively refines its approach until delivering the perfect answer—all without manual intervention.
+- **RAG-Powered Context Awareness**: Hybrid RAG (Retrieval-Augmented Generation) system using Qdrant vector search for intelligent context retrieval. Schema RAG finds relevant tables/collections from your database structure, while Message RAG retrieves semantically similar past conversations—ensuring the AI always has the right context.
 - **Multi-Database Support**: Connect to PostgreSQL, MySQL, MongoDB, Redis, and more.
 - **Spreadsheet Support**: Upload and query CSV/Excel files with AES-GCM encryption.
 - **Google Sheets Integration**: Connect directly to Google Sheets with OAuth authentication for seamless data access.
