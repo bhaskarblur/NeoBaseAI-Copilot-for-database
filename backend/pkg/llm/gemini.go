@@ -770,6 +770,10 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 			})
 		}
 
+		// Reset empty-retry budget after successful tool execution so that
+		// each phase (exploration vs. final-response) gets its own retries.
+		emptyRetries = 0
+
 		// Send tool results back to the session
 		result, err = session.SendMessage(ctx, responseParts...)
 		if err != nil {

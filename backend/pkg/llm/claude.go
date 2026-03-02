@@ -990,6 +990,10 @@ func (c *ClaudeClient) GenerateWithTools(ctx context.Context, messages []*models
 			Role:    "user",
 			Content: toolResultBlocks,
 		})
+
+		// Reset empty-retry budget after successful tool execution so that
+		// each phase (exploration vs. final-response) gets its own retries.
+		emptyRetries = 0
 	}
 
 	// Max iterations reached

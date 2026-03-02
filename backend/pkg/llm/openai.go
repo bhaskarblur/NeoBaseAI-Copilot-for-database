@@ -631,6 +631,10 @@ func (c *OpenAIClient) GenerateWithTools(ctx context.Context, messages []*models
 				Content:    toolResult.Content,
 			})
 		}
+
+		// Reset empty-retry budget after successful tool execution so that
+		// each phase (exploration vs. final-response) gets its own retries.
+		emptyRetries = 0
 	}
 
 	// Max iterations reached
