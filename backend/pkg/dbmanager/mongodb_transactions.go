@@ -151,6 +151,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 	log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing MongoDB query in transaction: %s", query)
 	startTime := time.Now()
 
+	// Sanitize operator spacing in the query (fix LLM-generated spacing issues)
+	query = sanitizeMongoOperatorSpacing(query)
+
 	// Check if the session is nil (which can happen if there was an error creating the transaction)
 	if tx.Session == nil {
 		log.Printf("MongoDBTransaction -> ExecuteQuery -> Cannot execute query: session is nil")
@@ -1374,6 +1377,25 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			// If direct parsing fails, handle MongoDB syntax with unquoted keys
 			log.Printf("MongoDBTransaction -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
+			// Pre-clean: Fix unbalanced braces from LLM output
+			// LLMs sometimes generate extra closing braces like: [{$count: "val"}}]
+			// Count braces and remove excess closing braces from right
+			openBraces := strings.Count(paramsStr, "{")
+			closeBraces := strings.Count(paramsStr, "}")
+			if closeBraces > openBraces {
+				excess := closeBraces - openBraces
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> Found %d excess closing braces, removing from right", excess)
+				runes := []rune(paramsStr)
+				for i := len(runes) - 1; i >= 0 && excess > 0; i-- {
+					if runes[i] == '}' {
+						runes = append(runes[:i], runes[i+1:]...)
+						excess--
+					}
+				}
+				paramsStr = string(runes)
+				log.Printf("MongoDBTransaction -> ExecuteQuery -> After brace fix: %s", paramsStr)
+			}
+
 			// Pre-clean the pipeline string before stage extraction to fix LLM formatting issues
 			// Fix double-quoted field names: ""$addFields"" → "$addFields"
 			preCleanPattern := regexp.MustCompile(`""([^"]+)""`)
@@ -1437,8 +1459,9 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 
 				log.Printf("MongoDBTransaction -> ExecuteQuery -> Processed stage %d: %s", i, processedStage)
 
-				// Only add non-empty stages
-				if processedStage != "" && processedStage != "," {
+				// Only add non-empty stages and filter out spurious lone braces
+				// LLMs sometimes generate extra } which ParseAggregationPipeline captures as a stage
+				if processedStage != "" && processedStage != "," && processedStage != "}" && processedStage != "{" {
 					processedStages = append(processedStages, processedStage)
 				}
 			}
@@ -1687,6 +1710,62 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			"ok":      1,
 			"message": fmt.Sprintf("Collection '%s' dropped successfully", collectionName),
 		}
+
+	case "distinct":
+		// Handle db.collection.distinct("fieldName") and db.collection.distinct("fieldName", {filter})
+		// Extract the field name from paramsStr — it may be quoted
+		fieldName := strings.TrimSpace(paramsStr)
+		fieldName = strings.Trim(fieldName, "\"'")
+
+		// Check if there's an optional filter after a comma
+		var filter bson.M
+		if commaIdx := strings.Index(paramsStr, ","); commaIdx != -1 {
+			fieldName = strings.TrimSpace(paramsStr[:commaIdx])
+			fieldName = strings.Trim(fieldName, "\"'")
+			filterStr := strings.TrimSpace(paramsStr[commaIdx+1:])
+			if filterStr != "" {
+				processedFilter, procErr := processMongoDBQueryParams(filterStr)
+				if procErr == nil {
+					if jsonErr := json.Unmarshal([]byte(processedFilter), &filter); jsonErr != nil {
+						log.Printf("MongoDBTransaction -> ExecuteQuery -> Could not parse distinct filter, ignoring: %v", jsonErr)
+					}
+				}
+			}
+		}
+
+		if filter == nil {
+			filter = bson.M{}
+		}
+
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Executing distinct on field '%s' with filter: %v", fieldName, filter)
+
+		// Distinct is not supported inside multi-document transactions, so run it outside
+		distinctResults, err := collection.Distinct(ctx, fieldName, filter)
+		if err != nil {
+			return &QueryExecutionResult{
+				Error: &dtos.QueryError{
+					Message: fmt.Sprintf("Failed to execute distinct: %v", err),
+					Code:    "EXECUTION_ERROR",
+				},
+			}, nil
+		}
+
+		// Format results as an array of objects for consistent display
+		var resultDocs []map[string]interface{}
+		for _, val := range distinctResults {
+			resultDocs = append(resultDocs, map[string]interface{}{
+				fieldName: val,
+			})
+		}
+
+		// Set execution time
+		execTime := int(time.Since(startTime).Milliseconds())
+		log.Printf("MongoDBTransaction -> ExecuteQuery -> Distinct query executed in %d ms, found %d distinct values", execTime, len(distinctResults))
+
+		return &QueryExecutionResult{
+			Result:        map[string]interface{}{"results": resultDocs},
+			ExecutionTime: execTime,
+		}, nil
 
 	default:
 		return &QueryExecutionResult{

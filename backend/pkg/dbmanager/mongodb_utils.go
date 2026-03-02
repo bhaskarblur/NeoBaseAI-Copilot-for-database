@@ -263,7 +263,9 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 
 	// Handle numerical values in sort expressions like {field: -1}
 	// Preserve negative numbers in sort expressions
-	sortPattern := regexp.MustCompile(`\{([^{}]+):\s*(-?\d+)\s*\}`)
+	// Use [^{}:] to only match a single key (no colons allowed) — prevents matching
+	// multi-key objects like {startDate: "$$NOW", unit: "day", amount: 30}
+	sortPattern := regexp.MustCompile(`\{([^{}:]+):\s*(-?\d+)\s*\}`)
 	paramsStr = sortPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
 		// Extract the field and direction
 		sortMatches := sortPattern.FindStringSubmatch(match)
