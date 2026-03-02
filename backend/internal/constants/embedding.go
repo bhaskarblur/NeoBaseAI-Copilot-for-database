@@ -110,6 +110,36 @@ func GetRagNoMatchingTablesFound(dbType string) string {
 		"7. Remember: You can also see the message history to know about the past interaction and the database structure from the messages."
 }
 
+// GetRagQdrantUnavailable returns a lightweight fallback context string when Qdrant is
+// temporarily unreachable but the Knowledge Base has table descriptions. Instead of
+// sending the full schema (~196K chars / ~49K tokens), we send only table names and
+// descriptions (~1,500-2,500 chars / ~400-600 tokens) so the LLM knows what tables
+// exist and can use targeted tool-calling (get_table_info) for detailed column info.
+func GetRagQdrantUnavailable(dbType string, tableListing string) string {
+	// Build the DB-specific discovery step
+	var discoveryStep string
+	switch dbType {
+	case DatabaseTypeMongoDB:
+		discoveryStep = "Use get_table_info with selected collection names to see their fields and structure, or execute_read_query for further exploration."
+	case DatabaseTypeClickhouse:
+		discoveryStep = "Use get_table_info with selected table names to see their columns and structure, or execute_read_query for further exploration."
+	default:
+		discoveryStep = "Use get_table_info with selected table names to see their columns and structure, or execute_read_query for further exploration."
+	}
+
+	return "\n\nℹ️ SCHEMA CONTEXT (lightweight — vector search temporarily unavailable):\n" +
+		"The semantic search service is temporarily unreachable. Below is a summary of all tables/collections " +
+		"in this database with their descriptions. Use this to identify relevant tables, then call " +
+		"get_table_info for detailed column information before writing queries.\n\n" +
+		tableListing + "\n\n" +
+		"INSTRUCTIONS:\n" +
+		"1. Review the table listing above to identify tables relevant to the user's question.\n" +
+		"2. " + discoveryStep + "\n" +
+		"3. Do NOT guess column names — always verify with get_table_info first.\n" +
+		"4. Always include the FINAL user-facing queries in the 'queries' array of your generate_final_response.\n" +
+		"5. Remember: You can also see the message history to know about the past interaction and the database structure from the messages."
+}
+
 // --- Embedding Provider Constants ---
 
 const (
