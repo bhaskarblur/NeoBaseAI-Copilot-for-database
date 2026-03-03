@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/github.css';
 import './MarkdownRenderer.css';
 import { highlightSearchText } from '../../utils/highlightSearch';
@@ -11,9 +12,36 @@ interface MarkdownRendererProps {
   searchQuery?: string;
 }
 
+/**
+ * Preprocess markdown to fix common LLM output issues:
+ * - Normalize line endings
+ * - Ensure blank line before list starts (required by strict parsers)
+ * - Strip trailing JSON code blocks from failed tool-call attempts
+ */
+function preprocessMarkdown(text: string): string {
+  let result = text;
+
+  // Normalize line endings
+  result = result.replace(/\r\n/g, '\n');
+
+  // Strip trailing JSON code fences that are failed tool-call attempts
+  // (LLM sometimes emits the generate_final_response call as a code block)
+  result = result.replace(/\n*```json\s*\n\s*\{[\s\S]*?"assistantMessage"[\s\S]*?\}\s*\n```\s*$/, '');
+
+  // Ensure a blank line before list starts (paragraph followed directly by list)
+  // This helps parsers that require a blank line between paragraph text and lists
+  result = result.replace(/([^\n])\n([ \t]*[*+-] )/g, '$1\n\n$2');
+  result = result.replace(/([^\n])\n([ \t]*\d+\. )/g, '$1\n\n$2');
+
+  return result;
+}
+
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className = '', searchQuery }) => {
   // Apply a safeguard to ensure markdown is always a string
-  const safeMarkdown = typeof markdown === 'string' ? markdown : '';
+  const safeMarkdown = useMemo(
+    () => preprocessMarkdown(typeof markdown === 'string' ? markdown : ''),
+    [markdown]
+  );
 
   // Recursive function to process children for search highlighting
   const processChildren = (child: React.ReactNode): React.ReactNode => {
@@ -111,7 +139,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
     // Handle list items
     li: (props: any) => {
       const { children, ...rest } = props;
-      return <li className="block" {...rest}>{processChildren(children)}</li>;
+      return <li {...rest}>{processChildren(children)}</li>;
     },
     // Handle inline code
     code: (props: any) => {
@@ -149,6 +177,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown, className
     <div className={`markdown-renderer ${className}`}>
       <ReactMarkdown
         skipHtml={false}
+        remarkPlugins={[remarkGfm]}
         components={components}
       >
         {safeMarkdown}

@@ -1,16 +1,39 @@
 package constants
 
 var OpenAILLMModels = []LLMModel{
+	// GPT-5.2 Series (Latest Frontier)
 	{
 		ID:                  "gpt-5.2",
 		Provider:            OpenAI,
 		DisplayName:         "GPT-5.2 (Best for Coding & Agentic)",
 		IsEnabled:           true,
-		MaxCompletionTokens: 100000,
+		MaxCompletionTokens: 128000,
 		Temperature:         1,
-		InputTokenLimit:     200000,
+		InputTokenLimit:     400000,
 		Description:         "Most advanced frontier model, best for coding tasks and agentic applications across all industries",
 	},
+	{
+		ID:                  "gpt-5.2-pro",
+		Provider:            OpenAI,
+		DisplayName:         "GPT-5.2 Pro (Smartest & Precise)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 128000,
+		Temperature:         1,
+		InputTokenLimit:     400000,
+		Description:         "Version of GPT-5.2 that produces smarter and more precise responses, uses extra compute for best quality",
+	},
+	// GPT-5.1 Series
+	{
+		ID:                  "gpt-5.1",
+		Provider:            OpenAI,
+		DisplayName:         "GPT-5.1 (Coding & Agentic)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 128000,
+		Temperature:         1,
+		InputTokenLimit:     400000,
+		Description:         "Previous flagship model for coding and agentic tasks with configurable reasoning effort",
+	},
+	// GPT-5 Series
 	{
 		ID:                  "gpt-5",
 		Provider:            OpenAI,
@@ -18,8 +41,18 @@ var OpenAILLMModels = []LLMModel{
 		IsEnabled:           true,
 		MaxCompletionTokens: 100000,
 		Temperature:         1,
-		InputTokenLimit:     200000,
+		InputTokenLimit:     400000,
 		Description:         "Full reasoning model with configurable reasoning effort for complex problem-solving tasks",
+	},
+	{
+		ID:                  "gpt-5-pro",
+		Provider:            OpenAI,
+		DisplayName:         "GPT-5 Pro (Enhanced Precision)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 128000,
+		Temperature:         1,
+		InputTokenLimit:     400000,
+		Description:         "Version of GPT-5 that produces smarter and more precise responses with extra compute",
 	},
 	{
 		ID:                  "gpt-5-mini",
@@ -41,7 +74,7 @@ var OpenAILLMModels = []LLMModel{
 		InputTokenLimit:     100000,
 		Description:         "Fastest and most cost-efficient version of GPT-5 for rapid inference",
 	},
-	// Reasoning Models (O-Series - Chat Completions)
+	// Reasoning Models (O-Series)
 	{
 		ID:                  "o3",
 		Provider:            OpenAI,
@@ -63,9 +96,19 @@ var OpenAILLMModels = []LLMModel{
 		Description:         "Version of O3 with more compute for better reasoning responses and complex problem analysis",
 	},
 	{
+		ID:                  "o4-mini",
+		Provider:            OpenAI,
+		DisplayName:         "O4 Mini (Fast Reasoning)",
+		IsEnabled:           true,
+		MaxCompletionTokens: 100000,
+		Temperature:         1,
+		InputTokenLimit:     200000,
+		Description:         "Fast, cost-efficient reasoning model optimized for coding and visual tasks",
+	},
+	{
 		ID:                  "o3-mini",
 		Provider:            OpenAI,
-		DisplayName:         "O3 Mini (Fast Reasoning)",
+		DisplayName:         "O3 Mini (Small Reasoning)",
 		IsEnabled:           true,
 		MaxCompletionTokens: 50000,
 		Temperature:         1,

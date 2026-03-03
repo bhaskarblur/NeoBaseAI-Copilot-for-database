@@ -874,6 +874,12 @@ func (d *MongoDBDriver) IsAlive(conn *Connection) bool {
 
 // ExecuteQuery executes a MongoDB query
 func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, query string, queryType string, findCount bool) *QueryExecutionResult {
+	// Sanitize MongoDB operator spacing.
+	// LLMs (especially Gemini) sometimes generate operators with extra whitespace
+	// like ' $project ' or '{ $match ' which MongoDB rejects. Strip spaces around $ operators.
+	query = strings.TrimSpace(query)
+	query = sanitizeMongoOperatorSpacing(query)
+
 	log.Printf("MongoDBDriver -> ExecuteQuery -> Executing MongoDB query: %s", query)
 
 	startTime := time.Now()
@@ -1944,6 +1950,23 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			// Try to handle MongoDB syntax with unquoted keys and ObjectId
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Attempting to parse MongoDB aggregation pipeline: %s", paramsStr)
 
+			// Pre-clean the pipeline string before stage extraction to fix LLM formatting issues
+			// Fix double-quoted field names: ""$addFields"" → "$addFields"
+			preCleanPattern := regexp.MustCompile(`""([^"]+)""`)
+			paramsStr = preCleanPattern.ReplaceAllString(paramsStr, `"$1"`)
+
+			// Fix mangled MongoDB operators: {"sort"} → $sort
+			preMangledPattern := regexp.MustCompile(`"\{"([a-zA-Z_][a-zA-Z0-9_]*)"\}"`)
+			paramsStr = preMangledPattern.ReplaceAllString(paramsStr, `"$$$1"`)
+
+			log.Printf("MongoDBDriver -> ExecuteQuery -> After pre-cleanup: %s", paramsStr)
+
+			// Try parsing again after pre-cleanup
+			if err := json.Unmarshal([]byte(paramsStr), &pipeline); err == nil {
+				log.Printf("MongoDBDriver -> ExecuteQuery -> Successfully parsed pipeline after pre-cleanup with %d stages", len(pipeline))
+				goto driverPipelineParsed
+			}
+
 			// Process each stage of the pipeline individually
 			// This helps with complex expressions that might not parse correctly as a whole
 			stagesRegex := regexp.MustCompile(`\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}`)
@@ -1994,6 +2017,11 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			fixFieldNamesPattern := regexp.MustCompile(`""([^"]+)""`)
 			jsonStr = fixFieldNamesPattern.ReplaceAllString(jsonStr, `"$1"`)
 
+			// Fix LLM-generated mangled MongoDB operators: {"key"} → $key
+			// Some LLMs (e.g., Gemini) output {"sort"} instead of $sort in aggregate pipelines
+			fixMangledOpsPattern := regexp.MustCompile(`"\{"([a-zA-Z_][a-zA-Z0-9_]*)"\}"`)
+			jsonStr = fixMangledOpsPattern.ReplaceAllString(jsonStr, `"$$$1"`)
+
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Final aggregation pipeline after cleanup: %s", jsonStr)
 
 			// Don't replace dates - let processObjectIds handle proper BSON conversion
@@ -2011,6 +2039,7 @@ func (d *MongoDBDriver) ExecuteQuery(ctx context.Context, conn *Connection, quer
 			log.Printf("MongoDBDriver -> ExecuteQuery -> Successfully parsed aggregation pipeline with %d stages", len(pipeline))
 		}
 
+	driverPipelineParsed:
 		// Process dot notation fields in the pipeline for improved support of
 		// accessing fields from joined documents after $lookup and $unwind
 		ProcessDotNotationFields(map[string]interface{}{"pipeline": pipeline})
@@ -2336,4 +2365,35 @@ func (d *MongoDBDriver) BeginTx(ctx context.Context, conn *Connection) Transacti
 
 	log.Printf("MongoDBDriver -> BeginTx -> MongoDB transaction started successfully")
 	return tx
+}
+
+// sanitizeMongoOperatorSpacing fixes whitespace around MongoDB $ operators in queries.
+// LLMs (especially Gemini) sometimes generate operators with extra spaces like:
+//   - ' $project ' instead of "$project"
+//   - '{ $match' instead of '{"$match'
+//
+// This function strips leading/trailing whitespace around $ operators in both keys and values.
+// It uses a regex to find patterns like '" $operator "' or '{ $operator' and normalizes them.
+var mongoOperatorSpaceRegex = regexp.MustCompile(`(\s)\$(\w+)(\s)`)
+var mongoKeyOperatorRegex = regexp.MustCompile(`"\s+\$(\w+)\s*"`)
+var mongoValueOperatorRegex = regexp.MustCompile(`:\s*"\s+\$(\w+)\s*"`)
+
+func sanitizeMongoOperatorSpacing(query string) string {
+	original := query
+
+	// Fix operator keys like ' "$project " ' → '"$project"'
+	// Match patterns: "  $operator  " where spaces appear inside the quotes
+	query = mongoKeyOperatorRegex.ReplaceAllString(query, `"$$$1"`)
+
+	// Fix standalone operator references with leading space like '{ $match' → '{"$match'
+	// This handles cases where the operator appears as an unquoted key with spaces
+	query = strings.ReplaceAll(query, "{ $", "{\"$")
+	query = strings.ReplaceAll(query, ",  $", ", \"$")
+	query = strings.ReplaceAll(query, ", $", ", \"$")
+
+	if query != original {
+		log.Printf("MongoDBDriver -> sanitizeMongoOperatorSpacing -> Fixed operator spacing in query")
+	}
+
+	return query
 }

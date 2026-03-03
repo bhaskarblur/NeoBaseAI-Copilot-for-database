@@ -1,6 +1,7 @@
 package di
 
 import (
+	"context"
 	"log"
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/handlers"
@@ -9,9 +10,11 @@ import (
 	"neobase-ai/internal/services"
 	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
+	"neobase-ai/pkg/embedding"
 	"neobase-ai/pkg/llm"
 	"neobase-ai/pkg/mongodb"
 	"neobase-ai/pkg/redis"
+	"neobase-ai/pkg/vectordb"
 	"time"
 
 	"go.uber.org/dig"
@@ -413,6 +416,7 @@ func Initialize() {
 		dbManager *dbmanager.Manager,
 		llmManager *llm.Manager,
 		redisRepo redis.IRedisRepositories,
+		mongoClient *mongodb.MongoDBClient,
 	) services.ChatService {
 		// Get a default LLM client - try in order of preference
 		var llmClient llm.Client
@@ -439,7 +443,68 @@ func Initialize() {
 			log.Printf("Warning: No LLM client available. Please configure OPENAI_API_KEY or GEMINI_API_KEY")
 		}
 
-		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo)
+		// Initialize Knowledge Base repository
+		kbRepo := repositories.NewKnowledgeBaseRepository(mongoClient, redisRepo)
+
+		// Initialize embedding provider (can be nil if no API keys)
+		embeddingProvider, embErr := embedding.AutoDetectProvider(
+			config.Env.OpenAIAPIKey,
+			config.Env.GeminiAPIKey,
+			config.Env.EmbeddingProvider,
+			config.Env.EmbeddingModel,
+		)
+		if embErr != nil {
+			log.Printf("Warning: Failed to initialize embedding provider: %v", embErr)
+		}
+		if embeddingProvider != nil {
+			log.Printf("Embedding provider initialized: %s/%s (dimension: %d)",
+				embeddingProvider.GetProviderName(),
+				embeddingProvider.GetModelName(),
+				embeddingProvider.GetDimension(),
+			)
+		} else {
+			log.Printf("Warning: No embedding provider available. RAG pipeline disabled.")
+		}
+
+		// Initialize Qdrant vector client (can be nil if not configured)
+		var vectorClient vectordb.Client
+		if config.Env.QdrantHost != "" {
+			qdrantPort := config.Env.QdrantPort
+			if qdrantPort == "" {
+				qdrantPort = "6334"
+			}
+
+			qClient, qErr := vectordb.NewQdrantClient(vectordb.QdrantConfig{
+				Host:   config.Env.QdrantHost,
+				Port:   qdrantPort,
+				APIKey: config.Env.QdrantAPIKey,
+				UseTLS: config.Env.QdrantUseTLS,
+			})
+			if qErr != nil {
+				log.Printf("Warning: Failed to connect to Qdrant: %v", qErr)
+			} else {
+				vectorClient = qClient
+				log.Printf("Qdrant client initialized: %s:%s", config.Env.QdrantHost, qdrantPort)
+			}
+		} else {
+			log.Printf("Warning: Qdrant not configured (QDRANT_HOST empty). RAG pipeline disabled.")
+		}
+
+		// Initialize VectorizationService (nil if embedding or vectordb unavailable)
+		vectorizationSvc := services.NewVectorizationService(embeddingProvider, vectorClient)
+
+		// Ensure Qdrant collection exists on startup
+		if vectorizationSvc != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := vectorizationSvc.EnsureReady(ctx); err != nil {
+					log.Printf("Warning: Failed to ensure Qdrant collection: %v", err)
+				}
+			}()
+		}
+
+		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo, vectorizationSvc, kbRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)

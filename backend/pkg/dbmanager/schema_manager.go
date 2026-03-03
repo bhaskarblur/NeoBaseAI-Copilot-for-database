@@ -754,6 +754,25 @@ func (sm *SchemaManager) getStoredSchema(ctx context.Context, chatID string) (*S
 	return schema, nil
 }
 
+// GetStoredSchemaInfo retrieves the full SchemaInfo from storage for a chat.
+// This is used by the vectorization service to build embedding chunks.
+func (sm *SchemaManager) GetStoredSchemaInfo(ctx context.Context, chatID string) (*SchemaInfo, error) {
+	storage, err := sm.getStoredSchema(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if storage == nil || storage.FullSchema == nil {
+		return nil, fmt.Errorf("no schema found for chat %s", chatID)
+	}
+	return storage.FullSchema, nil
+}
+
+// GetStoredSchemaStorage retrieves the full SchemaStorage (including LLMSchema with example records).
+// Used by vectorization to enrich schema chunks with example records.
+func (sm *SchemaManager) GetStoredSchemaStorage(ctx context.Context, chatID string) (*SchemaStorage, error) {
+	return sm.getStoredSchema(ctx, chatID)
+}
+
 // Add type-specific schema simplification
 type SchemaSimplifier interface {
 	SimplifyDataType(dbType string) string
@@ -1578,7 +1597,7 @@ func (sm *SchemaManager) createLLMSchemaWithExamples(ctx context.Context, schema
 		// Fetch example records if fetcher is available
 		if fetcher != nil {
 			log.Printf("createLLMSchemaWithExamples -> Fetching example records for table: %s", tableName)
-			examples, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3)
+			examples, err := fetcher.FetchExampleRecords(ctx, db, tableName, 3) // Fetch up to 3 example records
 			if err != nil {
 				log.Printf("createLLMSchemaWithExamples -> Failed to fetch example records for table %s: %v", tableName, err)
 			} else {

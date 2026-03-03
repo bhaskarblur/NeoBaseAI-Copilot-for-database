@@ -1444,6 +1444,7 @@ DATABASE_PASSWORD=`; // Mask password
           />
         ) : (
           <SchemaTab
+            chatId={newChatId || initialData?.id || ''}
             isLoadingTables={isLoadingTables}
             tables={tables}
             selectedTables={selectedTables}

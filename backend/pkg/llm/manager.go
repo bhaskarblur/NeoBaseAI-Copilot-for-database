@@ -77,6 +77,19 @@ func formatAssistantResponse(response map[string]interface{}) string {
 	return string(jsonBytes)
 }
 
+// getAssistantContent safely extracts assistant response content from a message's
+// Content map, handling both map[string]interface{} (normal JSON responses) and
+// string (legacy/fallback format) types for the "assistant_response" key.
+func getAssistantContent(content map[string]interface{}) string {
+	if assistantMsg, ok := content["assistant_response"].(map[string]interface{}); ok {
+		return formatAssistantResponse(assistantMsg)
+	}
+	if assistantStr, ok := content["assistant_response"].(string); ok {
+		return assistantStr
+	}
+	return ""
+}
+
 // Helper functions
 func mapRole(role string) string {
 	switch strings.ToLower(role) {

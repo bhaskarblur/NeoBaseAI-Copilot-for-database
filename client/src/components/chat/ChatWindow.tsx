@@ -1602,7 +1602,7 @@ export default function ChatWindow({
           themeColor="black"
           title="Refresh Knowledge Base"
           buttonText="Refresh"
-          message="This action will refetch the schema from the data source and update the knowledge base. This may take 1-3 minutes depending on the size of your data."
+          message="This action will refetch the schema from the data source and update the knowledge base. This may take 2-3 minutes depending on the size of your data."
           onConfirm={handleConfirmRefreshSchema}
           onCancel={handleCancelRefreshSchema}
         />

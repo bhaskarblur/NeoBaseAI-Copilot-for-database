@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Loader2, Search, X
 import { TableInfo } from '../../../types/chat';
 
 interface SchemaTabProps {
+  chatId?: string;
   isLoadingTables: boolean;
   tables: TableInfo[];
   selectedTables: string[];
@@ -17,6 +18,7 @@ interface SchemaTabProps {
 }
 
 const SchemaTab: React.FC<SchemaTabProps> = ({
+  chatId,
   isLoadingTables,
   tables,
   selectedTables,
@@ -133,48 +135,48 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
                 </div>
               ) : (
                 filteredTables.map(table => (
-                  <div key={table.name} className="border-b border-gray-200 last:border-b-0 pb-2">
-                    <div className="flex items-center">
-                      <button
-                        onClick={() => toggleExpandTable(table.name)}
-                        className="mr-2 p-1 hover:bg-gray-100 rounded"
-                      >
-                        {expandedTables[table.name] ? (
-                          <ChevronDown className="w-4 h-4" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4" />
-                        )}
-                      </button>
-                      <label className="flex items-center gap-2 cursor-pointer flex-grow">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 rounded-md border-2 border-black checked:bg-green-500 checked:border-green-500 focus:ring-green-500 text-green-500"
-                          checked={selectedTables.includes(table.name)}
-                          onChange={() => toggleTable(table.name)}
-                        />
-                        <span className="font-medium">{table.name}</span>
-                      </label>
-                    </div>
-                    
-                    {expandedTables[table.name] && (
-                      <div className="ml-8 mt-2 pl-2 border-l-2 border-gray-200">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Columns:</p>
-                        <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-2">
-                          {table.columns.map(column => (
-                            <div key={column.name} className="flex items-start p-1.5 rounded-md hover:bg-gray-50">
-                              <div className="flex-1">
-                                <span className="font-medium text-sm inline-block">{column.name}</span>
-                                <span className="text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded ml-2">{column.type}</span>
-                                {column.is_nullable && (
-                                  <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded ml-1">nullable</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                    <div key={table.name} className="border-b border-gray-200 last:border-b-0 pb-2">
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => toggleExpandTable(table.name)}
+                          className="mr-2 p-1 hover:bg-gray-100 rounded"
+                        >
+                          {expandedTables[table.name] ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </button>
+                        <label className="flex items-center gap-2 cursor-pointer flex-grow">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded-md border-2 border-black checked:bg-green-500 checked:border-green-500 focus:ring-green-500 text-green-500"
+                            checked={selectedTables.includes(table.name)}
+                            onChange={() => toggleTable(table.name)}
+                          />
+                          <span className="font-medium">{table.name}</span>
+                        </label>
                       </div>
-                    )}
-                  </div>
+                      
+                      {expandedTables[table.name] && (
+                        <div className="ml-8 mt-2 pl-2 border-l-2 border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Columns:</p>
+                          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-2">
+                          {table.columns.map(column => (
+                                <div key={column.name} className="flex items-start p-1.5 rounded-md hover:bg-gray-50">
+                              <div className="flex-1">
+                                    <span className="font-medium text-sm inline-block">{column.name}</span>
+                                <span className="text-xs bg-green-100 text-gray-700 px-1.5 py-0.5 rounded ml-2">{column.type.charAt(0).toUpperCase() + column.type.slice(1)}</span>
+                                      {column.is_nullable && (
+                                        <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded ml-1">Nullable</span>
+                                      )}
+                                    </div>
+                                  </div>
+                          ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                 ))
               )}
             </div>
@@ -182,7 +184,7 @@ const SchemaTab: React.FC<SchemaTabProps> = ({
 
           <div className="mt-6">
             <p className="text-gray-500 text-sm text-center">
-              When tables selection is updated, knowledge base will be automatically refreshed in the background which may take 1-2 minutes depending on the size of your data.
+              When tables selection is updated, knowledge base will be automatically refreshed in the background which may take 2-3 minutes depending on the size of your data.
             </p>
           </div>
         </div>

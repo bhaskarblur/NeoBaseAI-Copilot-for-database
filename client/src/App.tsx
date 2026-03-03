@@ -1079,8 +1079,12 @@ function AppContent() {
             }
             break;
           case 'ai-response-step':
-            // Set default of 500 ms delay for first step
-            await new Promise(resolve => setTimeout(resolve, 500));
+            {
+            // Shorter delay for subsequent steps so UX feels responsive
+            const isFirstOrSecondStep = !temporaryMessage || 
+              (temporaryMessage.loading_steps && temporaryMessage.loading_steps.length <= 1);
+            const stepDelay = isFirstOrSecondStep ? 500 : 200;
+            await new Promise(resolve => setTimeout(resolve, stepDelay));
 
             // Clear timeout on first step received - stream is working
             if (streamId && streamingMessageTimeouts.current[streamId]) {
@@ -1121,6 +1125,7 @@ function AppContent() {
                     msg.id === streamingMessage.id ? updatedMessage : msg
                   );
                 });
+            }
             }
             break;
 

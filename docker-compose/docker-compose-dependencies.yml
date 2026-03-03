@@ -48,10 +48,26 @@ services:
     networks:
       - neobase-network
 
+  neobase-qdrant:
+    image: qdrant/qdrant:latest
+    container_name: neobase-qdrant
+    restart: always
+    ports:
+      - 6333:6333
+      - 6334:6334
+    volumes:
+      - neobase-qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__API_KEY=neobase-qdrant-local-key
+    networks:
+      - neobase-network
+
 volumes:
   neobase-mongodb-data:
   neobase-redis-data:
   neobase-spreadsheet-postgres-data:
+  neobase-qdrant-data:
 
 networks:
   neobase-network:

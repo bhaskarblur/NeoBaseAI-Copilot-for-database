@@ -114,6 +114,19 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	// Log the original string for debugging
 	log.Printf("Original MongoDB query params: %s", paramsStr)
 
+	// Fix Python-style booleans and None that LLMs sometimes generate
+	pythonBoolPattern := regexp.MustCompile(`:\s*True\b`)
+	paramsStr = pythonBoolPattern.ReplaceAllString(paramsStr, ": true")
+	pythonFalsePattern := regexp.MustCompile(`:\s*False\b`)
+	paramsStr = pythonFalsePattern.ReplaceAllString(paramsStr, ": false")
+	pythonNonePattern := regexp.MustCompile(`:\s*None\b`)
+	paramsStr = pythonNonePattern.ReplaceAllString(paramsStr, ": null")
+
+	// Fix single-quoted MongoDB operators from LLM retry responses
+	// e.g., "'$match'" → "$match", "'$group'" → "$group"
+	singleQuotedOpPattern := regexp.MustCompile(`"'(\$[a-zA-Z_][a-zA-Z0-9_]*)'"`)
+	paramsStr = singleQuotedOpPattern.ReplaceAllString(paramsStr, `"$1"`)
+
 	// Special handling for MongoDB operators that should NOT be quoted
 	mongoOperators := []string{
 		"$dateToString", "$dateFromString", "$dateToParts", "$dateFromParts",
@@ -250,7 +263,9 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 
 	// Handle numerical values in sort expressions like {field: -1}
 	// Preserve negative numbers in sort expressions
-	sortPattern := regexp.MustCompile(`\{([^{}]+):\s*(-?\d+)\s*\}`)
+	// Use [^{}:] to only match a single key (no colons allowed) — prevents matching
+	// multi-key objects like {startDate: "$$NOW", unit: "day", amount: 30}
+	sortPattern := regexp.MustCompile(`\{([^{}:]+):\s*(-?\d+)\s*\}`)
 	paramsStr = sortPattern.ReplaceAllStringFunc(paramsStr, func(match string) string {
 		// Extract the field and direction
 		sortMatches := sortPattern.FindStringSubmatch(match)
@@ -397,7 +412,7 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 	paramsStr = strings.ReplaceAll(paramsStr, "\u2019", "'")  // Replace right smart quote
 	paramsStr = strings.ReplaceAll(paramsStr, "\u201C", "\"") // Replace left smart double quote
 	paramsStr = strings.ReplaceAll(paramsStr, "\u201D", "\"") // Replace right smart double quote
-	
+
 	// Handle single quotes for string values
 	// Use a standard approach instead of negative lookbehind which isn't supported in Go
 	singleQuoteRegex := regexp.MustCompile(`'([^']*)'`)
@@ -711,7 +726,7 @@ func processAggregationResultsFromCursor(cursor *mongo.Cursor, ctx context.Conte
 			},
 		}
 	}
-	
+
 	// Debug logging for aggregation results
 	log.Printf("processAggregationResultsFromCursor -> Decoded %d results from aggregation", len(results))
 
@@ -1359,7 +1374,7 @@ func ParseAggregationPipeline(pipelineStr string) ([]string, error) {
 	runes := []rune(pipelineStr)
 	for i := 0; i < len(runes); i++ {
 		char := runes[i]
-		
+
 		if escapeNext {
 			currentStage.WriteRune(char)
 			escapeNext = false
@@ -1429,7 +1444,7 @@ func ParseAggregationPipeline(pipelineStr string) ([]string, error) {
 		if stage != "" && stage != "," { // Don't add if it's just a comma
 			stages = append(stages, stage)
 		}
-		}
+	}
 
 	return stages, nil
 }

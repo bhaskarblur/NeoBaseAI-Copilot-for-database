@@ -85,6 +85,10 @@ type ChatService interface {
 	GetVisualizationForQuery(ctx context.Context, queryID string) (*dtos.VisualizationResponse, error)                           // Get visualization by query ID (per-query visualization)
 	GetVisualizationData(ctx context.Context, userID, chatID, messageID, queryID string, limit, offset int) (interface{}, error) // Lazy-load visualization data on demand
 	ExecuteChartQuery(ctx context.Context, userID, chatID string, chartConfig *dtos.ChartConfiguration, limit int) ([]map[string]interface{}, error)
+
+	// Knowledge Base operations
+	GetKnowledgeBase(ctx context.Context, userID, chatID string) (*models.KnowledgeBase, uint32, error)
+	UpdateKnowledgeBase(ctx context.Context, userID, chatID string, tableDescs []models.TableDescription) (*models.KnowledgeBase, uint32, error)
 }
 
 type chatService struct {
@@ -99,6 +103,8 @@ type chatService struct {
 	processesMu       sync.RWMutex
 	crypto            *utils.AESGCMCrypto
 	redisRepo         redis.IRedisRepositories
+	vectorizationSvc  VectorizationService                 // RAG pipeline — can be nil if unavailable
+	kbRepo            repositories.KnowledgeBaseRepository // Knowledge base persistence
 }
 
 func isValidDBType(dbType string) bool {
@@ -153,6 +159,8 @@ func NewChatService(
 	llmManager *llm.Manager,
 	redisRepo redis.IRedisRepositories,
 	visualizationRepo repositories.IVisualizationRepository,
+	vectorizationSvc VectorizationService,
+	kbRepo repositories.KnowledgeBaseRepository,
 ) ChatService {
 	// Initialize crypto instance
 	crypto, err := utils.NewFromConfig()
@@ -171,6 +179,8 @@ func NewChatService(
 		activeProcesses:   make(map[string]context.CancelFunc),
 		crypto:            crypto,
 		redisRepo:         redisRepo,
+		vectorizationSvc:  vectorizationSvc,
+		kbRepo:            kbRepo,
 	}
 }
 
@@ -653,6 +663,20 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 		if err := s.dbManager.DisconnectWithType(chatID, userID, chat.Connection.Type, true); err != nil {
 			log.Printf("failed to delete DB connection: %v", err)
 		}
+
+		// Delete vectors from Qdrant
+		if s.vectorizationSvc != nil && s.vectorizationSvc.IsAvailable(context.Background()) {
+			if err := s.vectorizationSvc.DeleteChatVectors(context.Background(), chatID); err != nil {
+				log.Printf("failed to delete chat vectors: %v", err)
+			}
+		}
+
+		// Delete knowledge base from MongoDB
+		if s.kbRepo != nil {
+			if err := s.kbRepo.DeleteByChatID(context.Background(), chatObjID); err != nil {
+				log.Printf("failed to delete knowledge base: %v", err)
+			}
+		}
 	}()
 
 	return http.StatusOK, nil
@@ -751,6 +775,18 @@ func (s *chatService) CreateMessage(ctx context.Context, userID, chatID string, 
 	if err := s.chatRepo.CreateMessage(msg); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to save message: %v", err)
 	}
+
+	// Vectorize the user message in the background for conversational RAG retrieval
+	go func() {
+		bgCtx := context.Background()
+		if s.vectorizationSvc != nil {
+			// Use the total message count as a rough message index for ordering
+			_, total, _ := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1)
+			if err := s.vectorizationSvc.VectorizeMessage(bgCtx, chatID, msg.ID.Hex(), "user", content, int(total)); err != nil {
+				log.Printf("ChatService -> CreateMessage -> Failed to vectorize user message: %v", err)
+			}
+		}
+	}()
 
 	log.Printf("ChatService -> CreateMessage -> AutoExecuteQuery: %v", chat.Settings.AutoExecuteQuery)
 
@@ -882,10 +918,30 @@ func (s *chatService) UpdateMessage(ctx context.Context, userID, chatID, message
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to update message: %v", err)
 	}
 
+	// Delete old message vector — the re-processed response will create a fresh one
+	go func() {
+		if s.vectorizationSvc != nil {
+			bgCtx := context.Background()
+			if delErr := s.vectorizationSvc.DeleteMessageVector(bgCtx, chatID, messageID); delErr != nil {
+				log.Printf("UpdateMessage -> Failed to delete old message vector: %v", delErr)
+			}
+		}
+	}()
+
 	// Find the next AI message after the edited message
 	nextMessage, err := s.chatRepo.FindNextMessageByID(messageObjID)
 	if err == nil && nextMessage != nil && nextMessage.Type == string(constants.MessageTypeAssistant) {
 		log.Printf("UpdateMessage -> Found next AI message: %v", nextMessage.ID)
+
+		// Delete old AI message vector — it will be recreated after LLM re-generation
+		go func() {
+			if s.vectorizationSvc != nil {
+				bgCtx := context.Background()
+				if delErr := s.vectorizationSvc.DeleteMessageVector(bgCtx, chatID, nextMessage.ID.Hex()); delErr != nil {
+					log.Printf("UpdateMessage -> Failed to delete old AI message vector: %v", delErr)
+				}
+			}
+		}()
 
 		// Reset query states for the AI message
 		if nextMessage.Queries != nil {
@@ -946,6 +1002,16 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 	if err := s.chatRepo.DeleteMessages(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete messages: %v", err)
 	}
+
+	// Clean up all message vectors in the background (schema vectors are preserved)
+	go func() {
+		if s.vectorizationSvc != nil {
+			bgCtx := context.Background()
+			if err := s.vectorizationSvc.DeleteChatMessageVectors(bgCtx, chatID); err != nil {
+				log.Printf("DeleteMessages -> Failed to delete message vectors: %v", err)
+			}
+		}
+	}()
 
 	return http.StatusOK, nil
 }
@@ -1139,6 +1205,77 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 		}
 
 		log.Printf("Chat duplication completed successfully with messages. New chat ID: %s", newChat.ID.Hex())
+
+		// Copy vectors (schema + messages) in background
+		if s.vectorizationSvc != nil {
+			go func() {
+				copyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
+				if !s.vectorizationSvc.IsAvailable(copyCtx) {
+					log.Printf("Chat duplication -> Skipping vector copy: vectorization service unavailable")
+					return
+				}
+
+				// Build string-based message ID map for vector remapping
+				msgIDMapStr := make(map[string]string, len(messageIDMap))
+				messageIDMapMutex.Lock()
+				for oldID, newID := range messageIDMap {
+					msgIDMapStr[oldID.Hex()] = newID.Hex()
+				}
+				messageIDMapMutex.Unlock()
+
+				if err := s.vectorizationSvc.CopyVectorsForChat(copyCtx, chatID, newChat.ID.Hex(), true, msgIDMapStr); err != nil {
+					log.Printf("Chat duplication -> Warning: failed to copy vectors: %v", err)
+				}
+			}()
+		}
+	} else {
+		// No messages duplicated — still copy schema vectors (same DB connection)
+		if s.vectorizationSvc != nil {
+			go func() {
+				copyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
+				if !s.vectorizationSvc.IsAvailable(copyCtx) {
+					log.Printf("Chat duplication -> Skipping vector copy: vectorization service unavailable")
+					return
+				}
+
+				if err := s.vectorizationSvc.CopyVectorsForChat(copyCtx, chatID, newChat.ID.Hex(), false, nil); err != nil {
+					log.Printf("Chat duplication -> Warning: failed to copy schema vectors: %v", err)
+				}
+			}()
+		}
+	}
+
+	// Copy KnowledgeBase in background (same DB = same table descriptions apply)
+	if s.kbRepo != nil {
+		go func() {
+			kbCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			sourceKB, err := s.kbRepo.FindByChatID(kbCtx, chatObjID)
+			if err != nil {
+				log.Printf("Chat duplication -> Warning: failed to fetch source KB: %v", err)
+				return
+			}
+			if sourceKB == nil {
+				log.Printf("Chat duplication -> No knowledge base to copy for chat %s", chatID)
+				return
+			}
+
+			newKB := models.NewKnowledgeBase(newChat.ID)
+			newKB.UserID = userObjID
+			newKB.TableDescriptions = sourceKB.TableDescriptions
+
+			if err := s.kbRepo.Upsert(kbCtx, newKB); err != nil {
+				log.Printf("Chat duplication -> Warning: failed to copy knowledge base: %v", err)
+			} else {
+				log.Printf("Chat duplication -> Copied knowledge base (%d tables) to new chat %s",
+					len(sourceKB.TableDescriptions), newChat.ID.Hex())
+			}
+		}()
 	}
 
 	return s.buildChatResponse(newChat), http.StatusOK, nil
@@ -1547,6 +1684,24 @@ func (s *chatService) HandleSchemaChange(userID, chatID, streamID string, diff i
 		}
 
 		log.Printf("ChatService -> HandleSchemaChange -> Schema update saved to chat.Connection")
+
+		// Sync knowledge base and vectorize schema in background
+		// KB sync runs FIRST so enriched schema chunks include KB descriptions.
+		go func() {
+			// Sync knowledge base descriptions via LLM first
+			if schemaMsg != "" {
+				kbCtx, kbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				s.syncKnowledgeBase(kbCtx, chatID, schemaMsg)
+				kbCancel()
+			}
+
+			// Vectorize schema — enriched chunks now include KB descriptions + example records
+			if s.vectorizationSvc != nil {
+				vecCtx, vecCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				s.vectorizeSchemaForChat(vecCtx, chatID)
+				vecCancel()
+			}
+		}()
 	}
 }
 

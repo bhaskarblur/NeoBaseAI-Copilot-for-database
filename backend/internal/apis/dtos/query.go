@@ -30,6 +30,7 @@ type QueryExecutionResponse struct {
 	TotalRecordsCount *int            `json:"total_records_count"`
 	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
 	ActionAt          *string         `json:"action_at,omitempty"`
+	UpdatedContent    *string         `json:"updated_content,omitempty"` // set when explainErrorWithLLM updates message content
 }
 
 type QueryResultsRequest struct {

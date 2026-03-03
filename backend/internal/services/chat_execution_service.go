@@ -13,6 +13,7 @@ import (
 	"neobase-ai/internal/models"
 	"neobase-ai/internal/utils"
 	"neobase-ai/pkg/dbmanager"
+	"neobase-ai/pkg/llm"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,67 +28,137 @@ func (s *chatService) handleError(_ context.Context, chatID string, err error) {
 	log.Printf("Error processing message for chat %s: %v", chatID, err)
 }
 
-// convertMessagesToLLMFormat converts regular messages to LLM format and prepends schema
-// It checks if schema exists in chat.Connection, if not fetches from DB Manager and caches it
-func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *models.Chat, messages []*models.Message, dbType string) ([]*models.LLMMessage, error) {
+// performRAGSearch performs vector-based retrieval for a user query against the chat's vectorized schema and knowledge base.
+// Returns the assembled RAG context string, the number of unique tables found, and any error.
+func (s *chatService) performRAGSearch(ctx context.Context, chatID string, userQuery string) (ragContext string, tableCount int, err error) {
+	if s.vectorizationSvc == nil || !s.vectorizationSvc.IsAvailable(ctx) {
+		return "", 0, nil
+	}
+
+	searchQuery := userQuery
+	if searchQuery == "" {
+		// No user query — use a broad query to retrieve key schema highlights (e.g. for recommendations)
+		searchQuery = "main tables relationships key columns important data"
+	}
+
+	topK := 10
+	if userQuery == "" {
+		topK = 5
+	}
+
+	ragResults, ragErr := s.vectorizationSvc.SearchSchema(ctx, chatID, searchQuery, topK)
+	if ragErr != nil {
+		log.Printf("performRAGSearch -> search failed: %v", ragErr)
+		return "", 0, nil // non-fatal, fall back to full schema
+	}
+
+	if len(ragResults) == 0 {
+		return "", 0, nil
+	}
+
+	// Count unique tables from results
+	tableSet := make(map[string]struct{})
+	var ragBuilder strings.Builder
+	if userQuery != "" {
+		ragBuilder.WriteString("\n\n--- Relevant Schema Context (from vector search) ---\n")
+	} else {
+		ragBuilder.WriteString("\n\n--- Key Schema Context (from vector search) ---\n")
+	}
+	for _, result := range ragResults {
+		if content, ok := result.Payload["content"].(string); ok {
+			ragBuilder.WriteString(content)
+			ragBuilder.WriteString("\n---\n")
+		}
+		if tbl, ok := result.Payload["table_name"].(string); ok && tbl != "" {
+			tableSet[tbl] = struct{}{}
+		}
+	}
+
+	log.Printf("performRAGSearch -> %d results, %d unique tables, context length: %d",
+		len(ragResults), len(tableSet), ragBuilder.Len())
+
+	return ragBuilder.String(), len(tableSet), nil
+}
+
+// convertMessagesToLLMFormat converts regular messages to LLM format and prepends schema.
+// ragContext is optional pre-computed RAG context to include alongside or instead of the full schema.
+// useRAGOnly: when true and ragContext is non-empty, the full schema is omitted from the system message
+// and only the RAG chunks are sent. This dramatically reduces token usage when the schema is
+// already vectorized. A lightweight schema summary is included so the LLM knows the DB structure.
+func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *models.Chat,
+	messages []*models.Message, dbType string, ragContext string, useRAGOnly bool) ([]*models.LLMMessage, error) {
 	chatIDStr := chat.ID.Hex()
 
-	// Step 1: Get or fetch schema
+	// Step 1: Get or fetch schema (skipped when RAG-only mode is active)
 	var schemaStr string
 	var shouldUpdateCache bool
 
-	if chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
-		// Schema exists in cache
-		schemaStr = *chat.Connection.CurrentSchema
-		log.Printf("convertMessagesToLLMFormat -> Using cached schema from chat.Connection (length: %d)", len(schemaStr))
+	if useRAGOnly && ragContext != "" {
+		// RAG-only mode: schema is vectorized and relevant chunks were found.
+		// We include ONLY the RAG chunks and a lightweight table listing so
+		// the LLM knows which tables exist without the full column details.
+		log.Printf("convertMessagesToLLMFormat -> RAG-only mode: skipping full schema. Using RAG chunks instead (ragContext length: %d chars).", len(ragContext))
 	} else {
-		// Schema doesn't exist, fetch from DB Manager
-		log.Printf("convertMessagesToLLMFormat -> Schema not found in chat.Connection, fetching from DB Manager")
+		if chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
+			// Schema exists in cache
+			schemaStr = *chat.Connection.CurrentSchema
+			log.Printf("convertMessagesToLLMFormat -> Using cached schema from chat.Connection (length: %d)", len(schemaStr))
+		} else {
+			// Schema doesn't exist, fetch from DB Manager
+			log.Printf("convertMessagesToLLMFormat -> Schema not found in chat.Connection, fetching from DB Manager")
 
-		// Parse selected collections
-		selectedCollections := []string{"ALL"}
-		if chat.SelectedCollections != "" && chat.SelectedCollections != "ALL" {
-			selectedCollections = strings.Split(chat.SelectedCollections, ",")
+			// Parse selected collections
+			selectedCollections := []string{"ALL"}
+			if chat.SelectedCollections != "" && chat.SelectedCollections != "ALL" {
+				selectedCollections = strings.Split(chat.SelectedCollections, ",")
+			}
+
+			// Fetch schema with examples from DB Manager
+			formattedSchema, err := s.dbManager.FormatSchemaWithExamples(ctx, chatIDStr, selectedCollections)
+			if err != nil {
+				// Fallback to basic schema if examples fail
+				log.Printf("convertMessagesToLLMFormat -> Error getting schema with examples, trying basic schema: %v", err)
+
+				dbConn, connErr := s.dbManager.GetConnection(chatIDStr)
+				if connErr != nil {
+					return nil, fmt.Errorf("failed to get database connection: %v", connErr)
+				}
+
+				connInfo, exists := s.dbManager.GetConnectionInfo(chatIDStr)
+				if !exists {
+					return nil, fmt.Errorf("connection info not found for chat %s", chatIDStr)
+				}
+
+				schema, schemaErr := s.dbManager.GetSchemaManager().GetSchema(ctx, chatIDStr, dbConn, connInfo.Config.Type, selectedCollections)
+				if schemaErr != nil {
+					return nil, fmt.Errorf("failed to get schema: %v", schemaErr)
+				}
+
+				formattedSchema = s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
+			}
+
+			schemaStr = formattedSchema
+			shouldUpdateCache = true
+			log.Printf("convertMessagesToLLMFormat -> Fetched and formatted schema from DB (length: %d)", len(schemaStr))
 		}
-
-		// Fetch schema with examples from DB Manager
-		formattedSchema, err := s.dbManager.FormatSchemaWithExamples(ctx, chatIDStr, selectedCollections)
-		if err != nil {
-			// Fallback to basic schema if examples fail
-			log.Printf("convertMessagesToLLMFormat -> Error getting schema with examples, trying basic schema: %v", err)
-
-			dbConn, connErr := s.dbManager.GetConnection(chatIDStr)
-			if connErr != nil {
-				return nil, fmt.Errorf("failed to get database connection: %v", connErr)
-			}
-
-			connInfo, exists := s.dbManager.GetConnectionInfo(chatIDStr)
-			if !exists {
-				return nil, fmt.Errorf("connection info not found for chat %s", chatIDStr)
-			}
-
-			schema, schemaErr := s.dbManager.GetSchemaManager().GetSchema(ctx, chatIDStr, dbConn, connInfo.Config.Type, selectedCollections)
-			if schemaErr != nil {
-				return nil, fmt.Errorf("failed to get schema: %v", schemaErr)
-			}
-
-			formattedSchema = s.dbManager.GetSchemaManager().FormatSchemaForLLM(schema)
-		}
-
-		schemaStr = formattedSchema
-		shouldUpdateCache = true
-		log.Printf("convertMessagesToLLMFormat -> Fetched and formatted schema from DB (length: %d)", len(schemaStr))
 	}
 
-	// Step 2: Create system message with schema
+	// Step 2: Create system message with schema + optional RAG context
 	now := time.Now()
+
+	systemContent := map[string]interface{}{}
+	if schemaStr != "" {
+		systemContent["schema_update"] = schemaStr
+	}
+	if ragContext != "" {
+		systemContent["rag_context"] = ragContext
+	}
+
 	systemMessage := &models.LLMMessage{
-		ChatID: chat.ID,
-		UserID: chat.UserID,
-		Role:   string(constants.MessageTypeSystem),
-		Content: map[string]interface{}{
-			"schema_update": schemaStr,
-		},
+		ChatID:      chat.ID,
+		UserID:      chat.UserID,
+		Role:        string(constants.MessageTypeSystem),
+		Content:     systemContent,
 		IsEdited:    false,
 		NonTechMode: chat.Settings.NonTechMode,
 		CreatedAt:   now,
@@ -98,7 +169,7 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 	llmMessages := make([]*models.LLMMessage, 0, len(messages)+1)
 	llmMessages = append(llmMessages, systemMessage) // Prepend schema
 
-	for _, msg := range messages {
+	for idx, msg := range messages {
 		var contentMap map[string]interface{}
 
 		if string(msg.Type) == string(constants.MessageTypeUser) {
@@ -111,8 +182,20 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 			var parsedContent map[string]interface{}
 			if err := json.Unmarshal([]byte(msg.Content), &parsedContent); err != nil {
 				log.Printf("Warning: Failed to parse assistant message content: %v", err)
+				// Try to extract meaningful content from old-format text tool calls
+				// (e.g., <ctrl42>call\nprint(default_api.generate_final_response(...)))
+				extractedContent := msg.Content
+				if parsed, ok := llm.TryParseTextToolCall(msg.Content); ok {
+					var parsedMap map[string]interface{}
+					if json.Unmarshal([]byte(parsed), &parsedMap) == nil {
+						if assistantMsg, hasMsg := parsedMap["assistantMessage"].(string); hasMsg {
+							extractedContent = assistantMsg
+							log.Printf("convertMessagesToLLMFormat -> Extracted assistantMessage from old-format text tool call")
+						}
+					}
+				}
 				contentMap = map[string]interface{}{
-					"assistant_response": msg.Content,
+					"assistant_response": extractedContent,
 				}
 			} else {
 				// Extract response and queries
@@ -124,6 +207,38 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 				}
 				if buttons, ok := parsedContent["button_prompts"]; ok {
 					contentMap["buttons"] = buttons
+				}
+			}
+
+			// Context continuity: for the LAST assistant message in the window,
+			// inject a compact summary of query execution results so the LLM can
+			// reference actual data from the previous interaction in follow-up questions.
+			// This prevents the LLM from ignoring prior context (e.g., knowing that
+			// a "status" field exists because the previous query returned it).
+			if idx == len(messages)-1 && msg.Queries != nil && len(*msg.Queries) > 0 {
+				var resultSummaries []map[string]interface{}
+				for _, q := range *msg.Queries {
+					if q.IsExecuted && q.ExecutionResult != nil && *q.ExecutionResult != "" {
+						// Parse the execution result and take a compact summary
+						var execResult interface{}
+						if json.Unmarshal([]byte(*q.ExecutionResult), &execResult) == nil {
+							summary := map[string]interface{}{
+								"query":       q.Query,
+								"description": q.Description,
+							}
+							// Truncate large results to avoid token bloat
+							resultStr := *q.ExecutionResult
+							if len(resultStr) > 2000 {
+								resultStr = resultStr[:2000] + "...(truncated)"
+							}
+							summary["result_preview"] = resultStr
+							resultSummaries = append(resultSummaries, summary)
+						}
+					}
+				}
+				if len(resultSummaries) > 0 {
+					contentMap["previous_query_results"] = resultSummaries
+					log.Printf("convertMessagesToLLMFormat -> Injected %d execution result(s) from last assistant message for context continuity", len(resultSummaries))
 				}
 			}
 		}
@@ -159,6 +274,109 @@ func (s *chatService) convertMessagesToLLMFormat(ctx context.Context, chat *mode
 	}
 
 	return llmMessages, nil
+}
+
+// injectToolQueriesIfMissing checks if the LLM's final response has an empty queries array
+// but the tool history shows execute_read_query calls were made. In that case, it injects
+// those queries into the response so the user can see and re-run them.
+// This is a safety net — the prompt instructs the LLM to include queries, but models
+// sometimes omit them thinking "I already executed it, user doesn't need it."
+// Exploration-only queries (information_schema, SHOW TABLES, etc.) are filtered out
+// because they are not useful to the user.
+func (s *chatService) injectToolQueriesIfMissing(response string, toolResult *llm.ToolCallResult) string {
+	if toolResult == nil || len(toolResult.ToolHistory) == 0 {
+		return response
+	}
+
+	// Parse the response
+	var jsonResp map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonResp); err != nil {
+		return response
+	}
+
+	// Check if queries is empty or nil
+	queries, _ := jsonResp["queries"].([]interface{})
+	if len(queries) > 0 {
+		return response // LLM already included queries, nothing to do
+	}
+
+	// Collect queries from tool history (execute_read_query calls),
+	// filtering out pure exploration queries that only discover schema metadata.
+	var injectedQueries []interface{}
+	for _, call := range toolResult.ToolHistory {
+		if call.Name != llm.ExecuteQueryToolName {
+			continue
+		}
+		queryStr, _ := call.Arguments["query"].(string)
+		explanation, _ := call.Arguments["explanation"].(string)
+		if queryStr == "" {
+			continue
+		}
+
+		// Skip exploration-only queries that just discover table/collection names or schema metadata.
+		// These are not useful to the user as executable queries.
+		upperQuery := strings.ToUpper(strings.TrimSpace(queryStr))
+		if isExplorationQuery(upperQuery) {
+			log.Printf("processLLMResponse -> injectToolQueriesIfMissing: skipping exploration query: %s", queryStr)
+			continue
+		}
+
+		queryObj := map[string]interface{}{
+			"query":       queryStr,
+			"explanation": explanation,
+			"queryType":   "SELECT",
+		}
+		injectedQueries = append(injectedQueries, queryObj)
+	}
+
+	if len(injectedQueries) == 0 {
+		return response
+	}
+
+	log.Printf("processLLMResponse -> injectToolQueriesIfMissing: LLM returned empty queries but %d execute_read_query calls found in tool history, injecting", len(injectedQueries))
+	jsonResp["queries"] = injectedQueries
+
+	updatedResponse, err := json.Marshal(jsonResp)
+	if err != nil {
+		return response
+	}
+	return string(updatedResponse)
+}
+
+// isExplorationQuery returns true if the query is a pure schema exploration query
+// (e.g. listing tables, describing columns) that should not be shown to the user
+// as an executable query.
+func isExplorationQuery(upperQuery string) bool {
+	explorationPatterns := []string{
+		"INFORMATION_SCHEMA",
+		"SHOW TABLES",
+		"SHOW DATABASES",
+		"SHOW COLUMNS",
+		"SHOW FULL COLUMNS",
+		"SHOW CREATE TABLE",
+		"\\DT",
+		"\\D ",
+		"\\D+",
+		"DESCRIBE ",
+		"DESC ",
+		"SHOW COLLECTIONS",
+		"DB.GETCOMMAND",
+		"DB.GETCOLLECTIONNAMES",
+		"DB.GETCOLLECTIONNAMES()",
+		"SYSTEM.TABLES",
+		"SYSTEM.COLUMNS",
+		"SYSTEM.DATABASES",
+		"LISTCOLLECTIONS",
+		".FIND({}).LIMIT(1)", // Schema sampling query
+		".FIND({}).LIMIT(5)", // Schema sampling query
+		".FINDONE()",         // Schema sampling
+	}
+	for _, pattern := range explorationPatterns {
+		if strings.Contains(upperQuery, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // private function, processLLMResponse processes the LLM response updates SSE stream only if synchronous is false, allowSSEUpdates is used to send SSE updates to the client except the final ai-response event
@@ -262,13 +480,18 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	}
 
 	// Fetch all regular messages from the chat
-	regularMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1000) // Get up to 1000 messages
+	regularMessages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 50) // Get up to 50 messages
 	if err != nil {
 		s.handleError(ctx, chatID, err)
 		return nil, fmt.Errorf("failed to fetch messages: %v", err)
 	}
 
-	// Filter messages up to the edited message
+	// Reverse to chronological order (oldest first) since FindMessagesByChat returns newest first
+	for i, j := 0, len(regularMessages)-1; i < j; i, j = i+1, j-1 {
+		regularMessages[i], regularMessages[j] = regularMessages[j], regularMessages[i]
+	}
+
+	// Filter messages up to the current user message (inclusive)
 	filteredRegularMessages := make([]*models.Message, 0)
 	for _, msg := range regularMessages {
 		filteredRegularMessages = append(filteredRegularMessages, msg)
@@ -277,11 +500,24 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		}
 	}
 
-	// Convert messages to LLM format (includes schema as system message)
-	filteredMessages, err := s.convertMessagesToLLMFormat(ctx, chat, filteredRegularMessages, connInfo.Config.Type)
-	if err != nil {
-		s.handleError(ctx, chatID, err)
-		return nil, fmt.Errorf("failed to convert messages to LLM format: %v", err)
+	// --- Sliding Window + Message RAG ---
+	// For long conversations, we use a hybrid approach:
+	//   1. Always include the last N messages (sliding window) for recency context
+	//   2. For older messages, do semantic search to find ones relevant to the current query
+	// This mirrors how ChatGPT/Claude handle long conversations.
+	windowSize := constants.SlidingWindowSize
+	var recentMessages []*models.Message
+	var olderMessagesForRAG []*models.Message
+
+	if len(filteredRegularMessages) <= windowSize {
+		// Short conversation — include everything, no RAG needed
+		recentMessages = filteredRegularMessages
+	} else {
+		// Long conversation — split into recent window + older messages
+		recentMessages = filteredRegularMessages[len(filteredRegularMessages)-windowSize:]
+		olderMessagesForRAG = filteredRegularMessages[:len(filteredRegularMessages)-windowSize]
+		log.Printf("processLLMResponse -> Sliding window: %d recent + %d older messages for chat %s",
+			len(recentMessages), len(olderMessagesForRAG), chatID)
 	}
 
 	// Now finalize model selection for edited messages
@@ -296,17 +532,12 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		} else {
 			// Priority 2: Check last assistant message's model
 			lastAssistantModel := ""
-			if len(filteredMessages) > 0 {
-				// Find the last assistant message (looking backwards from the end)
-				for i := len(filteredMessages) - 1; i >= 0; i-- {
-					if filteredMessages[i].Role == string(constants.MessageTypeAssistant) {
-						if filteredMessages[i].Content != nil {
-							// Content is already map[string]interface{}
-							if modelID, exists := filteredMessages[i].Content["llm_model_id"]; exists && modelID != "" {
-								lastAssistantModel = modelID.(string)
-								break
-							}
-						}
+			// Find from recent messages directly (before LLM conversion)
+			for i := len(recentMessages) - 1; i >= 0; i-- {
+				if string(recentMessages[i].Type) == string(constants.MessageTypeAssistant) {
+					if recentMessages[i].LLMModel != nil && *recentMessages[i].LLMModel != "" {
+						lastAssistantModel = *recentMessages[i].LLMModel
+						break
 					}
 				}
 			}
@@ -389,13 +620,217 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			Event: "ai-response-step",
 			Data:  "Fetching relevant data points & structure for the request..",
 		})
-
-		// Send initial processing message
-		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-			Event: "ai-response-step",
-			Data:  "Running the workflow & fetching the results..",
-		})
 	}
+	if checkCancellation() {
+		return nil, fmt.Errorf("operation cancelled")
+	}
+
+	// --- Schema RAG: Perform BEFORE message conversion ---
+	// If schema is vectorized, we can skip sending the entire schema (~1M+ chars) to the LLM
+	// and instead send only the relevant RAG chunks, saving ~95% of tokens.
+	var ragContext string
+	var useRAGOnly bool
+	schemaVectorized := false
+
+	if s.vectorizationSvc != nil && s.vectorizationSvc.IsAvailable(ctx) {
+		if !synchronous || allowSSEUpdates {
+			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+				Event: "ai-response-step",
+				Data:  "Searching knowledge base for relevant context..",
+			})
+		}
+
+		// Extract the user's latest query
+		userQuery := ""
+		for i := len(filteredRegularMessages) - 1; i >= 0; i-- {
+			if string(filteredRegularMessages[i].Type) == string(constants.MessageTypeUser) {
+				userQuery = filteredRegularMessages[i].Content
+				break
+			}
+		}
+
+		// Check if schema vectors exist for this chat
+		schemaVectorized = s.vectorizationSvc.HasSchemaVectors(ctx, chatID)
+
+		// Auto-vectorize old chats that have a cached schema but no vectors yet.
+		// This triggers vectorization in the background so subsequent messages benefit from RAG.
+		// The CURRENT request will proceed without vectors (tool-calling discovery mode).
+		if !schemaVectorized && chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
+			log.Printf("processLLMResponse -> Chat %s has cached schema but no vectors. Triggering background vectorization.", chatID)
+			if !synchronous || allowSSEUpdates {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Setting up knowledge base for future queries (first-time setup)...",
+				})
+			}
+			go func() {
+				bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer bgCancel()
+
+				// First sync KB descriptions so enriched chunks have KB data
+				if *chat.Connection.CurrentSchema != "" {
+					s.syncKnowledgeBase(bgCtx, chatID, *chat.Connection.CurrentSchema)
+				}
+
+				// Then vectorize schema with enriched chunks
+				s.vectorizeSchemaForChat(bgCtx, chatID)
+				log.Printf("processLLMResponse -> Background vectorization completed for chat %s", chatID)
+			}()
+		}
+
+		ragCtx, tableCount, _ := s.performRAGSearch(ctx, chatID, userQuery)
+
+		if !synchronous || allowSSEUpdates {
+			if tableCount > 0 {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  fmt.Sprintf("Found %d relevant tables from knowledge base", tableCount),
+				})
+			} else {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Exploring knowledge base using tool-calling to discover relevant context..",
+				})
+			}
+		}
+
+		if ragCtx != "" {
+			ragContext = ragCtx
+			// When schema is vectorized and RAG found relevant chunks, skip sending
+			// the full schema (~1M+ chars) — the RAG chunks contain everything the
+			// LLM needs for this specific query. Fall back to full schema if not vectorized.
+			if schemaVectorized {
+				useRAGOnly = true
+				log.Printf("processLLMResponse -> RAG-only mode: schema is vectorized and RAG found %d tables. Skipping full schema.", tableCount)
+			}
+		} else if tableCount == 0 && userQuery != "" {
+			// RAG search was performed but found NO matching tables.
+			// NEVER send the full schema — instead instruct the LLM to use
+			// tool-calling (get_table_info, execute_read_query) to discover
+			// the database structure on its own. This saves ~300-400K tokens.
+			ragContext = constants.GetRagNoMatchingTablesFound(connInfo.Config.Type)
+			useRAGOnly = true
+			log.Printf("processLLMResponse -> No RAG tables found. Using tool-calling discovery mode (no full schema sent). dbType=%s", connInfo.Config.Type)
+		}
+	} else if s.vectorizationSvc != nil && !s.vectorizationSvc.IsAvailable(ctx) {
+		// The LLM sees table names + descriptions and can use get_table_info for details.
+		log.Printf("processLLMResponse -> Qdrant unavailable. Attempting lightweight KB fallback.")
+		chatObjIDForKB, _ := primitive.ObjectIDFromHex(chatID)
+		if s.kbRepo != nil {
+			kb, kbErr := s.kbRepo.FindByChatID(ctx, chatObjIDForKB)
+			if kbErr == nil && kb != nil && len(kb.TableDescriptions) > 0 {
+				var sb strings.Builder
+				for _, td := range kb.TableDescriptions {
+					sb.WriteString(fmt.Sprintf("- %s", td.TableName))
+					if td.Description != "" {
+						sb.WriteString(fmt.Sprintf(": %s", td.Description))
+					}
+					sb.WriteString("\n")
+				}
+				ragContext = constants.GetRagQdrantUnavailable(connInfo.Config.Type, sb.String())
+				useRAGOnly = true
+				log.Printf("processLLMResponse -> Qdrant unavailable → using KB lightweight fallback (%d tables, %d chars). Skipping full schema.",
+					len(kb.TableDescriptions), len(ragContext))
+			} else {
+				log.Printf("processLLMResponse -> Qdrant unavailable and no KB found. Falling back to full schema.")
+			}
+		}
+	}
+
+	// Convert the recent window messages to LLM format.
+	// When useRAGOnly=true, the full schema is omitted and only RAG chunks are sent as context.
+	filteredMessages, err := s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type, ragContext, useRAGOnly)
+	if err != nil {
+		s.handleError(ctx, chatID, err)
+		return nil, fmt.Errorf("failed to convert messages to LLM format: %v", err)
+	}
+
+	// --- Message RAG: Retrieve relevant older messages ---
+	if s.vectorizationSvc != nil && s.vectorizationSvc.IsAvailable(ctx) {
+		userQuery := ""
+		for i := len(filteredRegularMessages) - 1; i >= 0; i-- {
+			if string(filteredRegularMessages[i].Type) == string(constants.MessageTypeUser) {
+				userQuery = filteredRegularMessages[i].Content
+				break
+			}
+		}
+
+		// Only perform message RAG if there are older messages outside the sliding window
+		if len(olderMessagesForRAG) > 0 && userQuery != "" {
+			if !synchronous || allowSSEUpdates {
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Retrieving relevant earlier conversation context..",
+				})
+			}
+
+			// Build exclusion set from messages already in the recent window
+			excludeIDs := make([]string, 0, len(recentMessages))
+			for _, msg := range recentMessages {
+				excludeIDs = append(excludeIDs, msg.ID.Hex())
+			}
+
+			msgResults, msgErr := s.vectorizationSvc.SearchMessages(ctx, chatID, userQuery, constants.MessageRAGTopK, excludeIDs)
+			if msgErr != nil {
+				log.Printf("processLLMResponse -> Message RAG search failed (non-fatal): %v", msgErr)
+			} else if len(msgResults) > 0 {
+				log.Printf("processLLMResponse -> Message RAG found %d relevant older messages", len(msgResults))
+
+				// Build retrieved messages as LLM messages and insert them AFTER the system message
+				// but BEFORE the recent sliding window, with a clear separator.
+				retrievedLLMMessages := make([]*models.LLMMessage, 0, len(msgResults)+1)
+
+				// Add a separator system note
+				retrievedLLMMessages = append(retrievedLLMMessages, &models.LLMMessage{
+					Role: string(constants.MessageTypeSystem),
+					Content: map[string]interface{}{
+						"context_note": fmt.Sprintf("The following %d messages are from earlier in this conversation, retrieved because they are relevant to the current query. They are NOT the most recent messages — the recent conversation follows after.", len(msgResults)),
+					},
+				})
+
+				for _, r := range msgResults {
+					role, _ := r.Payload["role"].(string)
+					content, _ := r.Payload["content"].(string)
+					if role == "" || content == "" {
+						continue
+					}
+
+					var contentMap map[string]interface{}
+					if role == string(constants.MessageTypeUser) {
+						contentMap = map[string]interface{}{
+							"user_message": content,
+						}
+					} else {
+						contentMap = map[string]interface{}{
+							"assistant_response": content,
+						}
+					}
+
+					retrievedLLMMessages = append(retrievedLLMMessages, &models.LLMMessage{
+						Role:    role,
+						Content: contentMap,
+					})
+				}
+
+				// Insert retrieved messages after system message (index 0) but before recent window
+				if len(retrievedLLMMessages) > 1 { // > 1 because we always have the separator
+					newFiltered := make([]*models.LLMMessage, 0, len(filteredMessages)+len(retrievedLLMMessages))
+					newFiltered = append(newFiltered, filteredMessages[0]) // system message
+					newFiltered = append(newFiltered, retrievedLLMMessages...)
+					newFiltered = append(newFiltered, filteredMessages[1:]...) // recent window messages
+					filteredMessages = newFiltered
+
+					if !synchronous || allowSSEUpdates {
+						s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+							Event: "ai-response-step",
+							Data:  fmt.Sprintf("Found %d relevant earlier messages for context", len(msgResults)),
+						})
+					}
+				}
+			}
+		}
+	}
+
 	if checkCancellation() {
 		return nil, fmt.Errorf("operation cancelled")
 	}
@@ -416,27 +851,86 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	}
 
 	// Log messages being sent to LLM (for debugging)
-	log.Printf("========== LLM MESSAGES DEBUG START ==========")
+	log.Printf("========== LLM CONTEXT DEBUG START ==========")
 	log.Printf("processLLMResponse -> Sending %d messages to LLM", len(filteredMessages))
 	log.Printf("processLLMResponse -> Database Type: %s", connInfo.Config.Type)
 	log.Printf("processLLMResponse -> NonTechMode: %v", chat.Settings.NonTechMode)
 	log.Printf("processLLMResponse -> Selected LLM Model: %s", selectedLLMModel)
+	log.Printf("processLLMResponse -> Schema Vectorized: %v, RAG-only mode: %v", schemaVectorized, useRAGOnly)
+	totalContextChars := 0
 	for i, msg := range filteredMessages {
-		log.Printf("processLLMResponse -> Message[%d]: Role=%s, MessageID=%s", i, msg.Role, msg.MessageID.Hex())
-		// Log content preview (first 500 chars to avoid too much log spam)
+		contentStr := ""
 		if contentBytes, err := json.Marshal(msg.Content); err == nil {
-			contentStr := string(contentBytes)
-			if len(contentStr) > 500 {
-				log.Printf("processLLMResponse -> Message[%d] Content (first 500 chars): %s...", i, contentStr[:500])
-			} else {
-				log.Printf("processLLMResponse -> Message[%d] Content: %s", i, contentStr)
-			}
+			contentStr = string(contentBytes)
+		}
+		msgChars := len(contentStr)
+		totalContextChars += msgChars
+		approxTokens := msgChars / 4 // rough estimate: ~4 chars per token
+		log.Printf("processLLMResponse -> Message[%d]: Role=%s, Chars=%d, ~Tokens=%d, MessageID=%s",
+			i, msg.Role, msgChars, approxTokens, msg.MessageID.Hex())
+		// Log content preview (first 500 chars to avoid too much log spam)
+		if msgChars > 500 {
+			log.Printf("processLLMResponse -> Message[%d] Content (first 500 chars): %s...", i, contentStr[:500])
+		} else {
+			log.Printf("processLLMResponse -> Message[%d] Content: %s", i, contentStr)
 		}
 	}
-	log.Printf("========== LLM MESSAGES DEBUG END ==========")
+	log.Printf("processLLMResponse -> TOTAL context: %d chars, ~%d tokens (approx)", totalContextChars, totalContextChars/4)
+	log.Printf("========== LLM CONTEXT DEBUG END ==========")
 
-	// Generate LLM response
-	response, err := llmClient.GenerateResponse(ctx, filteredMessages, connInfo.Config.Type, chat.Settings.NonTechMode, selectedLLMModel)
+	// Send SSE step right before the LLM call
+	if !synchronous || allowSSEUpdates {
+		s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+			Event: "ai-response-step",
+			Data:  "Running the workflow & fetching the results..",
+		})
+	}
+
+	// Generate LLM response using iterative tool-calling.
+	// The LLM can call tools (execute_read_query, get_table_info) to explore the
+	// database before calling generate_final_response with the structured answer.
+	toolExecutor := BuildToolExecutor(s.dbManager, chatID, connInfo.Config.Type)
+	tools := llm.GetNeobaseTools()
+
+	// Build system prompt addendum for tool-calling instructions
+	toolCallConfig := llm.ToolCallConfig{
+		MaxIterations: llm.DefaultMaxIterations,
+		DBType:        connInfo.Config.Type,
+		NonTechMode:   chat.Settings.NonTechMode,
+		ModelID:       selectedLLMModel,
+		SystemPrompt:  llm.GetToolCallingSystemPromptAddendum(),
+		OnToolCall: func(call llm.ToolCall) {
+			if !synchronous || allowSSEUpdates {
+				var stepMsg string
+				if call.Name == "generate_final_response" {
+					stepMsg = "Preparing your response..."
+				} else if explanation, ok := call.Arguments["explanation"].(string); ok && explanation != "" {
+					stepMsg = fmt.Sprintf("Exploring: %s", explanation)
+				} else {
+					stepMsg = fmt.Sprintf("Exploring database: calling %s", call.Name)
+				}
+				s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  stepMsg,
+				})
+			}
+		},
+		OnToolResult: func(call llm.ToolCall, result llm.ToolResult) {
+			if !synchronous || allowSSEUpdates {
+				if result.IsError {
+					s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+						Event: "ai-response-step",
+						Data:  fmt.Sprintf("Tool %s returned an error, retrying..", call.Name),
+					})
+				}
+			}
+		},
+		OnIteration: func(iteration int, toolCallCount int) {
+			log.Printf("processLLMResponse -> Tool-calling iteration %d, total calls so far: %d", iteration, toolCallCount)
+		},
+	}
+
+	toolResult, err := llmClient.GenerateWithTools(ctx, filteredMessages, tools, toolExecutor, toolCallConfig)
 	if err != nil {
 		if !synchronous || allowSSEUpdates {
 			// Get model display name for error response
@@ -445,10 +939,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				displayName := s.getModelDisplayName(selectedLLMModel)
 				llmModelName = &displayName
 			}
+			// Show a user-friendly message instead of raw internal errors
+			userErrorMsg := "The AI model was unable to generate a complete response. Please try again or use a different model."
+			log.Printf("processLLMResponse -> LLM GenerateWithTools error (raw): %v", err)
 			s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 				Event: "ai-response-error",
 				Data: map[string]interface{}{
-					"error":          "Error: " + err.Error(),
+					"error":          userErrorMsg,
 					"llm_model":      selectedLLMModel,
 					"llm_model_name": llmModelName,
 				},
@@ -456,6 +953,13 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		}
 		return nil, fmt.Errorf("failed to generate LLM response: %v", err)
 	}
+
+	response := toolResult.Response
+	log.Printf("processLLMResponse -> Tool-calling completed: %d iterations, %d total tool calls", toolResult.Iterations, toolResult.TotalCalls)
+
+	// Safety net: if the LLM returned empty queries but actually executed queries via tools,
+	// inject those queries into the response so the user can see and re-run them.
+	response = s.injectToolQueriesIfMissing(response, toolResult)
 
 	log.Printf("processLLMResponse -> response: %s", response)
 
@@ -514,10 +1018,8 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			}
 
 			var rollbackDependentQuery *string
-			if queryMap["rollbackDependentQuery"] != nil {
-				rollbackDependentQuery = utils.StringPtr(queryMap["rollbackDependentQuery"].(string))
-			} else {
-				rollbackDependentQuery = nil
+			if rdq, ok := queryMap["rollbackDependentQuery"].(string); ok {
+				rollbackDependentQuery = utils.StringPtr(rdq)
 			}
 
 			var estimateResponseTime *float64
@@ -545,42 +1047,82 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 			log.Printf("processLLMResponse -> queryMap[\"pagination\"]: %v", queryMap["pagination"])
 			pagination := &models.Pagination{}
 			if queryMap["pagination"] != nil {
-				if queryMap["pagination"].(map[string]interface{})["paginatedQuery"] != nil {
-					pagination.PaginatedQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["paginatedQuery"].(string))
-					log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", *pagination.PaginatedQuery)
-				}
-				if queryMap["pagination"].(map[string]interface{})["countQuery"] != nil {
-					pagination.CountQuery = utils.StringPtr(queryMap["pagination"].(map[string]interface{})["countQuery"].(string))
-					log.Printf("processLLMResponse -> pagination.CountQuery: %v", *pagination.CountQuery)
+				if pagMap, ok := queryMap["pagination"].(map[string]interface{}); ok {
+					if pq, ok := pagMap["paginatedQuery"].(string); ok {
+						pagination.PaginatedQuery = utils.StringPtr(pq)
+						log.Printf("processLLMResponse -> pagination.PaginatedQuery: %v", pq)
+					}
+					if cq, ok := pagMap["countQuery"].(string); ok {
+						pagination.CountQuery = utils.StringPtr(cq)
+						log.Printf("processLLMResponse -> pagination.CountQuery: %v", cq)
+					}
 				}
 			}
 			var tables *string
 			if queryMap["tables"] != nil {
-				tables = utils.StringPtr(queryMap["tables"].(string))
+				switch v := queryMap["tables"].(type) {
+				case string:
+					tables = utils.StringPtr(v)
+				case []interface{}:
+					names := make([]string, 0, len(v))
+					for _, item := range v {
+						if s, ok := item.(string); ok {
+							names = append(names, s)
+						}
+					}
+					if len(names) > 0 {
+						tables = utils.StringPtr(strings.Join(names, ", "))
+					}
+				}
 			}
 
 			if queryMap["collections"] != nil {
-				tables = utils.StringPtr(queryMap["collections"].(string))
+				switch v := queryMap["collections"].(type) {
+				case string:
+					tables = utils.StringPtr(v)
+				case []interface{}:
+					names := make([]string, 0, len(v))
+					for _, item := range v {
+						if s, ok := item.(string); ok {
+							names = append(names, s)
+						}
+					}
+					if len(names) > 0 {
+						tables = utils.StringPtr(strings.Join(names, ", "))
+					}
+				}
+			}
+
+			if queryMap["collection"] != nil {
+				if s, ok := queryMap["collection"].(string); ok && tables == nil {
+					tables = utils.StringPtr(s)
+				}
 			}
 			var queryType *string
-			if queryMap["queryType"] != nil {
-				queryType = utils.StringPtr(queryMap["queryType"].(string))
+			if qt, ok := queryMap["queryType"].(string); ok {
+				queryType = utils.StringPtr(qt)
 			}
 
 			var rollbackQuery *string
-			if queryMap["rollbackQuery"] != nil {
-				rollbackQuery = utils.StringPtr(queryMap["rollbackQuery"].(string))
+			if rq, ok := queryMap["rollbackQuery"].(string); ok {
+				rollbackQuery = utils.StringPtr(rq)
 			}
+
+			// Safely extract required string fields with defaults
+			queryStr, _ := queryMap["query"].(string)
+			explanationStr, _ := queryMap["explanation"].(string)
+			canRollback, _ := queryMap["canRollback"].(bool)
+			isCritical, _ := queryMap["isCritical"].(bool)
 
 			// Create the query object
 			query := models.Query{
 				ID:                     primitive.NewObjectID(),
-				Query:                  queryMap["query"].(string),
-				Description:            queryMap["explanation"].(string),
+				Query:                  queryStr,
+				Description:            explanationStr,
 				ExecutionTime:          nil,
 				ExampleExecutionTime:   int(*estimateResponseTime),
-				CanRollback:            queryMap["canRollback"].(bool),
-				IsCritical:             queryMap["isCritical"].(bool),
+				CanRollback:            canRollback,
+				IsCritical:             isCritical,
 				IsExecuted:             false,
 				IsRolledBack:           false,
 				ExampleResult:          exampleResult,
@@ -591,6 +1133,7 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 				RollbackQuery:          rollbackQuery,
 				RollbackDependentQuery: rollbackDependentQuery,
 				Pagination:             pagination,
+				LLMModel:               selectedLLMModel,
 			}
 
 			// Handle ClickHouse-specific metadata
@@ -631,29 +1174,41 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 	// Extract action buttons from the LLM response
 	var actionButtons []models.ActionButton
 	if jsonResponse["actionButtons"] != nil {
-		actionButtonsArray := jsonResponse["actionButtons"].([]interface{})
-		if len(actionButtonsArray) > 0 {
+		if actionButtonsArray, ok := jsonResponse["actionButtons"].([]interface{}); ok && len(actionButtonsArray) > 0 {
 			actionButtons = make([]models.ActionButton, 0, len(actionButtonsArray))
 			for _, btn := range actionButtonsArray {
-				btnMap := btn.(map[string]interface{})
+				btnMap, ok := btn.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				label, _ := btnMap["label"].(string)
+				// LLMs sometimes return "prompt" instead of "action"
+				action, _ := btnMap["action"].(string)
+				if action == "" {
+					action, _ = btnMap["prompt"].(string)
+				}
+				isPrimary, _ := btnMap["isPrimary"].(bool)
+				if label == "" || action == "" {
+					log.Printf("processLLMResponse -> skipping action button with missing label or action: %v", btnMap)
+					continue
+				}
 				actionButton := models.ActionButton{
 					ID:        primitive.NewObjectID(),
-					Label:     btnMap["label"].(string),
-					Action:    btnMap["action"].(string),
-					IsPrimary: btnMap["isPrimary"].(bool),
+					Label:     label,
+					Action:    action,
+					IsPrimary: isPrimary,
 				}
 				actionButtons = append(actionButtons, actionButton)
 			}
 		}
-	} else {
+	}
+	if actionButtons == nil {
 		actionButtons = []models.ActionButton{}
 	}
 
 	assistantMessage := ""
-	if jsonResponse["assistantMessage"] != nil {
-		assistantMessage = jsonResponse["assistantMessage"].(string)
-	} else {
-		assistantMessage = ""
+	if am, ok := jsonResponse["assistantMessage"].(string); ok {
+		assistantMessage = am
 	}
 
 	// Find existing AI response message
@@ -771,6 +1326,17 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 		log.Printf("processLLMResponse -> Error saving chat response message: %v", err)
 		return nil, err
 	}
+
+	// Vectorize assistant message in the background for conversational RAG
+	go func() {
+		bgCtx := context.Background()
+		if s.vectorizationSvc != nil && assistantMessage != "" {
+			_, total, _ := s.chatRepo.FindMessagesByChat(chatObjID, 1, 1)
+			if err := s.vectorizationSvc.VectorizeMessage(bgCtx, chatID, chatResponseMsg.ID.Hex(), "assistant", assistantMessage, int(total)); err != nil {
+				log.Printf("processLLMResponse -> Failed to vectorize assistant message: %v", err)
+			}
+		}
+	}()
 
 	if !synchronous {
 		// Send final response
@@ -978,7 +1544,7 @@ func (s *chatService) DisconnectDB(ctx context.Context, userID, chatID string, s
 // ExecuteQuery executes a query, runs realtime query to connected database, stores the result in execution_result etc...
 func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, req *dtos.ExecuteQueryRequest) (*dtos.QueryExecutionResponse, uint32, error) {
 	// Verify message and query ownership
-	_, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
+	chat, msg, query, err := s.verifyQueryOwnership(userID, chatID, req.MessageID, req.QueryID)
 	if err != nil {
 		return nil, http.StatusForbidden, err
 	}
@@ -1006,10 +1572,17 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	var totalRecordsCount *int
 
+	// Safe dereference of QueryType — default to "SELECT" if nil.
+	// This can happen when injectToolQueriesIfMissing creates queries without a queryType field.
+	queryType := "SELECT"
+	if query.QueryType != nil {
+		queryType = *query.QueryType
+	}
+
 	// To find total records count, we need to execute the pagination.countQuery with findCount = true
 	if query.Pagination != nil && query.Pagination.CountQuery != nil && *query.Pagination.CountQuery != "" {
 		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.CountQuery is present, will use it to get the total records count")
-		countResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.Pagination.CountQuery, *query.QueryType, false, true)
+		countResult, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, *query.Pagination.CountQuery, queryType, false, true)
 		if queryErr != nil {
 			log.Printf("ChatService -> ExecuteQuery -> Error executing count query: %v", queryErr)
 		}
@@ -1182,21 +1755,92 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	log.Printf("ChatService -> ExecuteQuery -> queryToExecute: %+v", queryToExecute)
 	// Execute query, we will be executing the pagination.paginatedQuery if it exists, else the query.Query
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, queryType, false, false)
 	if queryErr != nil {
 		// Checking if executed query was paginatedQuery, if so, let's try to execute it again with the original query
 		if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" && queryToExecute == strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1) {
 			log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery was executed but faced an error, will try to execute the original query")
 			queryToExecute = query.Query
-			result, queryErr = s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, *query.QueryType, false, false)
+			result, queryErr = s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, queryToExecute, queryType, false, false)
 		}
 	}
+	var updatedContent *string // tracks content updated by explainErrorWithLLM (for SSE)
 	if queryErr != nil {
 		log.Printf("ChatService -> ExecuteQuery -> queryErr: %+v", queryErr)
 		if queryErr.Code == "FAILED_TO_START_TRANSACTION" || strings.Contains(queryErr.Message, "context deadline exceeded") || strings.Contains(queryErr.Message, "context canceled") {
 			return nil, http.StatusRequestTimeout, fmt.Errorf("query execution timed out")
 		}
 
+		// Attempt to fix the query using LLM and retry (tool-call style retry).
+		// Skip retry for structural / non-retryable errors where fixing the SQL/query text is impossible.
+		isNonRetryable := queryErr.Code == "COLLECTION_NOT_FOUND" ||
+			queryErr.Code == "TABLE_NOT_FOUND" ||
+			strings.Contains(queryErr.Message, "does not exist") ||
+			strings.Contains(queryErr.Message, "authentication failed") ||
+			strings.Contains(queryErr.Message, "permission denied") ||
+			strings.Contains(queryErr.Message, "access denied") ||
+			strings.Contains(queryErr.Message, "connection refused")
+		if isNonRetryable {
+			log.Printf("ChatService -> ExecuteQuery -> Skipping LLM retry for non-retryable error: code=%s msg=%s", queryErr.Code, queryErr.Message)
+
+			// Ask the LLM to generate a user-friendly explanation of the structural error
+			// so the user sees a helpful message instead of a raw DB error.
+			if chat != nil && s.llmManager != nil {
+				s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Analyzing the error to provide a clear explanation..",
+				})
+
+				explanation, explainErr := s.explainErrorWithLLM(ctx, queryToExecute, queryErr.Message, chat.Connection.Type, query.LLMModel)
+				if explainErr == nil && explanation != "" {
+					log.Printf("ChatService -> ExecuteQuery -> LLM explanation for structural error: %s", explanation)
+					// Update the assistant message content with the friendly explanation
+					msg.Content = explanation
+					updatedContent = &explanation
+				}
+			}
+		}
+		if chat != nil && s.llmManager != nil && !isNonRetryable {
+			fixedQuery, retryErr := s.retryQueryWithLLM(ctx, userID, chatID, req.StreamID, queryToExecute, queryErr.Message, chat.Connection.Type, query.LLMModel)
+			if retryErr == nil && fixedQuery != "" && fixedQuery != queryToExecute {
+				log.Printf("ChatService -> ExecuteQuery -> LLM suggested fixed query: %s", fixedQuery)
+
+				// Send SSE step about retry
+				s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+					Event: "ai-response-step",
+					Data:  "Query faced error, applying fix and retrying..",
+				})
+
+				// Execute the fixed query
+				retryResult, retryQueryErr := s.dbManager.ExecuteQuery(ctx, chatID, req.MessageID, req.QueryID, req.StreamID, fixedQuery, queryType, false, false)
+				if retryQueryErr == nil && retryResult != nil {
+					log.Printf("ChatService -> ExecuteQuery -> Retry succeeded with fixed query")
+
+					// Update the query in the message with the fixed version
+					if msg.Queries != nil {
+						for i := range *msg.Queries {
+							if (*msg.Queries)[i].ID.Hex() == query.ID.Hex() {
+								(*msg.Queries)[i].Query = fixedQuery
+								break
+							}
+						}
+					}
+
+					// Use retry result instead of failing
+					result = retryResult
+					queryErr = nil
+
+					s.sendStreamEvent(userID, chatID, req.StreamID, dtos.StreamResponse{
+						Event: "ai-response-step",
+						Data:  "Query fix applied successfully!",
+					})
+				} else {
+					log.Printf("ChatService -> ExecuteQuery -> Retry also failed: %+v", retryQueryErr)
+				}
+			}
+		}
+	}
+	if queryErr != nil {
 		processCompleted := make(chan bool)
 		go func() {
 			log.Printf("ChatService -> ExecuteQuery -> Updating message")
@@ -1262,13 +1906,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 			TotalRecordsCount: nil,
 			ActionButtons:     dtos.ToActionButtonDto(msg.ActionButtons),
 			ActionAt:          query.ActionAt,
+			UpdatedContent:    updatedContent,
 		}, http.StatusOK, nil
 	}
-
-	// Checking if the result record is a list with > 50 records, then cap it to 50 records.
-	// Then we need to save capped 50 results in DB
-	log.Printf("ChatService -> ExecuteQuery -> result: %+v", result)
-
 	// Convert Result to JSON string first
 	buf := utils.GetJSONBuffer()
 	encoder := json.NewEncoder(buf)
@@ -1285,9 +1925,9 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 	var resultListFormatting []interface{} = []interface{}{}
 	var resultMapFormatting map[string]interface{} = map[string]interface{}{}
 	if err := json.Unmarshal(resultJSON, &resultListFormatting); err != nil {
-		log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+		// Result is not an array — try parsing as a map (e.g. countDocuments returns {"count": N})
 		if err := json.Unmarshal(resultJSON, &resultMapFormatting); err != nil {
-			log.Printf("ChatService -> ExecuteQuery -> Error unmarshalling result JSON: %v", err)
+			log.Printf("ChatService -> ExecuteQuery -> Warning: result is neither array nor map: %v", err)
 			// Try to unmarshal as a map
 			err = json.Unmarshal(resultJSON, &resultMapFormatting)
 			if err != nil {
@@ -1582,7 +2222,7 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 		}
 
 		// Convert messages to LLM format
-		llmMessages, err := s.convertMessagesToLLMFormat(ctx, chat, recentMessages, conn.Config.Type)
+		llmMessages, err := s.convertMessagesToLLMFormat(ctx, chat, recentMessages, conn.Config.Type, "", false)
 		if err != nil {
 			log.Printf("ChatService -> RollbackQuery -> Error converting messages: %v", err)
 			return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert messages: %v", err)
@@ -1635,8 +2275,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case primitive.A:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-							rollbackQuery = qMap["rollback_query"].(string)
+						qQuery, _ := qMap["query"].(string)
+						if strings.Replace(qQuery, "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
+							if rq, ok := qMap["rollback_query"].(string); ok {
+								rollbackQuery = rq
+							}
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
 							v[i] = qMap
@@ -1648,8 +2291,11 @@ func (s *chatService) RollbackQuery(ctx context.Context, userID, chatID string, 
 			case []interface{}:
 				for i, q := range v {
 					if qMap, ok := q.(map[string]interface{}); ok {
-						if strings.Replace(qMap["query"].(string), "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
-							rollbackQuery = qMap["rollback_query"].(string)
+						qQuery, _ := qMap["query"].(string)
+						if strings.Replace(qQuery, "EDITED by user: ", "", 1) == query.Query && qMap["queryType"] == *query.QueryType && qMap["explanation"] == query.Description {
+							if rq, ok := qMap["rollback_query"].(string); ok {
+								rollbackQuery = rq
+							}
 							// Update the query map with rollback info
 							qMap["rollback_query"] = rollbackQuery
 							v[i] = qMap
@@ -1955,7 +2601,10 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 				})
 				tempQueries := make([]dtos.Query, len(*msgResp.Queries))
 				for i, query := range *msgResp.Queries {
-					if query.Query != "" && !query.IsCritical {
+					// Gate auto-execution: skip critical queries, empty queries,
+					// and exploration-only queries (e.g., SHOW TABLES, db.getCollectionNames())
+					// that only discover schema metadata and aren't useful as auto-executed results.
+					if query.Query != "" && !query.IsCritical && !isExplorationQuery(strings.ToUpper(strings.TrimSpace(query.Query))) {
 						executionResult, _, queryErr := s.ExecuteQuery(ctx, userID, chatID, &dtos.ExecuteQueryRequest{
 							MessageID: msgResp.ID,
 							QueryID:   query.ID,
@@ -1971,6 +2620,13 @@ func (s *chatService) processLLMResponseAndRunQuery(ctx context.Context, userID,
 							return
 						}
 						log.Printf("ProcessLLMResponseAndRunQuery -> Query executed successfully: %v", executionResult)
+
+						// If ExecuteQuery updated the message content (e.g. via explainErrorWithLLM
+						// for non-retryable errors), reflect it in msgResp so the SSE event
+						// carries the friendly explanation instead of the original LLM output.
+						if executionResult.UpdatedContent != nil {
+							msgResp.Content = *executionResult.UpdatedContent
+						}
 
 						query.IsExecuted = true
 						query.ExecutionTime = executionResult.ExecutionTime
@@ -2193,6 +2849,8 @@ func (s *chatService) processMessage(_ context.Context, userID, chatID, messageI
 }
 
 // RefreshSchema refreshes the schema of the chat & stores the latest schema in the database
+// Also refreshed knowledge base descriptions via LLM and vectorizes the schema for better retrieval during question answering,
+// this is a synchronous operation and can take time depending on the size of the schema, so it should be called asynchronously from the controller
 func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error) {
 	log.Printf("ChatService -> RefreshSchema -> Starting for chatID: %s", chatID)
 	// Increase the timeout for the initial context to 60 minutes
@@ -2266,6 +2924,37 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 			log.Printf("ChatService -> RefreshSchema -> schemaMsg length: %d", len(schemaMsg))
 
 			log.Println("ChatService -> RefreshSchema -> Schema refreshed successfully")
+
+			// Save formatted schema to chat.Connection.CurrentSchema so that
+			// GetQueryRecommendations (and other consumers) know the schema is ready.
+			// Previously this was missing — only HandleSchemaChange saved it, but
+			// RefreshSchema races with StartSchemaTracking and often the schema is
+			// already stored in Redis before doSchemaCheck runs, so HandleSchemaChange
+			// never fires, leaving CurrentSchema nil forever.
+			if schemaMsg != "" {
+				updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := s.chatRepo.UpdateConnectionSchema(updateCtx, chatObjID, schemaMsg); err != nil {
+					log.Printf("ChatService -> RefreshSchema -> Warning: Failed to save CurrentSchema: %v", err)
+				} else {
+					log.Printf("ChatService -> RefreshSchema -> Saved CurrentSchema to chat.Connection (length: %d)", len(schemaMsg))
+				}
+				updateCancel()
+			}
+
+			// Sync knowledge base descriptions via LLM FIRST (auto-generate from schema)
+			// so that KB descriptions are available when we build enriched schema chunks.
+			if schemaMsg != "" {
+				kbCtx, kbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				s.syncKnowledgeBase(kbCtx, chatID, schemaMsg)
+				kbCancel()
+			}
+
+			// Vectorize schema synchronously — enriched chunks now include KB descriptions + example records
+			if s.vectorizationSvc != nil {
+				vecCtx, vecCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				s.vectorizeSchemaForChat(vecCtx, chatID)
+				vecCancel()
+			}
 
 			// Clear cached recommendations since schema is being refreshed
 			if err := s.clearRecommendationsCache(context.Background(), chatID); err != nil {
@@ -2580,9 +3269,44 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to get chat: %v", err)
 	}
 
-	// Check if schema is ready (connection has CurrentSchema)
-	if chat.Connection.CurrentSchema == nil || *chat.Connection.CurrentSchema == "" {
-		log.Printf("ChatService -> GetQueryRecommendations -> Schema not ready, skipping recommendation generation")
+	// Check if schema is ready (connection has CurrentSchema).
+	// Fallback: if CurrentSchema is empty but a KnowledgeBase exists for this chat,
+	// format KB table descriptions into a lightweight schema context. The KB contains
+	// the same table/field information that the schema would have.
+	schemaContext := ""
+	if chat.Connection.CurrentSchema != nil && *chat.Connection.CurrentSchema != "" {
+		schemaContext = *chat.Connection.CurrentSchema
+	} else if s.kbRepo != nil {
+		log.Printf("ChatService -> GetQueryRecommendations -> CurrentSchema not ready, checking knowledge base fallback")
+		kb, kbErr := s.kbRepo.FindByChatID(ctx, chatObjID)
+		if kbErr == nil && kb != nil && len(kb.TableDescriptions) > 0 {
+			// Format KB table descriptions into a schema-like string
+			var sb strings.Builder
+			sb.WriteString("Database Schema (from Knowledge Base):\n\n")
+			for _, td := range kb.TableDescriptions {
+				sb.WriteString(fmt.Sprintf("Table: %s\n", td.TableName))
+				if td.Description != "" {
+					sb.WriteString(fmt.Sprintf("  Description: %s\n", td.Description))
+				}
+				for _, fd := range td.FieldDescriptions {
+					sb.WriteString(fmt.Sprintf("  - %s", fd.FieldName))
+					if fd.Description != "" {
+						sb.WriteString(fmt.Sprintf(": %s", fd.Description))
+					}
+					sb.WriteString("\n")
+				}
+				sb.WriteString("\n")
+			}
+			schemaContext = sb.String()
+			log.Printf("ChatService -> GetQueryRecommendations -> Using KB fallback as schema context (%d tables, %d chars)", len(kb.TableDescriptions), len(schemaContext))
+		} else {
+			log.Printf("ChatService -> GetQueryRecommendations -> No CurrentSchema and no KB found, skipping recommendation generation")
+			return &dtos.QueryRecommendationsResponse{
+				Recommendations: []dtos.QueryRecommendation{},
+			}, http.StatusOK, nil
+		}
+	} else {
+		log.Printf("ChatService -> GetQueryRecommendations -> Schema not ready and KB repo unavailable, skipping recommendation generation")
 		return &dtos.QueryRecommendationsResponse{
 			Recommendations: []dtos.QueryRecommendation{},
 		}, http.StatusOK, nil
@@ -2597,7 +3321,34 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	// Convert messages to LLM format (includes schema as system message)
 	var llmMessages []*models.LLMMessage
-	llmMessages, err = s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type)
+
+	// Perform RAG search for recommendations (uses last user query or broad search)
+	var recoRAGContext string
+	if s.vectorizationSvc != nil && s.vectorizationSvc.IsAvailable(ctx) {
+		userQuery := ""
+		for i := len(recentMessages) - 1; i >= 0; i-- {
+			if string(recentMessages[i].Type) == string(constants.MessageTypeUser) {
+				userQuery = recentMessages[i].Content
+				break
+			}
+		}
+		recoRAGContext, _, _ = s.performRAGSearch(ctx, chatID, userQuery)
+	}
+
+	// If CurrentSchema is empty (KB fallback path), inject the KB-derived schemaContext
+	// as RAG context so convertMessagesToLLMFormat includes it in the system message.
+	useRAGOnlyForReco := false
+	if (chat.Connection.CurrentSchema == nil || *chat.Connection.CurrentSchema == "") && schemaContext != "" {
+		if recoRAGContext == "" {
+			recoRAGContext = schemaContext
+		} else {
+			recoRAGContext = schemaContext + "\n\n" + recoRAGContext
+		}
+		useRAGOnlyForReco = true
+		log.Printf("ChatService -> GetQueryRecommendations -> Injecting KB-derived schema as RAG context for recommendations")
+	}
+
+	llmMessages, err = s.convertMessagesToLLMFormat(ctx, chat, recentMessages, connInfo.Config.Type, recoRAGContext, useRAGOnlyForReco)
 	if err != nil {
 		log.Printf("ChatService -> GetQueryRecommendations -> Error converting messages: %v", err)
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert messages: %v", err)
@@ -2710,9 +3461,9 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 		CreatedAt:       time.Now().Unix(),
 	}
 
-	// Cache the recommendations for 24 hours (compressed)
+	// Cache the recommendations for 3 days (compressed)
 	cacheData, _ := json.Marshal(cachedRecommendations)
-	if err := s.redisRepo.SetCompressed(cacheKey, cacheData, 24*time.Hour, ctx); err != nil {
+	if err := s.redisRepo.SetCompressed(cacheKey, cacheData, 3*24*time.Hour, ctx); err != nil {
 		log.Printf("ChatService -> GetQueryRecommendations -> Warning: Failed to cache recommendations: %v", err)
 	} else {
 		log.Printf("ChatService -> GetQueryRecommendations -> Successfully cached %d recommendations (compressed)", len(recommendations))
@@ -2726,7 +3477,7 @@ func (s *chatService) GetQueryRecommendations(ctx context.Context, userID, chatI
 
 	// Update cache with marked recommendations (compressed)
 	updatedCacheData, _ := json.Marshal(cachedRecommendations)
-	s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 24*time.Hour, ctx)
+	s.redisRepo.SetCompressed(cacheKey, updatedCacheData, 3*24*time.Hour, ctx)
 
 	return &dtos.QueryRecommendationsResponse{
 		Recommendations: selectedRecs,
@@ -2812,4 +3563,305 @@ func (s *chatService) clearRecommendationsCache(ctx context.Context, chatID stri
 	}
 	log.Printf("ChatService -> clearRecommendationsCache -> Successfully cleared recommendations cache for chatID %s", chatID)
 	return nil
+}
+
+// vectorizeSchemaForChat fetches the stored schema and vectorizes it into Qdrant.
+// This is called as a background task after schema refresh.
+func (s *chatService) vectorizeSchemaForChat(ctx context.Context, chatID string) {
+	if s.vectorizationSvc == nil {
+		return
+	}
+
+	if !s.vectorizationSvc.IsAvailable(ctx) {
+		log.Printf("ChatService -> vectorizeSchemaForChat -> Vectorization not available, skipping for chatID: %s", chatID)
+		return
+	}
+
+	log.Printf("ChatService -> vectorizeSchemaForChat -> Starting enriched schema vectorization for chatID: %s", chatID)
+
+	// 1. Get the stored schema (FullSchema for structure)
+	schemaInfo, err := s.dbManager.GetSchemaManager().GetStoredSchemaInfo(ctx, chatID)
+	if err != nil {
+		log.Printf("ChatService -> vectorizeSchemaForChat -> Error getting stored schema: %v", err)
+		return
+	}
+
+	// 2. Get connection info for db_type
+	connInfo, exists := s.dbManager.GetConnectionInfo(chatID)
+	dbType := "unknown"
+	if exists {
+		dbType = connInfo.Config.Type
+	}
+
+	// 3. Get SchemaStorage for example records from LLMSchema
+	schemaStorage, err := s.dbManager.GetSchemaManager().GetStoredSchemaStorage(ctx, chatID)
+	var examplesByTable map[string][]map[string]interface{}
+	if err == nil && schemaStorage != nil && schemaStorage.LLMSchema != nil {
+		examplesByTable = make(map[string][]map[string]interface{}, len(schemaStorage.LLMSchema.Tables))
+		for tName, tInfo := range schemaStorage.LLMSchema.Tables {
+			if len(tInfo.ExampleRecords) > 0 {
+				examplesByTable[tName] = tInfo.ExampleRecords
+			}
+		}
+	} else if err != nil {
+		log.Printf("ChatService -> vectorizeSchemaForChat -> Could not fetch schema storage for examples: %v (continuing without examples)", err)
+	}
+
+	// 4. Get KB descriptions from MongoDB (best-effort — nil if unavailable)
+	var kbDescsByTable map[string]*models.TableDescription
+	if s.kbRepo != nil {
+		chatObjID, parseErr := primitive.ObjectIDFromHex(chatID)
+		if parseErr == nil {
+			kb, kbErr := s.kbRepo.FindByChatID(ctx, chatObjID)
+			if kbErr == nil && kb != nil {
+				kbDescsByTable = make(map[string]*models.TableDescription, len(kb.TableDescriptions))
+				for i := range kb.TableDescriptions {
+					td := &kb.TableDescriptions[i]
+					if td.Description != "" || len(td.FieldDescriptions) > 0 {
+						kbDescsByTable[td.TableName] = td
+					}
+				}
+			} else if kbErr != nil {
+				log.Printf("ChatService -> vectorizeSchemaForChat -> Could not fetch KB: %v (continuing without KB descriptions)", kbErr)
+			}
+		}
+	}
+
+	// 5. Build enrichment map combining KB descriptions + example records
+	enrichments := make(map[string]*TableEnrichment)
+	allTableNames := make(map[string]bool)
+	for t := range schemaInfo.Tables {
+		allTableNames[t] = true
+	}
+	for t := range kbDescsByTable {
+		allTableNames[t] = true
+	}
+	for t := range examplesByTable {
+		allTableNames[t] = true
+	}
+
+	for tName := range allTableNames {
+		enrichment := &TableEnrichment{
+			FieldDescriptions: make(map[string]string),
+		}
+		hasData := false
+
+		// KB descriptions
+		if td, ok := kbDescsByTable[tName]; ok {
+			enrichment.TableDescription = td.Description
+			for _, fd := range td.FieldDescriptions {
+				if fd.Description != "" {
+					enrichment.FieldDescriptions[fd.FieldName] = fd.Description
+				}
+			}
+			hasData = true
+		}
+
+		// Example records
+		if examples, ok := examplesByTable[tName]; ok && len(examples) > 0 {
+			enrichment.ExampleRecords = examples
+			hasData = true
+		}
+
+		if hasData {
+			enrichments[tName] = enrichment
+		}
+	}
+
+	// 6. Convert SchemaInfo to SchemaTable map (same as before)
+	tables := make(map[string]SchemaTable)
+	for tableName, ts := range schemaInfo.Tables {
+		columns := make([]SchemaColumn, 0, len(ts.Columns))
+		for colName, col := range ts.Columns {
+			isPK := false
+			for _, c := range ts.Constraints {
+				if c.Type == "PRIMARY KEY" {
+					for _, cCol := range c.Columns {
+						if cCol == colName {
+							isPK = true
+							break
+						}
+					}
+				}
+			}
+			columns = append(columns, SchemaColumn{
+				Name:         colName,
+				Type:         col.Type,
+				IsNullable:   col.IsNullable,
+				IsPrimaryKey: isPK,
+				DefaultValue: col.DefaultValue,
+				Comment:      col.Comment,
+			})
+		}
+
+		indexes := make([]SchemaIndex, 0, len(ts.Indexes))
+		for _, idx := range ts.Indexes {
+			indexes = append(indexes, SchemaIndex{
+				Name:     idx.Name,
+				Columns:  idx.Columns,
+				IsUnique: idx.IsUnique,
+			})
+		}
+
+		fks := make([]SchemaFK, 0, len(ts.ForeignKeys))
+		for _, fk := range ts.ForeignKeys {
+			fks = append(fks, SchemaFK{
+				ColumnName: fk.ColumnName,
+				RefTable:   fk.RefTable,
+				RefColumn:  fk.RefColumn,
+			})
+		}
+
+		tables[tableName] = SchemaTable{
+			Name:        tableName,
+			Comment:     ts.Comment,
+			RowCount:    ts.RowCount,
+			Columns:     columns,
+			Indexes:     indexes,
+			ForeignKeys: fks,
+		}
+	}
+
+	// 7. Build enriched chunks and vectorize
+	chunks := BuildEnrichedSchemaChunks(tables, dbType, enrichments)
+	if len(chunks) == 0 {
+		log.Printf("ChatService -> vectorizeSchemaForChat -> No schema chunks to vectorize for chatID: %s", chatID)
+		return
+	}
+
+	if err := s.vectorizationSvc.VectorizeSchema(ctx, chatID, chunks); err != nil {
+		log.Printf("ChatService -> vectorizeSchemaForChat -> Error vectorizing schema: %v", err)
+		return
+	}
+
+	enrichedCount := len(enrichments)
+	log.Printf("ChatService -> vectorizeSchemaForChat -> Enriched schema vectorization completed for chatID: %s (%d tables, %d enriched with KB/examples)", chatID, len(chunks), enrichedCount)
+}
+
+// retryQueryWithLLM sends the failed query and its error to the LLM, asking it to produce a corrected query.
+// It uses the same GenerateResponse flow as normal chat — including the DB-specific system prompt
+// and structured JSON response schema — so that the corrected query comes back in the standard
+// queries[].query format. The prompt template lives in constants/query_retry.go for reusability.
+func (s *chatService) retryQueryWithLLM(ctx context.Context,
+	userID, chatID, streamID, failedQuery, errorMessage, dbType, llmModelID string) (string, error) {
+	log.Printf("ChatService -> retryQueryWithLLM -> Attempting LLM-based fix for query error. dbType=%s, model=%s", dbType, llmModelID)
+	log.Printf("ChatService -> retryQueryWithLLM -> Failed query: %s", failedQuery)
+	log.Printf("ChatService -> retryQueryWithLLM -> Error: %s", errorMessage)
+
+	// Resolve the LLM client for the model's provider
+	llmClient := s.llmClient // fallback to default
+	if llmModelID != "" && s.llmManager != nil {
+		selectedModel := constants.GetLLMModel(llmModelID)
+		if selectedModel != nil {
+			providerClient, err := s.llmManager.GetClient(selectedModel.Provider)
+			if err != nil {
+				log.Printf("ChatService -> retryQueryWithLLM -> Failed to get provider client for '%s': %v, using default", selectedModel.Provider, err)
+			} else {
+				llmClient = providerClient
+			}
+		}
+	}
+
+	if llmClient == nil {
+		return "", fmt.Errorf("no LLM client available for retry")
+	}
+
+	// Build a user message using the standard LLMMessage format.
+	// GenerateResponse will automatically prepend the DB-specific system prompt
+	// and enforce the structured JSON response schema — exactly like a normal chat call.
+	retryPrompt := constants.GetQueryRetryPrompt(dbType, failedQuery, errorMessage)
+
+	messages := []*models.LLMMessage{
+		{
+			Role: "user",
+			Content: map[string]interface{}{
+				"user_message": retryPrompt,
+			},
+		},
+	}
+
+	// Call the LLM using the same flow as processLLMResponse
+	response, err := llmClient.GenerateResponse(ctx, messages, dbType, false, llmModelID)
+	if err != nil {
+		log.Printf("ChatService -> retryQueryWithLLM -> LLM call failed: %v", err)
+		return "", fmt.Errorf("LLM retry call failed: %v", err)
+	}
+
+	log.Printf("ChatService -> retryQueryWithLLM -> Raw LLM response: %s", response)
+
+	// Parse the structured JSON response — same schema as normal LLM responses
+	var jsonResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		log.Printf("ChatService -> retryQueryWithLLM -> Failed to parse JSON response: %v", err)
+		return "", fmt.Errorf("failed to parse LLM retry response: %v", err)
+	}
+
+	// Extract corrected query from queries[0].query
+	if queriesRaw, ok := jsonResponse["queries"]; ok {
+		if queriesArr, ok := queriesRaw.([]interface{}); ok && len(queriesArr) > 0 {
+			if queryMap, ok := queriesArr[0].(map[string]interface{}); ok {
+				if queryStr, ok := queryMap["query"].(string); ok && queryStr != "" {
+					fixedQuery := strings.TrimSpace(queryStr)
+					log.Printf("ChatService -> retryQueryWithLLM -> Extracted fixed query from structured response: %s", fixedQuery)
+					return fixedQuery, nil
+				}
+			}
+		}
+	}
+
+	log.Printf("ChatService -> retryQueryWithLLM -> No corrected query found in LLM response")
+	return "", fmt.Errorf("LLM response did not contain a corrected query")
+}
+
+// explainErrorWithLLM asks the LLM to generate a user-friendly explanation for a non-retryable
+// structural error (e.g., table doesn't exist, permission denied). Returns the assistantMessage
+// text from the LLM response. This is used to replace the raw error with a helpful user message.
+func (s *chatService) explainErrorWithLLM(ctx context.Context,
+	failedQuery, errorMessage, dbType, llmModelID string) (string, error) {
+	log.Printf("ChatService -> explainErrorWithLLM -> Generating friendly explanation. dbType=%s, model=%s", dbType, llmModelID)
+
+	// Resolve the LLM client
+	llmClient := s.llmClient
+	if llmModelID != "" && s.llmManager != nil {
+		selectedModel := constants.GetLLMModel(llmModelID)
+		if selectedModel != nil {
+			if providerClient, err := s.llmManager.GetClient(selectedModel.Provider); err == nil {
+				llmClient = providerClient
+			}
+		}
+	}
+
+	if llmClient == nil {
+		return "", fmt.Errorf("no LLM client available for error explanation")
+	}
+
+	prompt := constants.GetStructuralErrorPrompt(dbType, failedQuery, errorMessage)
+
+	messages := []*models.LLMMessage{
+		{
+			Role: "user",
+			Content: map[string]interface{}{
+				"user_message": prompt,
+			},
+		},
+	}
+
+	response, err := llmClient.GenerateResponse(ctx, messages, dbType, false, llmModelID)
+	if err != nil {
+		log.Printf("ChatService -> explainErrorWithLLM -> LLM call failed: %v", err)
+		return "", err
+	}
+
+	log.Printf("ChatService -> explainErrorWithLLM -> Raw LLM response: %s", response)
+
+	var jsonResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonResponse); err != nil {
+		return "", fmt.Errorf("failed to parse error explanation response: %v", err)
+	}
+
+	if msg, ok := jsonResponse["assistantMessage"].(string); ok && msg != "" {
+		return msg, nil
+	}
+
+	return "", fmt.Errorf("no assistantMessage found in error explanation response")
 }
