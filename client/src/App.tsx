@@ -1334,6 +1334,18 @@ function AppContent() {
             );
             break;
 
+          // === Dashboard SSE Events ===
+          // These are dispatched as custom DOM events so DashboardView can listen for them
+          case 'dashboard-blueprints':
+          case 'dashboard-generation-progress':
+          case 'dashboard-generation-complete':
+          case 'dashboard-widget-data':
+          case 'dashboard-widget-error':
+            globalThis.dispatchEvent(
+              new CustomEvent(response.event, { detail: response.data })
+            );
+            break;
+
         }
       } catch (error) {
         console.error('Failed to parse SSE message:', error);
