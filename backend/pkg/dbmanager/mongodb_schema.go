@@ -117,10 +117,10 @@ func (f *MongoDBSchemaFetcher) GetSchema(ctx context.Context, db DBExecutor, sel
 		}
 
 		log.Printf("MongoDBSchemaFetcher -> GetSchema -> Analyzing fields from all samples for %s", collName)
-		// Analyze fields from all samples
+		// Analyze fields from all samples (max nesting depth of 3 to keep schema manageable)
 		fieldFrequency := make(map[string]int)
 		for _, sample := range samples {
-			f.analyzeDocument(sample, "", &collection.Fields, fieldFrequency)
+			f.analyzeDocumentWithDepth(sample, "", &collection.Fields, fieldFrequency, 0, 3)
 		}
 
 		// If collection is empty (no samples), add a default _id field
@@ -166,15 +166,21 @@ func (f *MongoDBSchemaFetcher) GetSchema(ctx context.Context, db DBExecutor, sel
 	return schemaInfo, nil
 }
 
-// analyzeDocument recursively analyzes a document to extract field information
+// analyzeDocument recursively analyzes a document to extract field information (no depth limit — legacy)
 func (f *MongoDBSchemaFetcher) analyzeDocument(doc bson.M, prefix string, fields *map[string]MongoDBField, fieldFrequency map[string]int) {
+	f.analyzeDocumentWithDepth(doc, prefix, fields, fieldFrequency, 0, 100)
+}
+
+// analyzeDocumentWithDepth recursively analyzes a document with a max nesting depth.
+// When maxDepth is reached, nested objects/arrays are recorded as "object" or "array" without
+// expanding their sub-fields. This keeps MongoDB schemas manageable for deeply nested documents.
+func (f *MongoDBSchemaFetcher) analyzeDocumentWithDepth(doc bson.M, prefix string, fields *map[string]MongoDBField, fieldFrequency map[string]int, currentDepth, maxDepth int) {
 	for key, value := range doc {
 		fieldName := key
 		if prefix != "" {
 			fieldName = prefix + "." + key
 		}
 
-		log.Printf("MongoDBSchemaFetcher -> GetSchema -> Analyzing field %s", fieldName)
 		// Increment field frequency counter
 		fieldFrequency[fieldName]++
 
@@ -191,25 +197,24 @@ func (f *MongoDBSchemaFetcher) analyzeDocument(doc bson.M, prefix string, fields
 			}
 		}
 
-		log.Printf("MongoDBSchemaFetcher -> GetSchema -> Checking if field %s is an array", fieldName)
 		// Check if it's an array
 		if arr, ok := value.(bson.A); ok {
 			field.IsArray = true
-			log.Printf("MongoDBSchemaFetcher -> GetSchema -> Field %s is an array", fieldName)
 			// If array has elements, analyze the first one to determine element type
 			if len(arr) > 0 {
 				field.Type = f.getMongoDBFieldType(arr[0])
 
-				// If array element is a document, analyze its structure
-				if doc, ok := arr[0].(bson.M); ok {
-					f.analyzeDocument(doc, fieldName+"[]", &field.NestedFields, fieldFrequency)
+				// If array element is a document, recurse only if within depth limit
+				if doc, ok := arr[0].(bson.M); ok && currentDepth < maxDepth {
+					f.analyzeDocumentWithDepth(doc, fieldName+"[]", &field.NestedFields, fieldFrequency, currentDepth+1, maxDepth)
 				}
 			}
 		} else if nestedDoc, ok := value.(bson.M); ok {
-			log.Printf("MongoDBSchemaFetcher -> GetSchema -> Field %s is a nested document", fieldName)
-			// Handle nested document
+			// Handle nested document — only recurse if within depth limit
 			field.Type = "object"
-			f.analyzeDocument(nestedDoc, fieldName, &field.NestedFields, fieldFrequency)
+			if currentDepth < maxDepth {
+				f.analyzeDocumentWithDepth(nestedDoc, fieldName, &field.NestedFields, fieldFrequency, currentDepth+1, maxDepth)
+			}
 		}
 
 		// Update field in map
