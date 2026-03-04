@@ -22,4 +22,9 @@ const (
 
 	// Knowledge Base cache TTLs
 	KnowledgeBaseCacheTTL = 30 * time.Minute // 30 minutes cache for knowledge base per chat
+
+	// Dashboard cache TTLs
+	DashboardCacheTTL     = 30 * time.Minute // 30 minutes cache for individual dashboards
+	DashboardListCacheTTL = 15 * time.Minute // 15 minutes cache for dashboard lists per chat
+	WidgetDataCacheTTL    = 5 * time.Minute  // 5 minutes cache for widget query result data
 )
