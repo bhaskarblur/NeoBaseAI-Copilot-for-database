@@ -1,9 +1,12 @@
-import { Eraser, ListRestart, Loader, MoreHorizontal, Pencil, PlugZap, RefreshCw, Search, Eye, EyeOff, PinIcon, PinOffIcon, Settings, MessageCircle, MessageCircleIcon } from 'lucide-react';
+import { Eraser, ListRestart, Loader, MoreHorizontal, PlugZap, RefreshCw, Search, PinIcon, Settings, MessageCircleIcon } from 'lucide-react';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Chat } from '../../types/chat';
 import analyticsService from '../../services/analyticsService';
 import DatabaseLogo from '../icons/DatabaseLogos';
 import DisconnectionTooltip from './DisconnectionTooltip';
+
+import { DashboardViewMode } from '../../types/dashboard';
+import ViewModeToggle from '../dashboard/ViewModeToggle';
 
 interface ChatHeaderProps {
     chat: Chat;
@@ -17,6 +20,9 @@ interface ChatHeaderProps {
     onToggleSearch: () => void;
     viewMode?: 'chats' | 'pinned';
     onViewModeChange?: (mode: 'chats' | 'pinned') => void;
+    dashboardViewMode?: DashboardViewMode;
+    onDashboardViewModeChange?: (mode: DashboardViewMode) => void;
+    dashboardCount?: number;
 }
 
 export default function ChatHeader({
@@ -31,6 +37,9 @@ export default function ChatHeader({
     onToggleSearch,
     viewMode,
     onViewModeChange,
+    dashboardViewMode,
+    onDashboardViewModeChange,
+    dashboardCount,
 }: ChatHeaderProps) {
     const [showDisconnectionTooltip, setShowDisconnectionTooltip] = useState(false);
     const [showDropdown, setShowDropdown] = useState(false);
@@ -169,9 +178,18 @@ export default function ChatHeader({
                 <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
                     <DatabaseLogo type={chat.connection.type as "postgresql" | "mysql" | "mongodb" | "redis" | "clickhouse" | "neo4j"} size={32} className="transition-transform hover:scale-110" />
                     <h2 className="text-lg md:text-2xl font-bold truncate">{chat.connection.is_example_db ? "Sample Database" : chat.connection.database}</h2>
-                    {connectionStatus}
+                    <span className="hidden md:inline-flex">{connectionStatus}</span>
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Dashboard toggle */}
+                    {onDashboardViewModeChange && dashboardViewMode && (
+                        <ViewModeToggle
+                            mode={dashboardViewMode}
+                            onChange={onDashboardViewModeChange}
+                            dashboardCount={dashboardCount}
+                        />
+                    )}
+
                 {/* Reconnect button - only show when disconnected */}
                     {!isConnected && !isConnecting && (
                         <div className="relative group">
@@ -200,7 +218,8 @@ export default function ChatHeader({
                     )}
 
 
-                    {/* Search button - standalone */}
+                    {/* Search button - standalone (hidden in dashboard mode) */}
+                    {dashboardViewMode !== 'dashboard' && (
                     <div className="relative group">
                         <button
                             onClick={onToggleSearch}
@@ -220,6 +239,7 @@ export default function ChatHeader({
                             Search messages
                         </div>
                     </div>
+                    )}
 
                     {/* Dropdown menu button */}
                     <div className="relative">
@@ -269,6 +289,7 @@ export default function ChatHeader({
                             Chat Settings
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
+                        {dashboardViewMode !== 'dashboard' && (
                         <button 
                             onClick={() => handleDropdownAction(() => {
                                 if (onViewModeChange) {
@@ -289,6 +310,7 @@ export default function ChatHeader({
                                 </>
                             )}
                         </button>
+                        )}
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
                             onClick={() => handleDropdownAction(handleClearChat)}

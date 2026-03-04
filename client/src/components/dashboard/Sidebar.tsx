@@ -475,7 +475,7 @@ export default function Sidebar({
                           <div key={connection.id} className="relative group">
                             <button
                               onClick={() => handleSelectConnection(connection.id)}
-                              className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
+                              className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-100'
                                 }`}
                               title={connection.connection.database}
                             >
