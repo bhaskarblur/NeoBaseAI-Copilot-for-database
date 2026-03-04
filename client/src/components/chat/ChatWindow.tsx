@@ -13,7 +13,7 @@ import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
 import SearchBar from './SearchBar';
-import { Message } from './types';
+import { Message } from '../../types/query';
 import { ChatSettings } from '../../types/chat';
 interface ChatWindowProps {
   chat: Chat;

@@ -1,4 +1,4 @@
-import { ActionButton, Message } from "../components/chat/types";
+import { ActionButton, Message } from "./query";
 
 
 // Update MessagesResponse to use BackendMessage instead of Message

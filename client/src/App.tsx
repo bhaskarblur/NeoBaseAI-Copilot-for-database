@@ -6,7 +6,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { Routes, Route, useNavigate, useParams, Navigate } from 'react-router-dom';
 import AuthForm from './components/auth/AuthForm';
 import ChatWindow from './components/chat/ChatWindow';
-import { Message, QueryResult, LoadingStep } from './components/chat/types';
+import { Message, QueryResult, LoadingStep } from './types/query';
 import StarUsButton from './components/common/StarUsButton';
 import SuccessBanner from './components/common/SuccessBanner';
 import Sidebar from './components/dashboard/Sidebar';
