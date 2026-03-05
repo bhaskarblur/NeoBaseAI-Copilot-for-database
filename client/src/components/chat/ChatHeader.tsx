@@ -177,7 +177,7 @@ export default function ChatHeader({
             <div className="fixed top-0 left-0 right-0 md:relative md:left-auto md:right-auto bg-white border-b-4 border-black h-16 px-4 flex justify-between items-center mt-0 md:mt-0 z-20">
                 <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
                     <DatabaseLogo type={chat.connection.type as "postgresql" | "mysql" | "mongodb" | "redis" | "clickhouse" | "neo4j"} size={32} className="transition-transform hover:scale-110" />
-                    <h2 className="text-lg md:text-2xl font-bold truncate">{chat.connection.is_example_db ? "Sample Database" : chat.connection.database}</h2>
+                    <h2 className="text-xl md:text-2xl font-bold truncate">{chat.connection.is_example_db ? "Sample Database" : chat.connection.database}</h2>
                     <span className="hidden md:inline-flex">{connectionStatus}</span>
                 </div>
                 <div className="flex items-center gap-2">

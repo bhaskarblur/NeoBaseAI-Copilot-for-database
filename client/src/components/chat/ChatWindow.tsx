@@ -534,7 +534,7 @@ export default function ChatWindow({
 
       // Check if the connection is already established
       const connectionStatus = await checkConnectionStatus(chat.id);
-      if (!connectionStatus) {
+      if (!connectionStatus?.is_connected) {
         await connectToDatabase(chat.id, currentStreamId);
       }
       console.log('connectionStatus', connectionStatus);
@@ -1352,6 +1352,7 @@ export default function ChatWindow({
             chatId={chat.id}
             streamId={streamId}
             isConnected={isConnected}
+            onReconnect={handleReconnect}
           />
         </div>
 
