@@ -532,7 +532,12 @@ export default function ChatWindow({
         currentStreamId = generateStreamId();
       }
 
-      // Check if the connection is already established
+      // First, ensure SSE connection is established
+      await checkSSEConnection();
+      // Wait a bit for the EventSource to fully establish
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Then check if the database connection is already established
       const connectionStatus = await checkConnectionStatus(chat.id);
       if (!connectionStatus?.is_connected) {
         await connectToDatabase(chat.id, currentStreamId);
@@ -555,7 +560,7 @@ export default function ChatWindow({
     } finally {
       setIsConnecting(false);
     }
-  }, [chat.id, streamId, generateStreamId, onConnectionStatusChange]);
+  }, [chat.id, streamId, generateStreamId, checkSSEConnection, onConnectionStatusChange]);
 
   const checkConnectionStatus = async (chatId: string) => {
     try {

@@ -256,7 +256,7 @@ export default function DashboardHeader({
       {/* Dashboard Selector Dropdown (fixed) */}
       {showSelector && selectorPosition && (
         <div
-          className="dashboard-selector-dropdown fixed w-72 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100] py-1 max-h-64 overflow-y-auto"
+          className="dashboard-selector-dropdown fixed w-80 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100] py-1 max-h-64 overflow-y-auto"
           style={{ top: `${selectorPosition.top}px`, left: `${selectorPosition.left}px` }}
           onClick={(e) => e.stopPropagation()}
         >
