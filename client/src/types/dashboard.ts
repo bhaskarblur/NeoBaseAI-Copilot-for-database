@@ -171,12 +171,12 @@ export type DashboardViewMode = 'chat' | 'dashboard';
 
 export const REFRESH_INTERVAL_OPTIONS = [
   { label: 'Off', value: 0 },
-  { label: '15s', value: 15 },
-  { label: '30s', value: 30 },
-  { label: '1m', value: 60 },
-  { label: '5m', value: 300 },
-  { label: '10m', value: 600 },
-  { label: '1h', value: 3600 },
+  { label: '15 sec', value: 15 },
+  { label: '30 sec', value: 30 },
+  { label: '1 min', value: 60 },
+  { label: '5 min', value: 300 },
+  { label: '10 min', value: 600 },
+  { label: '1 hour', value: 3600 },
 ] as const;
 
 export const TIME_RANGE_OPTIONS = [

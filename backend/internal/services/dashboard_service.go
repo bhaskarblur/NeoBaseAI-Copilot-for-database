@@ -658,7 +658,7 @@ func (s *dashboardService) CreateFromBlueprints(ctx context.Context, userID, cha
 						fmt.Sprintf("Finalizing dashboard: %s", blueprint.Name), progress+30)
 				} else if call.Name == constants.DashboardExecuteQueryToolName {
 					s.sendDashboardProgress(userID, chatID, streamID, "", "testing_queries",
-						"Testing widget queries...", progress+15)
+						"Curating & testing the widget queries...", progress+15)
 				}
 			},
 			OnToolResult: func(call llm.ToolCall, result llm.ToolResult) {
@@ -855,13 +855,19 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 // === Data Refresh ===
 
 func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID, dashboardID, streamID string) (uint32, error) {
+	log.Printf("RefreshDashboard called - userID: %s, chatID: %s, dashboardID: %s, streamID: %s", userID, chatID, dashboardID, streamID)
+
 	// Check if database connection exists
-	if !s.dbManager.IsConnected(chatID) {
+	isDBConnected := s.dbManager.IsConnected(chatID)
+	log.Printf("RefreshDashboard -> DB connection check: %v", isDBConnected)
+	if !isDBConnected {
 		return 400, fmt.Errorf("database connection not found for this chat - please connect to database first")
 	}
 
 	// Check if SSE stream exists
-	if s.streamHandler == nil || !s.streamHandler.HasStream(userID, chatID, streamID) {
+	hasStream := s.streamHandler != nil && s.streamHandler.HasStream(userID, chatID, streamID)
+	log.Printf("RefreshDashboard -> SSE stream check: streamHandler=%v, hasStream=%v", s.streamHandler != nil, hasStream)
+	if !hasStream {
 		return 400, fmt.Errorf("SSE stream not found - please ensure you are connected before refreshing")
 	}
 
