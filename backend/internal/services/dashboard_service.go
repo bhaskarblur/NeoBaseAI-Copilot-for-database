@@ -855,6 +855,16 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 // === Data Refresh ===
 
 func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID, dashboardID, streamID string) (uint32, error) {
+	// Check if database connection exists
+	if !s.dbManager.IsConnected(chatID) {
+		return 400, fmt.Errorf("database connection not found for this chat - please connect to database first")
+	}
+
+	// Check if SSE stream exists
+	if s.streamHandler == nil || !s.streamHandler.HasStream(userID, chatID, streamID) {
+		return 400, fmt.Errorf("SSE stream not found - please ensure you are connected before refreshing")
+	}
+
 	dashObjID, err := primitive.ObjectIDFromHex(dashboardID)
 	if err != nil {
 		return 400, fmt.Errorf("invalid dashboard ID: %s", dashboardID)
@@ -889,6 +899,16 @@ func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID,
 }
 
 func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string) (uint32, error) {
+	// Check if database connection exists
+	if !s.dbManager.IsConnected(chatID) {
+		return 400, fmt.Errorf("database connection not found for this chat - please connect to database first")
+	}
+
+	// Check if SSE stream exists
+	if s.streamHandler == nil || !s.streamHandler.HasStream(userID, chatID, streamID) {
+		return 400, fmt.Errorf("SSE stream not found - please ensure you are connected before refreshing")
+	}
+
 	widgetObjID, err := primitive.ObjectIDFromHex(widgetID)
 	if err != nil {
 		return 400, fmt.Errorf("invalid widget ID: %s", widgetID)

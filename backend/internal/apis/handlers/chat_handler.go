@@ -501,6 +501,15 @@ func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, respons
 	}
 }
 
+// HasStream checks if an SSE stream exists for the given user, chat, and stream ID
+func (h *ChatHandler) HasStream(userID, chatID, streamID string) bool {
+	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
+	h.streamMutex.RLock()
+	defer h.streamMutex.RUnlock()
+	_, exists := h.streams[streamKey]
+	return exists
+}
+
 // @Summary Stream chat
 // @Description Stream chat
 // @Accept json

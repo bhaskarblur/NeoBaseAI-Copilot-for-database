@@ -27,6 +27,7 @@ import (
 // Used by Handler
 type StreamHandler interface {
 	HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+	HasStream(userID, chatID, streamID string) bool
 }
 
 type ChatService interface {
