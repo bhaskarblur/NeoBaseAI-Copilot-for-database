@@ -398,7 +398,7 @@ export default function DashboardWidgetCard({
     const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
 
     return (
-      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 3 ? 'h-[260px]' : 'h-[200px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
+      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 6 ? 'h-[280px]' : data.length >= 3 ? 'h-[260px]' : 'h-[200px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             <Pie
@@ -640,7 +640,7 @@ export default function DashboardWidgetCard({
 
         {/* Footer: Last refreshed */}
         {widget.last_refreshed_at && (
-          <div className="px-4 py-2.5 border-t border-gray-200 flex items-center gap-1.5">
+          <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-1.5">
             <span className="text-xs text-gray-400">
               Last refreshed: <span className="text-gray-600">{formatRelativeTime(widget.last_refreshed_at)}</span>
             </span>
