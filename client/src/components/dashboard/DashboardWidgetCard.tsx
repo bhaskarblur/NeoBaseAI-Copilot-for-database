@@ -437,6 +437,21 @@ export default function DashboardWidgetCard({
     const data = displayData || [];
     if (data.length === 0) return null;
 
+    // Helper: Get nested value using dot-notation path (e.g., "careerIntent.intents")
+    const getNestedValue = (obj: any, path: string): any => {
+      // First try direct access (for simple keys)
+      if (path in obj) return obj[path];
+      
+      // Then try dot-notation path traversal
+      const parts = path.split('.');
+      let value = obj;
+      for (const part of parts) {
+        if (value == null) return undefined;
+        value = value[part];
+      }
+      return value;
+    };
+
     const columns = widget.table_config?.columns;
     const columnKeys = columns
       ? columns.map((c) => c.key)
@@ -449,43 +464,116 @@ export default function DashboardWidgetCard({
     const pageSize = widget.table_config?.page_size || 25;
     const displayRows = data.slice(0, pageSize);
 
-    // Detect date columns
+    // Detect date columns - use getNestedValue to handle dot paths
     const dateColumnSet = new Set<string>();
     for (const key of columnKeys) {
-      if (data.some((row) => isDateString(row[key]))) dateColumnSet.add(key);
+      if (data.some((row) => isDateString(getNestedValue(row, key)))) dateColumnSet.add(key);
     }
-
-    const formatCell = (value: unknown, column: string): string => {
-      if (value === null || value === undefined) return '—';
-      if (dateColumnSet.has(column) && typeof value === 'string') {
-        return formatDateValue(value, dateFormats[column] ?? true);
-      }
-      if (typeof value === 'object') return JSON.stringify(value);
-      return String(value);
-    };
 
     // Dynamic min-width per column based on column count
     const colWidth = columnKeys.length <= 3 ? 'min-w-[180px]' : columnKeys.length <= 5 ? 'min-w-[140px]' : 'min-w-[120px]';
 
     const renderCellContent = (value: unknown, column: string, rowIndex: number) => {
-      const cellText = formatCell(value, column);
-      // If text is long (> ~56 chars), show Read more / Less toggle
-      if (cellText.length > 56) {
-        const cellId = `${rowIndex}-${column}`;
-        const isExpanded = expandedCells[cellId];
+      const cellId = `${rowIndex}-${column}`;
+      const isExpanded = expandedCells[cellId];
+
+      // Handle null/undefined
+      if (value === null || value === undefined) {
+        return <span className="text-gray-400">—</span>;
+      }
+
+      // Handle dates
+      if (dateColumnSet.has(column) && typeof value === 'string') {
+        return <span>{formatDateValue(value, dateFormats[column] ?? true)}</span>;
+      }
+
+      // Handle arrays
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          return <span className="text-gray-400 text-sm">Empty list</span>;
+        }
+        
         return (
-          <div className={isExpanded ? 'whitespace-normal break-words' : ''}>
-            <span>{isExpanded ? cellText : cellText.slice(0, 56) + '...'}</span>
+          <div className="flex flex-col gap-1">
             <button
               onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
-              className="ml-1 text-sm text-green-600 hover:text-green-800 font-medium"
+              className="text-left text-sm text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
             >
-              {isExpanded ? 'Less' : 'Read more'}
+              {isExpanded ? '▼' : '▶'} List ({value.length} {value.length === 1 ? 'item' : 'items'})
             </button>
+            {isExpanded && (
+              <div className="pl-4 space-y-1 text-sm">
+                {value.map((item, idx) => (
+                  <div key={idx} className="py-1 border-l-2 border-gray-200 pl-2">
+                    {typeof item === 'object' && item !== null ? (
+                      <div className="text-base text-gray-700 bg-gray-100 p-3 rounded space-y-0.5">
+                        {Object.entries(item).map(([key, val]) => (
+                          <div key={key} className="flex gap-2">
+                            <span className="font-semibold text-gray-600">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+                            <span className="text-gray-800">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span>{String(item)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       }
-      return cellText;
+
+      // Handle objects
+      if (typeof value === 'object') {
+        const keys = Object.keys(value as object);
+        if (keys.length === 0) {
+          return <span className="text-gray-400 text-sm">Empty object</span>;
+        }
+
+        return (
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
+              className="text-left text-sm text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
+            >
+              {isExpanded ? '▼' : '▶'} Object ({keys.length} {keys.length === 1 ? 'property' : 'properties'})
+            </button>
+            {isExpanded && (
+              <div className="text-sm text-gray-700 bg-gray-100 p-2 rounded space-y-0.5">
+                {Object.entries(value as object).map(([key, val]) => (
+                  <div key={key} className="flex gap-2">
+                    <span className="font-semibold text-gray-600">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+                    <span className="text-gray-800">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Handle strings (with long text support)
+      if (typeof value === 'string') {
+        if (value.length > 56) {
+          return (
+            <div className={isExpanded ? 'whitespace-normal break-words' : ''}>
+              <span>{isExpanded ? value : value.slice(0, 56) + '...'}</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
+                className="ml-1 text-sm text-green-600 hover:text-green-800 font-medium"
+              >
+                {isExpanded ? 'Less' : 'Read more'}
+              </button>
+            </div>
+          );
+        }
+        return <span>{value}</span>;
+      }
+
+      // Handle numbers and booleans
+      return <span>{String(value)}</span>;
     };
 
     return (
@@ -514,11 +602,24 @@ export default function DashboardWidgetCard({
           <tbody>
             {displayRows.map((row, i) => (
               <tr key={i} className="border-b border-gray-100 hover:bg-[#FFDB58]/20 transition-colors">
-                {columnKeys.map((key) => (
-                  <td key={key} className={`py-2.5 px-3 pr-6 text-gray-700 max-w-[540px] ${expandedCells[`${i}-${key}`] ? 'whitespace-normal' : 'whitespace-nowrap truncate'} ${colWidth}`} title={expandedCells[`${i}-${key}`] ? undefined : String(row[key] ?? '')}>
-                    {renderCellContent(row[key], key, i)}
-                  </td>
-                ))}
+                {columnKeys.map((key) => {
+                  const value = getNestedValue(row, key);
+                  const cellId = `${i}-${key}`;
+                  const isExpanded = expandedCells[cellId];
+                  // Only show title tooltip for simple text values, not for objects/arrays
+                  const showTitle = !isExpanded && value !== null && value !== undefined && 
+                                   typeof value !== 'object' && typeof value === 'string' && value.length > 56;
+                  
+                  return (
+                    <td 
+                      key={key} 
+                      className={`py-2.5 px-3 pr-6 text-gray-700 max-w-[540px] ${isExpanded ? 'whitespace-normal' : 'whitespace-nowrap truncate'} ${colWidth}`}
+                      title={showTitle ? String(value) : undefined}
+                    >
+                      {renderCellContent(value, key, i)}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
