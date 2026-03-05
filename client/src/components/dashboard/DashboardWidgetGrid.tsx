@@ -8,6 +8,8 @@ interface DashboardWidgetGridProps {
   onDeleteWidget: (widgetId: string) => void;
   onEditWidget: (widgetId: string) => void;
   onRefreshWidget: (widgetId: string) => void;
+  onCancelWidgetRefresh?: (widgetId: string) => void;
+  individuallyRefreshingWidgets?: Set<string>;
   onAddWidget: () => void;
 }
 
@@ -22,10 +24,13 @@ export default function DashboardWidgetGrid({
   onDeleteWidget,
   onEditWidget,
   onRefreshWidget,
+  onCancelWidgetRefresh,
+  individuallyRefreshingWidgets,
   onAddWidget,
 }: Readonly<DashboardWidgetGridProps>) {
   const renderWidgetCard = (widget: Widget) => {
     const layout = dashboard.layout.find((l) => l.widget_id === widget.id);
+    const isIndividuallyRefreshing = individuallyRefreshingWidgets?.has(widget.id);
     return (
       <DashboardWidgetCard
         key={widget.id}
@@ -34,6 +39,7 @@ export default function DashboardWidgetGrid({
         onDelete={() => onDeleteWidget(widget.id)}
         onEdit={() => onEditWidget(widget.id)}
         onRefresh={() => onRefreshWidget(widget.id)}
+        onCancelRefresh={isIndividuallyRefreshing && onCancelWidgetRefresh ? () => onCancelWidgetRefresh(widget.id) : undefined}
       />
     );
   };

@@ -11,6 +11,7 @@ import {
   Table2,
   Trash2,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -40,6 +41,7 @@ interface DashboardWidgetCardProps {
   onDelete: () => void;
   onEdit?: () => void;
   onRefresh?: () => void;
+  onCancelRefresh?: () => void;
   onDataUpdate?: (data: Record<string, unknown>[]) => void;
   onError?: (error: string) => void;
 }
@@ -81,8 +83,10 @@ const TOOLTIP_STYLE = {
 };
 
 // Capitalize first letter of each word for legend labels
-const legendFormatter = (value: string) =>
-  value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const legendFormatter = (value: string) => {
+  if (!value || value.length === 0 || value.trim() === '') return 'No Label';
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
 
 // Try to parse any date-like string into short human-readable format for axes
 const tryFormatDate = (value: unknown): string => {
@@ -98,9 +102,13 @@ const tryFormatDate = (value: unknown): string => {
   return value;
 };
 
-// Tooltip label formatter — capitalize
+// Tooltip label formatter — capitalize + human-readable date
 const tooltipLabelFormatter = (label: string | number) => {
+  if (label == null) return '';
   const s = String(label);
+  // Try to format as date first
+  const dateFormatted = tryFormatDate(s);
+  if (dateFormatted !== s) return dateFormatted;
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
@@ -125,6 +133,7 @@ export default function DashboardWidgetCard({
   onDelete,
   onEdit,
   onRefresh,
+  onCancelRefresh,
 }: DashboardWidgetCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
@@ -134,6 +143,8 @@ export default function DashboardWidgetCard({
   const [dateFormats, setDateFormats] = useState<Record<string, boolean>>({});
   // Info tooltip
   const [showInfo, setShowInfo] = useState(false);
+  // Table cell expand state for Read more / Less
+  const [expandedCells, setExpandedCells] = useState<Record<string, boolean>>({});
 
   // Ref to store previous data so we can show it while loading (Grafana-style)
   const prevDataRef = useRef<Record<string, unknown>[] | undefined>(undefined);
@@ -218,7 +229,7 @@ export default function DashboardWidgetCard({
         <div className="flex items-center justify-center h-full min-h-[120px] p-4">
           <div className="flex flex-col items-center gap-2 text-center">
             <AlertTriangle className="w-5 h-5 text-red-400" />
-            <span className="text-sm text-red-500 line-clamp-2">{widget.error.charAt(0).toUpperCase() + widget.error.slice(1)}</span>
+            <span className="text-base text-red-500 line-clamp-2">{widget.error.charAt(0).toUpperCase() + widget.error.slice(1)}</span>
           </div>
         </div>
       );
@@ -268,6 +279,16 @@ export default function DashboardWidgetCard({
     const keys = Object.keys(firstRow);
     const mainValue = firstRow[keys[0]] as number;
 
+    // Handle null or undefined values
+    if (mainValue === null || mainValue === undefined) {
+      return (
+        <div className="flex flex-col justify-center p-1">
+          <div className="text-4xl font-black text-gray-400">—</div>
+          <div className="text-sm font-semibold text-gray-500 mt-1">{widget.title}</div>
+        </div>
+      );
+    }
+
     const formattedValue = formatStatValue(mainValue, config.format, config.prefix, config.suffix, config.decimal_places);
 
     const changePercent = config.change_percentage;
@@ -293,41 +314,56 @@ export default function DashboardWidgetCard({
   const renderLineChart = () => {
     const showBrush = chartData.length > 15;
     return (
-      <div className="w-full outline-none focus:outline-none" style={{ height: showBrush ? 340 : 280 }} tabIndex={-1}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={axisTickFormatter} />}
-            <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-            <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-            <Legend wrapperStyle={{ fontSize: 13, paddingTop: 6 }} formatter={legendFormatter} />
-            {numericKeys.map((key, i) => (
-              <Line key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
-            ))}
-            {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
-          </LineChart>
-        </ResponsiveContainer>
+      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
+        <div style={{ height: showBrush ? 340 : 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
+              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
+              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
+              <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
+              {numericKeys.map((key, i) => (
+                <Line key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
+              ))}
+              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handler above to select a time range</p>}
       </div>
     );
   };
 
   const renderBarChart = () => {
     const showBrush = chartData.length > 12;
+    const singleSeries = numericKeys.length === 1;
     return (
-      <div className="w-full outline-none focus:outline-none" style={{ height: showBrush ? 340 : 280 }} tabIndex={-1}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={axisTickFormatter} />}
-            <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-            <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-            <Legend wrapperStyle={{ fontSize: 14, paddingTop: 6 }} formatter={legendFormatter} />
-            {numericKeys.map((key, i) => (
-              <Bar key={key} dataKey={key} name={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
-            ))}
-            {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 15)} />}
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
+        <div style={{ height: showBrush ? 340 : 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
+              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
+              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
+              {!singleSeries && <Legend wrapperStyle={{ fontSize: 14, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />}
+              {singleSeries ? (
+                <Bar key={numericKeys[0]} dataKey={numericKeys[0]} radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              ) : (
+                numericKeys.map((key, i) => (
+                  <Bar key={key} dataKey={key} name={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
+                ))
+              )}
+              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 15)} />}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handle above to select a range</p>}
       </div>
     );
   };
@@ -335,20 +371,23 @@ export default function DashboardWidgetCard({
   const renderAreaChart = () => {
     const showBrush = chartData.length > 15;
     return (
-      <div className="w-full outline-none focus:outline-none" style={{ height: showBrush ? 340 : 280 }} tabIndex={-1}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={axisTickFormatter} />}
-            <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-            <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-            <Legend wrapperStyle={{ fontSize: 14, paddingTop: 6 }} formatter={legendFormatter} />
-            {numericKeys.map((key, i) => (
-              <Area key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} fill={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.15} strokeWidth={2.5} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
-            ))}
-            {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
-          </AreaChart>
-        </ResponsiveContainer>
+      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
+        <div style={{ height: showBrush ? 340 : 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
+              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
+              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
+              <Legend wrapperStyle={{ fontSize: 14, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
+              {numericKeys.map((key, i) => (
+                <Area key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} fill={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.15} strokeWidth={2.5} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
+              ))}
+              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handler above to select a range</p>}
       </div>
     );
   };
@@ -359,7 +398,7 @@ export default function DashboardWidgetCard({
     const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
 
     return (
-      <div className={`${data.length >= 6 ? 'h-[280px]' : data.length >= 3 ? 'h-[240px]' : 'h-[200px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
+      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 3 ? 'h-[260px]' : 'h-[200px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             <Pie
@@ -372,6 +411,10 @@ export default function DashboardWidgetCard({
               innerRadius={38}
               strokeWidth={2}
               stroke="#000"
+            //   label={(entry) => {
+            //     const name = entry[nameKey || 'name'];
+            //     return (!name || name.length === 0 || String(name).trim() === '') ? 'No Label' : String(name);
+            //   }}
             >
               {data.map((_entry, index) => (
                 <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -383,7 +426,7 @@ export default function DashboardWidgetCard({
               itemStyle={TOOLTIP_STYLE.itemStyle}
               formatter={(value: number | string, name: string) => [value, legendFormatter(name)]}
             />
-            <Legend wrapperStyle={{ fontSize: 14, paddingTop: 8 }} formatter={legendFormatter} />
+            <Legend wrapperStyle={{ fontSize: 14, paddingBottom: 12, paddingTop: 12, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
           </RechartsPieChart>
         </ResponsiveContainer>
       </div>
@@ -424,6 +467,27 @@ export default function DashboardWidgetCard({
     // Dynamic min-width per column based on column count
     const colWidth = columnKeys.length <= 3 ? 'min-w-[180px]' : columnKeys.length <= 5 ? 'min-w-[140px]' : 'min-w-[120px]';
 
+    const renderCellContent = (value: unknown, column: string, rowIndex: number) => {
+      const cellText = formatCell(value, column);
+      // If text is long (> ~56 chars), show Read more / Less toggle
+      if (cellText.length > 56) {
+        const cellId = `${rowIndex}-${column}`;
+        const isExpanded = expandedCells[cellId];
+        return (
+          <div className={isExpanded ? 'whitespace-normal break-words' : ''}>
+            <span>{isExpanded ? cellText : cellText.slice(0, 56) + '...'}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
+              className="ml-1 text-sm text-green-600 hover:text-green-800 font-medium"
+            >
+              {isExpanded ? 'Less' : 'Read more'}
+            </button>
+          </div>
+        );
+      }
+      return cellText;
+    };
+
     return (
       <div className="overflow-auto max-h-[420px]">
         <table className="w-full text-base leading-relaxed border-collapse min-w-max">
@@ -451,8 +515,8 @@ export default function DashboardWidgetCard({
             {displayRows.map((row, i) => (
               <tr key={i} className="border-b border-gray-100 hover:bg-[#FFDB58]/20 transition-colors">
                 {columnKeys.map((key) => (
-                  <td key={key} className={`py-2 px-3 text-gray-700 whitespace-nowrap max-w-[480px] truncate ${colWidth}`} title={String(row[key] ?? '')}>
-                    {formatCell(row[key], key)}
+                  <td key={key} className={`py-2.5 px-3 pr-6 text-gray-700 max-w-[540px] ${expandedCells[`${i}-${key}`] ? 'whitespace-normal' : 'whitespace-nowrap truncate'} ${colWidth}`} title={expandedCells[`${i}-${key}`] ? undefined : String(row[key] ?? '')}>
+                    {renderCellContent(row[key], key, i)}
                   </td>
                 ))}
               </tr>
@@ -495,7 +559,7 @@ export default function DashboardWidgetCard({
                 <button
                   onMouseEnter={() => setShowInfo(true)}
                   onMouseLeave={() => setShowInfo(false)}
-                  className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-0.5 text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   <Info className="w-4 h-4 mt-0.5 -ml-0.5" />
                 </button>
@@ -526,19 +590,36 @@ export default function DashboardWidgetCard({
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
-            {onRefresh && (
+            {onRefresh && !widget.is_loading && (
               <button
                 onClick={onRefresh}
-                disabled={widget.is_loading}
-                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
                 title="Refresh widget data"
               >
-                <RefreshCcw className={`w-5 h-5 text-gray-500 ${widget.is_loading ? 'animate-spin' : ''}`} />
+                <RefreshCcw className="w-4 h-4 text-gray-500" />
+              </button>
+            )}
+            {widget.is_loading && onCancelRefresh && (
+              <button
+                onClick={onCancelRefresh}
+                className="p-2 rounded-lg hover:bg-red-100 transition-colors"
+                title="Cancel loading"
+              >
+                <X className="w-4 h-4 text-red-500" />
+              </button>
+            )}
+            {widget.is_loading && !onCancelRefresh && onRefresh && (
+              <button
+                disabled
+                className="p-2 rounded-lg opacity-50 cursor-not-allowed hover:bg-gray-200 transition-colors"
+                title="Loading..."
+              >
+                <RefreshCcw className="w-4 h-4 text-gray-500 animate-spin" />
               </button>
             )}
             <button
               onClick={handleToggleMenu}
-              className="widget-menu-btn p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              className="widget-menu-btn p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
             >
               <MoreHorizontal className="w-5 h-5 text-gray-500" />
             </button>
@@ -550,8 +631,8 @@ export default function DashboardWidgetCard({
           {renderWidgetContent()}
           {/* Error overlay on top of stale data */}
           {widget.error && displayData && displayData.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border-t border-red-200 text-xs text-red-500">
-              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border-t border-red-200 text-sm text-red-500">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{widget.error}</span>
             </div>
           )}
