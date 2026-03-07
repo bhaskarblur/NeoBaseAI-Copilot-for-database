@@ -9,6 +9,10 @@ import {
   EditWidgetRequest,
   CreateFromBlueprintsRequest,
   Widget,
+  ValidateImportRequest,
+  ValidateImportResponse,
+  ImportDashboardRequest,
+  ImportDashboardResponse,
 } from '../types/dashboard';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -211,5 +215,50 @@ export const dashboardService = {
     await axios.post(
       `${API_URL}/chats/${chatId}/dashboards/${dashboardId}/widgets/${widgetId}/refresh?stream_id=${streamId}`
     );
+  },
+
+  // === Import/Export ===
+
+  /**
+   * Export a dashboard to portable JSON format
+   * Returns JSON that can be downloaded and imported elsewhere
+   */
+  exportDashboard: async (
+    chatId: string,
+    dashboardId: string
+  ): Promise<Blob> => {
+    const response = await axios.get(
+      `${API_URL}/chats/${chatId}/dashboards/${dashboardId}/export`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  },
+
+  /**
+   * Validate import JSON and get connection mapping suggestions
+   */
+  validateImport: async (
+    chatId: string,
+    request: ValidateImportRequest
+  ): Promise<ValidateImportResponse> => {
+    const response = await axios.post(
+      `${API_URL}/chats/${chatId}/dashboards/import/validate`,
+      request
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Import a dashboard from export JSON
+   */
+  importDashboard: async (
+    chatId: string,
+    request: ImportDashboardRequest
+  ): Promise<ImportDashboardResponse> => {
+    const response = await axios.post(
+      `${API_URL}/chats/${chatId}/dashboards/import`,
+      request
+    );
+    return response.data.data;
   },
 };

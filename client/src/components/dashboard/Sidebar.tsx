@@ -387,7 +387,7 @@ export default function Sidebar({
     });
   };
 
-  const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean) => {
+  const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean, duplicateDashboards: boolean) => {
     try {
       const connectionToDuplicate = connections.find(chat => chat.id === chatId);
       
@@ -404,7 +404,7 @@ export default function Sidebar({
       }
 
       // Call the duplicateChat service and get the duplicated chat
-      const duplicatedChat = await chatService.duplicateChat(chatId, duplicateMessages);
+      const duplicatedChat = await chatService.duplicateChat(chatId, duplicateMessages, duplicateDashboards);
       
       // Call the onDuplicateConnection callback with the ID of the duplicated chat
       if (onDuplicateConnection) {

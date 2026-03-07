@@ -196,3 +196,46 @@ export const DASHBOARD_SSE_EVENTS = {
   WIDGET_DATA: 'dashboard-widget-data',
   WIDGET_ERROR: 'dashboard-widget-error',
 } as const;
+
+// === Import/Export ===
+
+export interface ValidateImportRequest {
+  json: string;
+}
+
+export interface ValidateImportResponse {
+  valid: boolean;
+  errors?: string[];
+  warnings?: string[];
+  requiredConnections?: ConnectionRequired[];
+}
+
+export interface ConnectionRequired {
+  name: string;
+  type: string;
+  usedBy: string[]; // Widget titles
+  suggestions?: string[]; // Connection IDs or names
+}
+
+export interface ImportDashboardRequest {
+  json: string;
+  mappings: Record<string, string>; // source name -> target connection ID
+  options: ImportOptions;
+}
+
+export interface ImportOptions {
+  skipInvalidWidgets: boolean;
+  autoCreateConnections: boolean;
+}
+
+export interface ImportDashboardResponse {
+  dashboardId: string;
+  summary: ImportSummary;
+}
+
+export interface ImportSummary {
+  widgetsImported: number;
+  widgetsSkipped: number;
+  warnings?: string[];
+  connectionsUsed: Record<string, string>; // source name -> target name
+}
