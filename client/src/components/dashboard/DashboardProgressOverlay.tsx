@@ -42,7 +42,7 @@ export default function DashboardProgressOverlay({
             style={{ width: `${progress.progress}%` }}
           />
         </div>
-        <p className="text-sm text-gray-400 mb-6">{progress.progress}%</p>
+        <p className="text-base text-gray-500 mb-6">{progress.progress}%</p>
 
         {/* Cancel button */}
         <button

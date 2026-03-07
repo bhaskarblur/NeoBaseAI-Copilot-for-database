@@ -658,7 +658,7 @@ func (s *dashboardService) CreateFromBlueprints(ctx context.Context, userID, cha
 						fmt.Sprintf("Finalizing dashboard: %s", blueprint.Name), progress+30)
 				} else if call.Name == constants.DashboardExecuteQueryToolName {
 					s.sendDashboardProgress(userID, chatID, streamID, "", "testing_queries",
-						"Curating & testing the widget queries...", progress+15)
+						"Curating & testing the widget queries. This may take a few moments...", progress+15)
 				}
 			},
 			OnToolResult: func(call llm.ToolCall, result llm.ToolResult) {
