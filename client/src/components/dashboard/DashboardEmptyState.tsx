@@ -3,11 +3,13 @@ import { BarChart3, Bot, Sparkles, Table2, TrendingUp, PieChart } from 'lucide-r
 interface DashboardEmptyStateProps {
   onExploreSuggestions: () => void;
   onCreateWithAI: () => void;
+  onImportDashboard?: () => void;
 }
 
 export default function DashboardEmptyState({
   onExploreSuggestions,
   onCreateWithAI,
+  onImportDashboard,
 }: Readonly<DashboardEmptyStateProps>) {
   return (
     <div className="flex flex-col items-center justify-center h-full px-4 py-12 select-none">
@@ -128,6 +130,20 @@ export default function DashboardEmptyState({
           Customize With AI
         </button>
       </div>
+
+      {/* Import Link */}
+      {onImportDashboard && (
+        <p className="text-sm text-gray-600 mt-6">
+          Or{' '}
+          <button
+            onClick={onImportDashboard}
+            className="text-green-600 hover:text-green-700 transition-colors"
+          >
+            Import a dashboard
+          </button>
+          {' '}(.json)
+        </p>
+      )}
 
       {/* Floating animation keyframes */}
       <style>{`

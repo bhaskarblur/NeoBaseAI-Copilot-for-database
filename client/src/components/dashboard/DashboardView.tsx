@@ -20,6 +20,7 @@ import {
   BlueprintPickerModal,
   CreateDashboardPromptModal,
   EditWidgetModal,
+  ImportDashboardModal,
   RegenerateDashboardModal,
 } from './DashboardModals';
 import DashboardProgressOverlay from './DashboardProgressOverlay';
@@ -69,6 +70,11 @@ export default function DashboardView({
   const [isAddingWidget, setIsAddingWidget] = useState(false);
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [showDeleteDashboardConfirm, setShowDeleteDashboardConfirm] = useState(false);
+
+  // Import/Export state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importJsonContent, setImportJsonContent] = useState<string>('');
+  const [isImporting, setIsImporting] = useState(false);
 
   // Edit widget state
   const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
@@ -868,6 +874,75 @@ export default function DashboardView({
     setShowPromptModal(true);
   };
 
+  // Import/Export handlers
+  const handleExportDashboard = async () => {
+    if (!activeDashboard) return;
+    
+    try {
+      const blob = await dashboardService.exportDashboard(chatId, activeDashboard.id);
+      const url = globalThis.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeDashboard.name.replaceAll(/\s+/g, '-').toLowerCase()}-export.json`;
+      document.body.appendChild(a);
+      a.click();
+      globalThis.URL.revokeObjectURL(url);
+      a.remove();
+      toast.success('Dashboard exported successfully', { icon: '📥' });
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export dashboard');
+    }
+  };
+
+  const handleImportDashboard = () => {
+    console.log('Import dashboard clicked');
+    setShowImportModal(true);
+  };
+
+  const handleImportSubmit = async (jsonContent: string) => {
+    setImportJsonContent(jsonContent);
+    setIsImporting(true);
+    
+    try {
+      // Import with auto-mapping to current chat connection
+      const result = await dashboardService.importDashboard(chatId, {
+        json: jsonContent,
+        mappings: {}, // Backend auto-maps to current chat's connection
+        options: {
+          skipInvalidWidgets: false,
+          autoCreateConnections: false,
+        },
+      });
+      
+      setShowImportModal(false);
+      setImportJsonContent('');
+      
+      // Reload dashboard list and switch to imported dashboard
+      await loadDashboardList();
+      await loadDashboard(result.dashboardId);
+      
+      const warnings = result.summary.warnings?.length || 0;
+      
+      if (warnings > 0) {
+        toast.success(
+          `Dashboard imported with ${result.summary.widgetsImported} widgets. Some queries may need regeneration.`,
+          { icon: '⚠️', duration: 5000 }
+        );
+      } else {
+        toast.success(
+          `Dashboard imported successfully with ${result.summary.widgetsImported} widgets!`,
+          { icon: '✅' }
+        );
+      }
+    } catch (error) {
+      console.error('Import failed:', error);
+      toast.error('Failed to import dashboard');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // =============================================
   // Render
   // =============================================
@@ -891,7 +966,17 @@ export default function DashboardView({
         <DashboardEmptyState
           onExploreSuggestions={handleExploreSuggestions}
           onCreateWithAI={handleCreateWithAI}
+          onImportDashboard={handleImportDashboard}
         />
+        
+        {/* Import Dashboard Modal */}
+        {showImportModal && (
+          <ImportDashboardModal
+            isImporting={isImporting}
+            onSubmit={handleImportSubmit}
+            onClose={() => setShowImportModal(false)}
+          />
+        )}
       </div>
     );
   }
@@ -907,6 +992,7 @@ export default function DashboardView({
           <DashboardEmptyState
             onExploreSuggestions={handleExploreSuggestions}
             onCreateWithAI={handleCreateWithAI}
+            onImportDashboard={handleImportDashboard}
           />
         </div>
       ) : (
@@ -925,6 +1011,8 @@ export default function DashboardView({
             onAddWidget={() => setShowAddWidgetModal(true)}
             onRegenerateDashboard={() => setShowRegenerateModal(true)}
             onDeleteDashboard={() => setShowDeleteDashboardConfirm(true)}
+            onExportDashboard={handleExportDashboard}
+            onImportDashboard={handleImportDashboard}
           />
 
           {/* Widget Grid */}
@@ -1019,6 +1107,15 @@ export default function DashboardView({
           onConfirm={handleDeleteDashboard}
           onCancel={() => setShowDeleteDashboardConfirm(false)}
           zIndex="z-[120]"
+        />
+      )}
+
+      {/* Import Dashboard */}
+      {showImportModal && (
+        <ImportDashboardModal
+          isImporting={isImporting}
+          onSubmit={handleImportSubmit}
+          onClose={() => setShowImportModal(false)}
         />
       )}
 

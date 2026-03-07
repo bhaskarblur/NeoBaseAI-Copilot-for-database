@@ -640,55 +640,56 @@ export function ImportDashboardModal({
   onSubmit,
   onClose,
 }: Readonly<ImportDashboardModalProps>) {
-  const [importMethod, setImportMethod] = useState<'file' | 'paste'>('file');
-  const [pastedContent, setPastedContent] = useState('');
+  const [jsonContent, setJsonContent] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const exampleSchema = `{
+  "schemaVersion": "1.0.0",
+  "dashboard": {
+    "name": "My Dashboard",
+    "description": "Dashboard description",
+    "widgets": [...],
+    "layout": [...]
+  }
+}`;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (!file.name.endsWith('.json')) {
         setError('Please select a JSON file');
+        setSelectedFile(null);
         return;
       }
       setSelectedFile(file);
       setError(null);
+      
+      // Read file and populate text area
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setJsonContent(content);
+      };
+      reader.readAsText(file);
     }
   };
 
   const handleSubmit = async () => {
     setError(null);
     
-    if (importMethod === 'file') {
-      if (!selectedFile) {
-        setError('Please select a file');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const content = e.target?.result as string;
-          JSON.parse(content); // Validate JSON
-          onSubmit(content, selectedFile);
-        } catch (err) {
-          setError('Invalid JSON format');
-        }
-      };
-      reader.readAsText(selectedFile);
-    } else {
-      if (!pastedContent.trim()) {
-        setError('Please paste JSON content');
-        return;
-      }
-      try {
-        JSON.parse(pastedContent); // Validate JSON
-        onSubmit(pastedContent.trim());
-      } catch (err) {
-        setError('Invalid JSON format');
-      }
+    if (!jsonContent.trim()) {
+      setError('Please paste JSON content or select a file');
+      return;
+    }
+    
+    try {
+      JSON.parse(jsonContent); // Validate JSON
+      onSubmit(jsonContent.trim(), selectedFile || undefined);
+    } catch (err) {
+      setError('Invalid JSON format');
     }
   };
 
@@ -716,94 +717,92 @@ export function ImportDashboardModal({
 
         {/* Body */}
         <div className="p-6 space-y-4">
-          {/* Import Method Toggle */}
-          <div className="flex gap-3 mb-4">
-            <button
-              onClick={() => setImportMethod('file')}
-              className={`
-                flex-1 py-2.5 px-4 rounded-lg border-2 font-semibold text-sm transition-all
-                ${importMethod === 'file'
-                  ? 'border-black bg-[#FFD700] shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
-                  : 'border-gray-300 bg-white hover:border-gray-400'
-                }
-              `}
-            >
-              <div className="flex items-center justify-center gap-2">
-                <FileJson className="w-4 h-4" />
-                Upload File
-              </div>
-            </button>
-            <button
-              onClick={() => setImportMethod('paste')}
-              className={`
-                flex-1 py-2.5 px-4 rounded-lg border-2 font-semibold text-sm transition-all
-                ${importMethod === 'paste'
-                  ? 'border-black bg-[#FFD700] shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
-                  : 'border-gray-300 bg-white hover:border-gray-400'
-                }
-              `}
-            >
-              <div className="flex items-center justify-center gap-2">
-                <FileJson className="w-4 h-4" />
-                Paste JSON
-              </div>
-            </button>
+          {/* JSON Content Text Area - Always Visible */}
+          <div>
+            <label className="block text-base font-bold text-black mb-2">
+              Paste Dashboard JSON
+            </label>
+            <textarea
+              ref={textareaRef}
+              value={jsonContent}
+              onChange={(e) => {
+                setJsonContent(e.target.value);
+                setError(null);
+              }}
+              placeholder={exampleSchema}
+              className="
+                w-full h-48 px-4 py-3 text-sm font-mono
+                border-2 border-black rounded-xl
+                focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-1
+                resize-none placeholder:text-gray-400
+                shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+              "
+            />
           </div>
 
-          {/* File Upload Method */}
-          {importMethod === 'file' && (
-            <div>
-              <label className="block text-sm font-bold text-black mb-2">
-                Select Dashboard JSON File
-              </label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="
-                  w-full py-8 px-4 border-2 border-dashed border-gray-300 rounded-xl
-                  hover:border-black hover:bg-gray-50 transition-all
-                  flex flex-col items-center justify-center gap-2
-                "
-              >
-                <Upload className="w-8 h-8 text-gray-400" />
-                <span className="text-sm font-semibold text-gray-600">
-                  {selectedFile ? selectedFile.name : 'Click to select or drag & drop'}
-                </span>
-                <span className="text-xs text-gray-400">JSON files only</span>
-              </button>
-            </div>
-          )}
+          {/* OR Divider */}
+          <div className="flex items-center gap-4 my-6">
+            <div className="flex-1 h-px bg-gray-300" />
+            <span className="text-sm text-gray-500">OR</span>
+            <div className="flex-1 h-px bg-gray-300" />
+          </div>
 
-          {/* Paste JSON Method */}
-          {importMethod === 'paste' && (
-            <div>
-              <label className="block text-sm font-bold text-black mb-2">
-                Paste Dashboard JSON Content
-              </label>
-              <textarea
-                ref={textareaRef}
-                value={pastedContent}
-                onChange={(e) => {
-                  setPastedContent(e.target.value);
-                  setError(null);
-                }}
-                placeholder='Paste your dashboard JSON here...\n\nExample:\n{\n  "name": "My Dashboard",\n  "widgets": [...],\n  ...\n}'
-                className="
-                  w-full h-64 px-4 py-3 text-sm font-mono
-                  border-2 border-black rounded-xl
-                  focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-1
-                  resize-none placeholder:text-gray-400
-                  shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
-                "
-              />
-            </div>
-          )}
+          {/* File Upload Section - Always Visible */}
+          <div>
+            <label className="block text-base font-bold text-black mb-2">
+              Upload JSON File
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="
+                w-full py-8 px-4 border-2 border-dashed border-gray-300 rounded-xl
+                hover:border-black hover:bg-gray-50 transition-all
+                flex flex-col items-center justify-center gap-2
+              "
+            >
+              <Upload className="w-8 h-8 text-gray-400" />
+              <span className="text-base font-bold text-gray-700">
+                Click to select a JSON file
+              </span>
+              <span className="text-sm text-gray-500">
+                or drag and drop here
+              </span>
+            </button>
+
+            {/* Selected File Info */}
+            {selectedFile && (
+              <div className="mt-3 px-4 py-3 bg-green-50 border-2 border-green-200 rounded-lg flex items-center gap-3">
+                <FileJson className="w-5 h-5 text-green-600" />
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-green-900">
+                    {selectedFile.name}
+                  </p>
+                  <p className="text-xs text-green-600">
+                    {(selectedFile.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setJsonContent('');
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = '';
+                    }
+                  }}
+                  className="p-1 hover:bg-green-100 rounded transition-colors"
+                >
+                  <X className="w-4 h-4 text-green-600" />
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Error Message */}
           {error && (
@@ -815,8 +814,7 @@ export function ImportDashboardModal({
           {/* Info Box */}
           <div className="px-4 py-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
             <p className="text-sm text-gray-700">
-              <span className="font-semibold">Note:</span> The dashboard will be imported with connection mappings. 
-              If referenced data sources don't exist, you'll be prompted to map them.
+              <span className="font-semibold">Note:</span> When you import a dashboard file, the system will try to map your data sources and widget queries to your existing database schema, incompatibility errors may occur if any.
             </p>
           </div>
         </div>
@@ -825,7 +823,7 @@ export function ImportDashboardModal({
         <div className="flex gap-4 p-6 border-t-4 border-black bg-gray-50/50">
           <button
             onClick={handleSubmit}
-            disabled={isImporting || (importMethod === 'file' && !selectedFile) || (importMethod === 'paste' && !pastedContent.trim())}
+            disabled={isImporting || !jsonContent.trim()}
             className="neo-border bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1"
           >
             {isImporting ? (

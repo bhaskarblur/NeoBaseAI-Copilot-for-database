@@ -290,6 +290,7 @@ export default function ChatHeader({
                         </button>
                         <div className="h-px bg-gray-200 mx-2"></div>
                         {dashboardViewMode !== 'dashboard' && (
+                            <>
                         <button 
                             onClick={() => handleDropdownAction(() => {
                                 if (onViewModeChange) {
@@ -310,7 +311,6 @@ export default function ChatHeader({
                                 </>
                             )}
                         </button>
-                        )}
                         <div className="h-px bg-gray-200 mx-2"></div>
                         <button 
                             onClick={() => handleDropdownAction(handleClearChat)}
@@ -319,7 +319,8 @@ export default function ChatHeader({
                             <Eraser className="w-4 h-4 mr-2" />
                             Clear Chat
                         </button>
-                        
+                        </>
+                                                )}
                         {viewMode !== undefined && (
                             <div className="h-px bg-gray-200 mx-2"></div>
                         )}
