@@ -179,3 +179,68 @@ type DashboardWidgetDataEvent struct {
 	ExecutionTimeMs float64                  `json:"execution_time_ms"`
 	Error           string                   `json:"error,omitempty"`
 }
+
+// === Import/Export DTOs ===
+
+// ValidateImportRequest validates import JSON before actual import
+type ValidateImportRequest struct {
+	JSON string `json:"json" binding:"required"`
+}
+
+// ValidateImportResponse returns validation results and mapping suggestions
+type ValidateImportResponse struct {
+	Valid               bool                    `json:"valid"`
+	Errors              []string                `json:"errors,omitempty"`
+	Warnings            []string                `json:"warnings,omitempty"`
+	RequiredConnections []ConnectionRequiredDTO `json:"requiredConnections,omitempty"`
+	MappingSuggestions  []MappingSuggestionDTO  `json:"mappingSuggestions,omitempty"`
+}
+
+// ConnectionRequiredDTO describes a required connection for import
+type ConnectionRequiredDTO struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	UsedBy      []string `json:"usedBy"` // Widget titles
+	Suggestions []string `json:"suggestions,omitempty"`
+}
+
+// MappingSuggestionDTO suggests connection mappings
+type MappingSuggestionDTO struct {
+	SourceName  string           `json:"sourceName"`
+	SourceType  string           `json:"sourceType"`
+	Suggestions []ConnectionInfo `json:"suggestions"`
+}
+
+// ConnectionInfo provides connection details
+type ConnectionInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// ImportDashboardRequest imports a dashboard with connection mappings
+type ImportDashboardRequest struct {
+	JSON     string            `json:"json" binding:"required"`
+	Mappings map[string]string `json:"mappings"` // source connection name -> target connection ID
+	Options  ImportOptionsDTO  `json:"options"`
+}
+
+// ImportOptionsDTO configures import behavior
+type ImportOptionsDTO struct {
+	SkipInvalidWidgets    bool `json:"skipInvalidWidgets"`
+	AutoCreateConnections bool `json:"autoCreateConnections"`
+}
+
+// ImportDashboardResponse returns import results
+type ImportDashboardResponse struct {
+	DashboardID string           `json:"dashboardId"`
+	Summary     ImportSummaryDTO `json:"summary"`
+}
+
+// ImportSummaryDTO provides import feedback
+type ImportSummaryDTO struct {
+	WidgetsImported int               `json:"widgetsImported"`
+	WidgetsSkipped  int               `json:"widgetsSkipped"`
+	Warnings        []string          `json:"warnings,omitempty"`
+	ConnectionsUsed map[string]string `json:"connectionsUsed"` // source name -> target name
+}

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"neobase-ai/internal/apis/dtos"
+	"neobase-ai/internal/constants"
 	"neobase-ai/internal/services"
 	"net/http"
 
@@ -11,13 +13,15 @@ import (
 
 // DashboardHandler handles dashboard-related HTTP endpoints
 type DashboardHandler struct {
-	dashboardService services.DashboardService
+	dashboardService             services.DashboardService
+	dashboardImportExportService services.DashboardImportExportService
 }
 
 // NewDashboardHandler creates a new dashboard handler
-func NewDashboardHandler(dashboardService services.DashboardService) *DashboardHandler {
+func NewDashboardHandler(dashboardService services.DashboardService, dashboardImportExportService services.DashboardImportExportService) *DashboardHandler {
 	return &DashboardHandler{
-		dashboardService: dashboardService,
+		dashboardService:             dashboardService,
+		dashboardImportExportService: dashboardImportExportService,
 	}
 }
 
@@ -435,5 +439,180 @@ func (h *DashboardHandler) RefreshWidget(c *gin.Context) {
 	c.JSON(int(statusCode), dtos.Response{
 		Success: true,
 		Data:    "Widget refresh completed",
+	})
+}
+
+// ExportDashboard exports a dashboard to portable JSON format
+// GET /api/chats/:id/dashboards/:dashboardId/export
+func (h *DashboardHandler) ExportDashboard(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+	dashboardID := c.Param("dashboardId")
+
+	exportFormat, err := h.dashboardImportExportService.ExportDashboard(c, userID, chatID, dashboardID)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Set downloadable file headers
+	filename := "dashboard-export.json"
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+
+	c.JSON(200, exportFormat)
+}
+
+// ValidateImport validates dashboard import and suggests connection mappings
+// POST /api/chats/:id/dashboards/import/validate
+func (h *DashboardHandler) ValidateImport(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	var req dtos.ValidateImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Parse export data
+	var exportFormat constants.ExportFormat
+	if err := json.Unmarshal([]byte(req.JSON), &exportFormat); err != nil {
+		errorMsg := "Invalid import JSON format: " + err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Check size limit
+	if len(req.JSON) > constants.MaxImportSizeBytes {
+		errorMsg := "Import data exceeds maximum size limit"
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	validation, err := h.dashboardImportExportService.ValidateImport(c, userID, chatID, &exportFormat)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusInternalServerError, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Convert to DTO
+	requiredConnections := make([]dtos.ConnectionRequiredDTO, 0, len(validation.RequiredConnections))
+	for _, conn := range validation.RequiredConnections {
+		requiredConnections = append(requiredConnections, dtos.ConnectionRequiredDTO{
+			Name:        conn.Name,
+			Type:        conn.Type,
+			UsedBy:      conn.UsedBy,
+			Suggestions: conn.Suggestions,
+		})
+	}
+
+	response := dtos.ValidateImportResponse{
+		Valid:               validation.Valid,
+		Errors:              validation.Errors,
+		Warnings:            validation.Warnings,
+		RequiredConnections: requiredConnections,
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    response,
+	})
+}
+
+// ImportDashboard imports a dashboard from export data
+// POST /api/chats/:id/dashboards/import
+func (h *DashboardHandler) ImportDashboard(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("id")
+
+	var req dtos.ImportDashboardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Parse export data
+	var exportFormat constants.ExportFormat
+	if err := json.Unmarshal([]byte(req.JSON), &exportFormat); err != nil {
+		errorMsg := "Invalid import JSON format: " + err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Check size limit
+	if len(req.JSON) > constants.MaxImportSizeBytes {
+		errorMsg := "Import data exceeds maximum size limit"
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Convert options
+	options := constants.ImportOptions{
+		SkipInvalidWidgets:    req.Options.SkipInvalidWidgets,
+		AutoCreateConnections: req.Options.AutoCreateConnections,
+	}
+
+	dashboard, summary, err := h.dashboardImportExportService.ImportDashboard(
+		c,
+		userID,
+		chatID,
+		&exportFormat,
+		req.Mappings,
+		options,
+	)
+	if err != nil {
+		errorMsg := err.Error()
+		c.JSON(http.StatusBadRequest, dtos.Response{
+			Success: false,
+			Error:   &errorMsg,
+		})
+		return
+	}
+
+	// Convert summary to DTO
+	summaryDTO := dtos.ImportSummaryDTO{
+		WidgetsImported: summary.WidgetsImported,
+		WidgetsSkipped:  summary.WidgetsSkipped,
+		Warnings:        summary.Warnings,
+		ConnectionsUsed: summary.ConnectionsUsed,
+	}
+
+	response := dtos.ImportDashboardResponse{
+		DashboardID: dashboard.ID.Hex(),
+		Summary:     summaryDTO,
+	}
+
+	c.JSON(http.StatusOK, dtos.Response{
+		Success: true,
+		Data:    response,
 	})
 }

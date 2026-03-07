@@ -435,6 +435,7 @@ func Initialize() {
 		redisRepo redis.IRedisRepositories,
 		mongoClient *mongodb.MongoDBClient,
 		kbRepo repositories.KnowledgeBaseRepository,
+		dashboardRepo repositories.DashboardRepository,
 	) services.ChatService {
 		// Get a default LLM client - try in order of preference
 		var llmClient llm.Client
@@ -519,7 +520,7 @@ func Initialize() {
 			}()
 		}
 
-		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo, vectorizationSvc, kbRepo)
+		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo, vectorizationSvc, kbRepo, dashboardRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)
@@ -554,6 +555,17 @@ func Initialize() {
 		return services.NewDashboardService(dashboardRepo, chatRepo, dbManager, llmManager, redisRepo, kbRepo)
 	}); err != nil {
 		log.Fatalf("Failed to provide dashboard service: %v", err)
+	}
+
+	// Dashboard Import/Export Service
+	if err := DiContainer.Provide(func(
+		dashboardRepo repositories.DashboardRepository,
+		chatRepo repositories.ChatRepository,
+		dbManager *dbmanager.Manager,
+	) services.DashboardImportExportService {
+		return services.NewDashboardImportExportService(dashboardRepo, chatRepo, dbManager)
+	}); err != nil {
+		log.Fatalf("Failed to provide dashboard import/export service: %v", err)
 	}
 
 	// Provide handlers
@@ -592,13 +604,14 @@ func Initialize() {
 	// Dashboard Handler
 	if err := DiContainer.Provide(func(
 		dashboardService services.DashboardService,
+		dashboardImportExportService services.DashboardImportExportService,
 		chatService services.ChatService,
 		chatHandler *handlers.ChatHandler,
 	) *handlers.DashboardHandler {
 		// Reuse chat handler as stream handler so dashboard events
 		// flow through the same SSE connection
 		dashboardService.SetStreamHandler(chatHandler)
-		return handlers.NewDashboardHandler(dashboardService)
+		return handlers.NewDashboardHandler(dashboardService, dashboardImportExportService)
 	}); err != nil {
 		log.Fatalf("Failed to provide dashboard handler: %v", err)
 	}

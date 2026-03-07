@@ -37,5 +37,10 @@ func SetupDashboardRoutes(router *gin.Engine) {
 		// Data Refresh
 		protected.POST("/:id/dashboards/:dashboardId/refresh", dashHandler.RefreshDashboard)
 		protected.POST("/:id/dashboards/:dashboardId/widgets/:widgetId/refresh", dashHandler.RefreshWidget)
+
+		// Import/Export
+		protected.GET("/:id/dashboards/:dashboardId/export", dashHandler.ExportDashboard)
+		protected.POST("/:id/dashboards/import/validate", dashHandler.ValidateImport)
+		protected.POST("/:id/dashboards/import", dashHandler.ImportDashboard)
 	}
 }
