@@ -125,6 +125,7 @@ export interface UpdateDashboardRequest {
 
 export interface RegenerateDashboardRequest {
   reason: 'try_another_variant' | 'schema_changed';
+  custom_instructions?: string;
 }
 
 export interface AddWidgetRequest {
