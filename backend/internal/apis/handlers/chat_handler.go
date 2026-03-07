@@ -241,13 +241,15 @@ func (h *ChatHandler) Delete(c *gin.Context) {
 // @Produce json
 // @Param id path string true "Chat ID"
 // @Param duplicate_messages query bool false "Duplicate messages" default(false)
+// @Param duplicate_dashboards query bool false "Duplicate dashboards" default(false)
 
 func (h *ChatHandler) Duplicate(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 	duplicateMessages := c.Query("duplicate_messages") == "true"
+	duplicateDashboards := c.Query("duplicate_dashboards") == "true"
 
-	response, statusCode, err := h.chatService.Duplicate(userID, chatID, duplicateMessages)
+	response, statusCode, err := h.chatService.Duplicate(userID, chatID, duplicateMessages, duplicateDashboards)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{
