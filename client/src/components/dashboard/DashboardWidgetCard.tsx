@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   BarChart3,
   Info,
   MoreHorizontal,
@@ -145,6 +146,10 @@ export default function DashboardWidgetCard({
   const [showInfo, setShowInfo] = useState(false);
   // Table cell expand state for Read more / Less
   const [expandedCells, setExpandedCells] = useState<Record<string, boolean>>({});
+  // Table sorting: column key and direction
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  // Sort tooltip hover state
+  const [hoveredSortColumn, setHoveredSortColumn] = useState<string | null>(null);
 
   // Ref to store previous data so we can show it while loading (Grafana-style)
   const prevDataRef = useRef<Record<string, unknown>[] | undefined>(undefined);
@@ -462,7 +467,84 @@ export default function DashboardWidgetCard({
       : columnKeys.reduce((acc, k) => ({ ...acc, [k]: k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }), {} as Record<string, string>);
 
     const pageSize = widget.table_config?.page_size || 25;
-    const displayRows = data.slice(0, pageSize);
+    
+    // Apply sorting if configured
+    let sortedData = [...data];
+    if (sortConfig) {
+      sortedData.sort((a, b) => {
+        const aVal = getNestedValue(a, sortConfig.key);
+        const bVal = getNestedValue(b, sortConfig.key);
+        
+        // Handle null/undefined
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return sortConfig.direction === 'asc' ? 1 : -1;
+        if (bVal == null) return sortConfig.direction === 'asc' ? -1 : 1;
+        
+        // Compare values
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else if (typeof aVal === 'string' && typeof bVal === 'string') {
+          comparison = aVal.localeCompare(bVal);
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
+      });
+    }
+    
+    const displayRows = sortedData.slice(0, pageSize);
+    
+    // Handle sort toggle
+    const handleSort = (columnKey: string) => {
+      setSortConfig((current) => {
+        if (current?.key === columnKey) {
+          // Toggle direction or clear
+          if (current.direction === 'asc') {
+            return { key: columnKey, direction: 'desc' };
+          } else {
+            return null; // Clear sorting
+          }
+        } else {
+          // New column, start with ascending
+          return { key: columnKey, direction: 'asc' };
+        }
+      });
+    };
+    
+    // Get sort icon for column
+    const getSortIcon = (columnKey: string) => {
+      if (sortConfig?.key === columnKey) {
+        // Active column - black icon with direction indicator
+        return (
+          <div className="flex items-center gap-1">
+            {sortConfig.direction === 'asc' ? (
+              <ArrowUp className="w-4 h-4 text-black" />
+            ) : (
+              <ArrowDown className="w-4 h-4 text-black" />
+            )}
+            <span className="text-[10px] font-semibold text-black uppercase">
+              {sortConfig.direction === 'asc' ? 'Asc' : 'Desc'}
+            </span>
+          </div>
+        );
+      } else {
+        // Inactive column - gray icon
+        return <ArrowUpDown className="w-4 h-4 text-gray-400" />;
+      }
+    };
+    
+    // Get sort tooltip
+    const getSortTooltip = (columnKey: string) => {
+      if (sortConfig?.key === columnKey) {
+        return sortConfig.direction === 'asc' 
+          ? 'Sort descending' 
+          : 'Clear sorting';
+      } else {
+        return 'Sort ascending';
+      }
+    };
 
     // Detect date columns - use getNestedValue to handle dot paths
     const dateColumnSet = new Set<string>();
@@ -583,17 +665,35 @@ export default function DashboardWidgetCard({
             <tr className="border-b-2 border-black/10">
               {columnKeys.map((key) => (
                 <th key={key} className={`text-left py-2.5 px-3 font-bold text-black whitespace-nowrap ${colWidth}`}>
-                  <div className="flex items-center gap-1">
-                    <span>{columnLabels[key] || key}</span>
-                    {dateColumnSet.has(key) && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <span>{columnLabels[key] || key}</span>
+                      {dateColumnSet.has(key) && (
+                        <button
+                          onClick={(ev) => { ev.stopPropagation(); setDateFormats((prev) => ({ ...prev, [key]: !prev[key] })); }}
+                          className="inline-flex text-[10px] px-1.5 py-0.5 ml-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-600 font-medium transition-colors focus:outline-none"
+                          title="Toggle date format"
+                        >
+                          {dateFormats[key] !== false ? 'ISO' : 'Human'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
                       <button
-                        onClick={(ev) => { ev.stopPropagation(); setDateFormats((prev) => ({ ...prev, [key]: !prev[key] })); }}
-                        className="inline-flex text-[10px] px-1.5 py-0.5 ml-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-600 font-medium transition-colors focus:outline-none"
-                        title="Toggle date format"
+                        onClick={(ev) => { ev.stopPropagation(); handleSort(key); }}
+                        onMouseEnter={() => setHoveredSortColumn(key)}
+                        onMouseLeave={() => setHoveredSortColumn(null)}
+                        className="p-0.5 hover:bg-gray-100 rounded transition-colors focus:outline-none"
                       >
-                        {dateFormats[key] !== false ? 'ISO' : 'Human'}
+                        {getSortIcon(key)}
                       </button>
-                    )}
+                      {hoveredSortColumn === key && (
+                        <div className="absolute z-[100] top-full mt-1 left-1/2 -translate-x-1/2 whitespace-nowrap bg-black text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none">
+                          {getSortTooltip(key)}
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-black" />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </th>
               ))}

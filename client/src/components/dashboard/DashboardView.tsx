@@ -586,7 +586,7 @@ export default function DashboardView({
           layout: prev.layout.filter((l) => l.widget_id !== widgetId),
         };
       });
-      toast.success('Widget removed');
+      toast.success('Widget removed', { icon: <Trash2 size={18} /> });
     } catch {
       toast.error('Failed to delete widget');
     }
