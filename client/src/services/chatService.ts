@@ -352,10 +352,10 @@ const chatService = {
     },
 
       // Add a method to get a single chat
-      async duplicateChat(chatId: string, duplicateMessages: boolean = false): Promise<Chat> {
+      async duplicateChat(chatId: string, duplicateMessages: boolean = false, duplicateDashboards: boolean = false): Promise<Chat> {
         try {
             const response = await axios.post<{success: boolean, data: Chat}>(
-                `${API_URL}/chats/${chatId}/duplicate?duplicate_messages=${duplicateMessages}`,
+                `${API_URL}/chats/${chatId}/duplicate?duplicate_messages=${duplicateMessages}&duplicate_dashboards=${duplicateDashboards}`,
                 {},  // Empty body
                 {    // Proper options object with headers
                     withCredentials: true,

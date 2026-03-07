@@ -1431,7 +1431,6 @@ DATABASE_PASSWORD=`; // Mask password
             isLoadingData={isLoadingTables}
             onDeleteTable={(tableName) => {
               console.log('DataStructureTab: Delete table requested:', tableName);
-              // TODO: Implement delete table functionality
             }}
             onDownloadData={(tableName) => {
               console.log('DataStructureTab: Download data requested:', tableName);
