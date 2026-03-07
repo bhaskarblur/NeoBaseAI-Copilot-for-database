@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Check,
+  FileJson,
   Loader2,
   PieChart,
   Plus,
@@ -9,6 +10,7 @@ import {
   Sparkles,
   Table2,
   TrendingUp,
+  Upload,
   X,
   AreaChart,
   BarChart,
@@ -360,7 +362,8 @@ export function AddWidgetModal({
             ) : (
               <div className="flex items-center justify-center gap-2">
                 <Plus className="w-4 h-4" />
-                <span>Add Widget</span>
+                <span className="hidden sm:inline">Add Widget</span>
+                <span className="sm:hidden">Add</span>
               </div>
             )}
           </button>
@@ -461,7 +464,8 @@ export function EditWidgetModal({
             ) : (
               <div className="flex items-center justify-center gap-2">
                 <Sparkles className="w-4 h-4" />
-                <span>Update Widget</span>
+                <span className="hidden sm:inline">Update Widget</span>
+                <span className="sm:hidden">Update</span>
               </div>
             )}
           </button>
@@ -480,7 +484,7 @@ export function EditWidgetModal({
 type RegenerateReason = 'try_another_variant' | 'schema_changed';
 
 interface RegenerateDashboardModalProps {
-  onSubmit: (reason: RegenerateReason) => void;
+  onSubmit: (reason: RegenerateReason, customInstructions?: string) => void;
   onClose: () => void;
 }
 
@@ -504,6 +508,8 @@ export function RegenerateDashboardModal({
   onClose,
 }: Readonly<RegenerateDashboardModalProps>) {
   const [selectedReason, setSelectedReason] = useState<RegenerateReason | null>(null);
+  const [customInstructions, setCustomInstructions] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -528,36 +534,65 @@ export function RegenerateDashboardModal({
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-3">
-          {REGENERATE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setSelectedReason(option.value)}
-              className={`
-                w-full text-left p-4 rounded-xl border-2 transition-all
-                ${selectedReason === option.value
-                  ? 'border-black bg-[#FFD700]/10 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
-                  : 'border-gray-200 hover:border-black hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
-                }
-              `}
-            >
-              <div className="flex items-start gap-3">
-                <div className={`mt-0.5 ${selectedReason === option.value ? 'text-black' : 'text-gray-400'}`}>
-                  {option.icon}
+        <div className="p-6 space-y-4">
+          <div className="space-y-3">
+            <label className="block text-base font-bold text-black">
+              Choose Regeneration Reason
+            </label>
+            {REGENERATE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setSelectedReason(option.value)}
+                className={`
+                  w-full text-left p-4 rounded-xl border-2 transition-all
+                  ${selectedReason === option.value
+                    ? 'border-black bg-[#FFD700]/10 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                    : 'border-gray-200 hover:border-black hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                  }
+                `}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 ${selectedReason === option.value ? 'text-black' : 'text-gray-400'}`}>
+                    {option.icon}
+                  </div>
+                  <div>
+                    <div className="font-bold text-base">{option.label}</div>
+                    <div className="text-sm text-gray-500 mt-0.5">{option.description}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="font-bold text-base">{option.label}</div>
-                  <div className="text-sm text-gray-500 mt-0.5">{option.description}</div>
-                </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
+
+          {selectedReason && (
+            <div>
+              <label className="block text-base font-bold text-black mb-2">
+                Any Instructions (Optional)
+              </label>
+              <textarea
+                ref={textareaRef}
+                value={customInstructions}
+                onChange={(e) => setCustomInstructions(e.target.value)}
+                placeholder='e.g., "Focus on user engagement metrics", "Include more time-series charts", "Add filters for date ranges"'
+                className="
+                  w-full h-24 px-4 py-3 text-base
+                  border-2 border-black rounded-xl
+                  focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-1
+                  resize-none placeholder:text-gray-400
+                  shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                "
+              />
+              <p className="text-sm text-gray-600 mt-1">
+                Tell the AI how to customize the regenerated dashboard
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex gap-4 p-6 border-t-4 border-black bg-gray-50/50">
           <button
-            onClick={() => selectedReason && onSubmit(selectedReason)}
+            onClick={() => selectedReason && onSubmit(selectedReason, customInstructions.trim() || undefined)}
             disabled={!selectedReason}
             className={`
               neo-border px-4 py-2.5 font-bold text-base transition-all flex-1
@@ -571,6 +606,229 @@ export function RegenerateDashboardModal({
               <Sparkles className="w-4 h-4" />
               <span>Regenerate</span>
             </div>
+          </button>
+          <button onClick={onClose} className="neo-button-secondary flex-1">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Import Dashboard Modal
+// ============================================================================
+interface ImportDashboardModalProps {
+  isImporting: boolean;
+  onSubmit: (jsonContent: string, file?: File) => void;
+  onClose: () => void;
+}
+
+export function ImportDashboardModal({
+  isImporting,
+  onSubmit,
+  onClose,
+}: Readonly<ImportDashboardModalProps>) {
+  const [importMethod, setImportMethod] = useState<'file' | 'paste'>('file');
+  const [pastedContent, setPastedContent] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.name.endsWith('.json')) {
+        setError('Please select a JSON file');
+        return;
+      }
+      setSelectedFile(file);
+      setError(null);
+    }
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+    
+    if (importMethod === 'file') {
+      if (!selectedFile) {
+        setError('Please select a file');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const content = e.target?.result as string;
+          JSON.parse(content); // Validate JSON
+          onSubmit(content, selectedFile);
+        } catch (err) {
+          setError('Invalid JSON format');
+        }
+      };
+      reader.readAsText(selectedFile);
+    } else {
+      if (!pastedContent.trim()) {
+        setError('Please paste JSON content');
+        return;
+      }
+      try {
+        JSON.parse(pastedContent); // Validate JSON
+        onSubmit(pastedContent.trim());
+      } catch (err) {
+        setError('Invalid JSON format');
+      }
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white neo-border rounded-lg w-full max-w-2xl">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b-4 border-black">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center">
+              <Upload className="w-5 h-5 text-black" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Import Dashboard</h2>
+              <p className="text-sm text-gray-500 mt-0.5">Import a dashboard from JSON file or paste content</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-4">
+          {/* Import Method Toggle */}
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={() => setImportMethod('file')}
+              className={`
+                flex-1 py-2.5 px-4 rounded-lg border-2 font-semibold text-sm transition-all
+                ${importMethod === 'file'
+                  ? 'border-black bg-[#FFD700] shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                  : 'border-gray-300 bg-white hover:border-gray-400'
+                }
+              `}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <FileJson className="w-4 h-4" />
+                Upload File
+              </div>
+            </button>
+            <button
+              onClick={() => setImportMethod('paste')}
+              className={`
+                flex-1 py-2.5 px-4 rounded-lg border-2 font-semibold text-sm transition-all
+                ${importMethod === 'paste'
+                  ? 'border-black bg-[#FFD700] shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                  : 'border-gray-300 bg-white hover:border-gray-400'
+                }
+              `}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <FileJson className="w-4 h-4" />
+                Paste JSON
+              </div>
+            </button>
+          </div>
+
+          {/* File Upload Method */}
+          {importMethod === 'file' && (
+            <div>
+              <label className="block text-sm font-bold text-black mb-2">
+                Select Dashboard JSON File
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="
+                  w-full py-8 px-4 border-2 border-dashed border-gray-300 rounded-xl
+                  hover:border-black hover:bg-gray-50 transition-all
+                  flex flex-col items-center justify-center gap-2
+                "
+              >
+                <Upload className="w-8 h-8 text-gray-400" />
+                <span className="text-sm font-semibold text-gray-600">
+                  {selectedFile ? selectedFile.name : 'Click to select or drag & drop'}
+                </span>
+                <span className="text-xs text-gray-400">JSON files only</span>
+              </button>
+            </div>
+          )}
+
+          {/* Paste JSON Method */}
+          {importMethod === 'paste' && (
+            <div>
+              <label className="block text-sm font-bold text-black mb-2">
+                Paste Dashboard JSON Content
+              </label>
+              <textarea
+                ref={textareaRef}
+                value={pastedContent}
+                onChange={(e) => {
+                  setPastedContent(e.target.value);
+                  setError(null);
+                }}
+                placeholder='Paste your dashboard JSON here...\n\nExample:\n{\n  "name": "My Dashboard",\n  "widgets": [...],\n  ...\n}'
+                className="
+                  w-full h-64 px-4 py-3 text-sm font-mono
+                  border-2 border-black rounded-xl
+                  focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-1
+                  resize-none placeholder:text-gray-400
+                  shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
+                "
+              />
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className="px-4 py-3 bg-red-50 border-2 border-red-300 rounded-lg">
+              <p className="text-sm font-semibold text-red-600">{error}</p>
+            </div>
+          )}
+
+          {/* Info Box */}
+          <div className="px-4 py-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+            <p className="text-sm text-gray-700">
+              <span className="font-semibold">Note:</span> The dashboard will be imported with connection mappings. 
+              If referenced data sources don't exist, you'll be prompted to map them.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-4 p-6 border-t-4 border-black bg-gray-50/50">
+          <button
+            onClick={handleSubmit}
+            disabled={isImporting || (importMethod === 'file' && !selectedFile) || (importMethod === 'paste' && !pastedContent.trim())}
+            className="neo-border bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 font-bold text-base transition-all hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-y-[0px] active:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex-1"
+          >
+            {isImporting ? (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Importing...</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-2">
+                <Upload className="w-4 h-4" />
+                <span>Import Dashboard</span>
+              </div>
+            )}
           </button>
           <button onClick={onClose} className="neo-button-secondary flex-1">
             Cancel

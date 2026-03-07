@@ -769,6 +769,11 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 			dashboard.Name, dashboard.Description)
 	}
 
+	// Append custom instructions if provided
+	if req.CustomInstructions != "" {
+		regeneratePrompt += fmt.Sprintf("\n\nUser's additional instructions: %s", req.CustomInstructions)
+	}
+
 	// 4. Build LLM messages and call
 	messages := s.buildDashboardLLMMessages(chat, constants.DashboardGenerationSystemPrompt, regeneratePrompt, dbType, dashboard.TimeRange)
 

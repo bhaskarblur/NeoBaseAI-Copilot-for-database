@@ -1,11 +1,13 @@
 import {
   ChevronDown,
   Clock,
+  Download,
   MoreHorizontal,
   Plus,
   RefreshCcw,
   Sparkles,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -28,6 +30,8 @@ interface DashboardHeaderProps {
   onAddWidget: () => void;
   onRegenerateDashboard: () => void;
   onDeleteDashboard: () => void;
+  onExportDashboard: () => void;
+  onImportDashboard: () => void;
 }
 
 export default function DashboardHeader({
@@ -43,6 +47,8 @@ export default function DashboardHeader({
   onAddWidget,
   onRegenerateDashboard,
   onDeleteDashboard,
+  onExportDashboard,
+  onImportDashboard,
 }: Readonly<DashboardHeaderProps>) {
   const [showSelector, setShowSelector] = useState(false);
   const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number } | null>(null);
@@ -155,8 +161,8 @@ export default function DashboardHeader({
 
         {/* Right side controls */}
         <div className="flex items-center gap-2.5 flex-shrink-0">
-          {/* Manual refresh — hidden on mobile, shown in more menu instead */}
-          <div className="relative group hidden md:flex items-center gap-1">
+          {/* Manual refresh */}
+          <div className="relative group flex items-center gap-1">
             {!isRefreshing ? (
               <button
                 onClick={onRefreshDashboard}
@@ -204,8 +210,8 @@ export default function DashboardHeader({
             )}
           </div>
 
-          {/* Refresh interval selector — hidden on mobile */}
-          <div className="relative group hidden md:block">
+          {/* Refresh interval selector */}
+          <div className="relative group">
             <button
               ref={refreshBtnRef}
               onClick={handleToggleRefreshMenu}
@@ -349,19 +355,6 @@ export default function DashboardHeader({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="py-1">
-            {/* Refresh — visible only on mobile */}
-            <button
-              onClick={() => {
-                setShowMoreMenu(false);
-                setMoreMenuPosition(null);
-                onRefreshDashboard();
-              }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors md:hidden"
-            >
-              <RefreshCcw className="w-4 h-4 mr-2 text-black" />
-              Refresh Now
-            </button>
-            <div className="h-px bg-gray-200 mx-2 md:hidden" />
             <button
               onClick={() => {
                 setShowMoreMenu(false);
@@ -385,6 +378,37 @@ export default function DashboardHeader({
               <Sparkles className="w-4 h-4 mr-2 text-black" />
               Regenerate
             </button>
+            <div className="h-px bg-gray-200 mx-2" />
+            <div className="relative group">
+              <button className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors">
+                <Download className="w-4 h-4 mr-2 text-black" />
+                Import/Export
+              </button>
+              <div className="hidden group-hover:block absolute right-full top-0 mr-1 w-40 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-50 py-1">
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    setMoreMenuPosition(null);
+                    onExportDashboard();
+                  }}
+                  className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    setMoreMenuPosition(null);
+                    onImportDashboard();
+                  }}
+                  className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import
+                </button>
+              </div>
+            </div>
             <div className="h-px bg-gray-200 mx-2" />
             <button
               onClick={() => {

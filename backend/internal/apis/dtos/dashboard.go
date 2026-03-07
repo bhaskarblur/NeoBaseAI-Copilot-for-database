@@ -19,7 +19,8 @@ type UpdateDashboardRequest struct {
 
 // RegenerateDashboardRequest is used when regenerating a dashboard
 type RegenerateDashboardRequest struct {
-	Reason string `json:"reason" binding:"required"` // "try_another_variant" or "schema_changed"
+	Reason             string `json:"reason" binding:"required"`     // "try_another_variant" or "schema_changed"
+	CustomInstructions string `json:"custom_instructions,omitempty"` // Optional user instructions for regeneration
 }
 
 // AddWidgetRequest is used when adding a widget to a dashboard via AI

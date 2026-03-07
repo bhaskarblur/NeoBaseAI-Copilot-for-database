@@ -820,7 +820,7 @@ export default function DashboardView({
     }
   };
 
-  const handleRegenerateDashboard = async (reason: 'try_another_variant' | 'schema_changed') => {
+  const handleRegenerateDashboard = async (reason: 'try_another_variant' | 'schema_changed', customInstructions?: string) => {
     if (!activeDashboard) return;
     
     if (!streamId || !isConnected) {
@@ -838,6 +838,7 @@ export default function DashboardView({
     try {
       await dashboardService.regenerateDashboard(chatId, activeDashboard.id, streamId, {
         reason,
+        custom_instructions: customInstructions,
       });
     } catch {
       toast.error('Failed to regenerate dashboard');

@@ -119,9 +119,15 @@ export default function DashboardWidgetGrid({
     <div className="px-4 md:px-8 lg:px-12 mx-auto space-y-5">
       {rows.map((row, rowIdx) => {
         if (row.type === 'stat-row') {
-          // Stat widgets share the row equally
+          // Stat widgets share the row equally with responsive behavior
+          const statGridClass = 
+            row.widgets.length === 1 ? 'grid-cols-1' :
+            row.widgets.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
+            row.widgets.length === 3 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
+            'grid-cols-1 md:grid-cols-2 lg:grid-cols-4';
+          
           return (
-            <div key={`row-${rowIdx}`} className="grid gap-5" style={{ gridTemplateColumns: `repeat(${Math.min(row.widgets.length, 4)}, 1fr)` }}>
+            <div key={`row-${rowIdx}`} className={`grid gap-5 ${statGridClass}`}>
               {row.widgets.map((w) => (
                 <div key={w.id}>{renderWidgetCard(w)}</div>
               ))}
