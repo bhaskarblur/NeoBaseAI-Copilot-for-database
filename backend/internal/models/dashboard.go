@@ -38,7 +38,7 @@ type Widget struct {
 	UserID      primitive.ObjectID `bson:"user_id" json:"user_id"`
 	Title       string             `bson:"title" json:"title"`
 	Description string             `bson:"description,omitempty" json:"description,omitempty"`
-	WidgetType  string             `bson:"widget_type" json:"widget_type"` // "stat", "line", "bar", "area", "pie", "table", "combo"
+	WidgetType  string             `bson:"widget_type" json:"widget_type"` // "stat", "line", "bar", "area", "pie", "table", "combo", "gauge", "bar_gauge", "heatmap", "histogram"
 
 	// Query Configuration
 	Query     string `bson:"query" json:"query"`                               // The SQL/MongoDB query to execute
@@ -48,11 +48,13 @@ type Widget struct {
 	// Visualization Configuration (reuses existing ChartConfiguration structure)
 	ChartConfigJSON string `bson:"chart_config_json,omitempty" json:"chart_config_json,omitempty"` // Full chart config as JSON string
 
-	// Stat Card specific
-	StatConfig *StatWidgetConfig `bson:"stat_config,omitempty" json:"stat_config,omitempty"`
-
-	// Table widget specific
-	TableConfig *TableWidgetConfig `bson:"table_config,omitempty" json:"table_config,omitempty"`
+	// Widget-specific configurations
+	StatConfig      *StatWidgetConfig      `bson:"stat_config,omitempty" json:"stat_config,omitempty"`
+	TableConfig     *TableWidgetConfig     `bson:"table_config,omitempty" json:"table_config,omitempty"`
+	GaugeConfig     *GaugeWidgetConfig     `bson:"gauge_config,omitempty" json:"gauge_config,omitempty"`
+	BarGaugeConfig  *BarGaugeWidgetConfig  `bson:"bar_gauge_config,omitempty" json:"bar_gauge_config,omitempty"`
+	HeatmapConfig   *HeatmapWidgetConfig   `bson:"heatmap_config,omitempty" json:"heatmap_config,omitempty"`
+	HistogramConfig *HistogramWidgetConfig `bson:"histogram_config,omitempty" json:"histogram_config,omitempty"`
 
 	LastRefreshedAt *primitive.DateTime `bson:"last_refreshed_at,omitempty" json:"last_refreshed_at,omitempty"` // When data was last refreshed
 
@@ -90,6 +92,55 @@ type TableWidgetColumn struct {
 	Width  string `bson:"width,omitempty" json:"width,omitempty"`
 }
 
+// GaugeWidgetConfig for radial gauge (speedometer-style) widgets
+type GaugeWidgetConfig struct {
+	Min           float64     `bson:"min" json:"min"`                                   // Minimum value (default: 0)
+	Max           float64     `bson:"max" json:"max"`                                   // Maximum value (default: 100)
+	Thresholds    []Threshold `bson:"thresholds,omitempty" json:"thresholds,omitempty"` // Color thresholds
+	ShowThreshold bool        `bson:"show_threshold" json:"show_threshold"`             // Show threshold markers
+	DecimalPlaces int         `bson:"decimal_places" json:"decimal_places"`             // Value precision
+	Unit          string      `bson:"unit,omitempty" json:"unit,omitempty"`             // "%", "ms", "req/s", etc.
+}
+
+// BarGaugeWidgetConfig for horizontal/vertical bar gauge widgets
+type BarGaugeWidgetConfig struct {
+	Min           float64     `bson:"min" json:"min"`                                   // Minimum value
+	Max           float64     `bson:"max" json:"max"`                                   // Maximum value
+	Thresholds    []Threshold `bson:"thresholds,omitempty" json:"thresholds,omitempty"` // Color thresholds
+	Orientation   string      `bson:"orientation" json:"orientation"`                   // "horizontal" or "vertical"
+	DisplayMode   string      `bson:"display_mode" json:"display_mode"`                 // "basic", "lcd", "gradient"
+	ShowUnfilled  bool        `bson:"show_unfilled" json:"show_unfilled"`               // Show unfilled portion
+	DecimalPlaces int         `bson:"decimal_places" json:"decimal_places"`
+	Unit          string      `bson:"unit,omitempty" json:"unit,omitempty"`
+}
+
+// HeatmapWidgetConfig for 2D heatmap visualizations
+type HeatmapWidgetConfig struct {
+	XAxisColumn string `bson:"x_axis_column" json:"x_axis_column"`                 // Time or category column
+	YAxisColumn string `bson:"y_axis_column" json:"y_axis_column"`                 // Category column
+	ValueColumn string `bson:"value_column" json:"value_column"`                   // Metric/value column
+	ColorScheme string `bson:"color_scheme" json:"color_scheme"`                   // "green-red", "blue-yellow", "grayscale"
+	ShowValues  bool   `bson:"show_values" json:"show_values"`                     // Display values in cells
+	ShowLegend  bool   `bson:"show_legend" json:"show_legend"`                     // Show color scale legend
+	BucketSize  string `bson:"bucket_size,omitempty" json:"bucket_size,omitempty"` // "1h", "1d" for time-based
+}
+
+// HistogramWidgetConfig for value distribution visualizations
+type HistogramWidgetConfig struct {
+	ValueColumn   string  `bson:"value_column" json:"value_column"`                   // Column to create histogram from
+	BucketCount   int     `bson:"bucket_count" json:"bucket_count"`                   // Number of bins/buckets
+	BucketSize    float64 `bson:"bucket_size,omitempty" json:"bucket_size,omitempty"` // Fixed bucket size (alternative to count)
+	ShowMean      bool    `bson:"show_mean" json:"show_mean"`                         // Show mean line
+	ShowMedian    bool    `bson:"show_median" json:"show_median"`                     // Show median line
+	DecimalPlaces int     `bson:"decimal_places" json:"decimal_places"`
+}
+
+// Threshold defines a color threshold for gauge/bar gauge widgets
+type Threshold struct {
+	Value float64 `bson:"value" json:"value"` // Threshold value
+	Color string  `bson:"color" json:"color"` // Color when value exceeds threshold (hex or name)
+}
+
 // DashboardBlueprint is a lightweight preview of a dashboard (no queries, just overview)
 // Used during the recommendation flow before full generation
 type DashboardBlueprint struct {
@@ -102,7 +153,7 @@ type DashboardBlueprint struct {
 // BlueprintWidgetPreview is a lightweight widget preview in a blueprint
 type BlueprintWidgetPreview struct {
 	Title      string `json:"title"`
-	WidgetType string `json:"widget_type"` // "stat", "line", "bar", "area", "pie", "table", "combo"
+	WidgetType string `json:"widget_type"` // "stat", "line", "bar", "area", "pie", "table", "combo", "gauge", "bar_gauge", "heatmap", "histogram"
 }
 
 // NewDashboard creates a new Dashboard instance with defaults

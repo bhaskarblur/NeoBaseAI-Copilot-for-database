@@ -1,9 +1,12 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   BarChart3,
+  Gauge,
+  Grid3x3,
   Info,
   MoreHorizontal,
   Pencil,
@@ -58,6 +61,10 @@ const WIDGET_TYPE_ICONS: Record<WidgetType, React.ReactNode> = {
   pie: <PieChart className="w-5 h-5" />,
   table: <Table2 className="w-5 h-5" />,
   combo: <BarChart3 className="w-5 h-5" />,
+  gauge: <Gauge className="w-5 h-5" />,
+  bar_gauge: <Activity className="w-5 h-5" />,
+  heatmap: <Grid3x3 className="w-5 h-5" />,
+  histogram: <BarChart3 className="w-5 h-5" />,
 };
 
 /* Grafana-style loading bar keyframes via inline style tag */
@@ -270,6 +277,14 @@ export default function DashboardWidgetCard({
         return renderPieChart();
       case 'table':
         return renderTableWidget();
+      case 'gauge':
+        return renderGaugeWidget();
+      case 'bar_gauge':
+        return renderBarGaugeWidget();
+      case 'heatmap':
+        return renderHeatmapWidget();
+      case 'histogram':
+        return renderHistogramWidget();
       default:
         return renderBarChart();
     }
@@ -403,7 +418,7 @@ export default function DashboardWidgetCard({
     const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
 
     return (
-      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 6 ? 'h-[280px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
+      <div className={`${data.length >= 10 ? 'h-[340px]' : data.length >= 8 ? 'h-[310px]' : data.length >= 6 ? 'h-[290px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             <Pie
@@ -431,9 +446,370 @@ export default function DashboardWidgetCard({
               itemStyle={TOOLTIP_STYLE.itemStyle}
               formatter={(value: number | string, name: string) => [value, legendFormatter(name)]}
             />
-            <Legend wrapperStyle={{ fontSize: 14, paddingBottom: 12, paddingTop: 12, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
+            <Legend wrapperStyle={{ fontSize: 14, paddingBottom: 12, paddingTop: 12, paddingLeft: 12, paddingRight: 12 }} iconSize={14} formatter={legendFormatter} />
           </RechartsPieChart>
         </ResponsiveContainer>
+      </div>
+    );
+  };
+
+  const renderGaugeWidget = () => {
+    const config = widget.gauge_config;
+    const data = displayData;
+    if (!config || !data || data.length === 0) return null;
+
+    const firstRow = data[0];
+    const keys = Object.keys(firstRow);
+    const value = firstRow[keys[0]] as number;
+
+    if (value === null || value === undefined) {
+      return (
+        <div className="flex items-center justify-center h-full min-h-[120px]">
+          <div className="text-4xl font-black text-gray-400">—</div>
+        </div>
+      );
+    }
+
+    const min = config.min ?? 0;
+    const max = config.max ?? 100;
+    const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+    
+    // Get color based on thresholds
+    const getColor = () => {
+      if (!config.thresholds || config.thresholds.length === 0) return '#047857';
+      const sorted = [...config.thresholds].sort((a, b) => b.value - a.value);
+      for (const threshold of sorted) {
+        if (value >= threshold.value) return threshold.color;
+      }
+      return config.thresholds[0]?.color || '#047857';
+    };
+
+    const color = getColor();
+    const displayValue = value.toFixed(config.decimal_places ?? 0);
+
+    return (
+      <div className="min-h-[240px] w-full flex flex-col items-center justify-center py-4 outline-none focus:outline-none" tabIndex={-1}>
+        <div className="relative w-full max-w-[190px] aspect-square">
+          {/* Background arc */}
+          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth="8"
+              strokeDasharray="251.2"
+              strokeDashoffset="62.8"
+            />
+            {/* Value arc */}
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke={color}
+              strokeWidth="8"
+              strokeDasharray="251.2"
+              strokeDashoffset={62.8 + ((100 - percentage) / 100) * 188.4}
+              strokeLinecap="round"
+              style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+            />
+          </svg>
+          {/* Center value */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="text-3xl font-black text-black">
+              {displayValue}{config.unit || ''}
+            </div>
+            <div className="text-sm text-gray-500 mt-1">
+              {min} - {max}
+            </div>
+          </div>
+        </div>
+        {config.show_threshold && config.thresholds && config.thresholds.length > 0 && (
+          <div className="flex gap-3 mt-3 flex-wrap justify-center px-2">
+            {config.thresholds.map((t, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-xs">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
+                <span className="text-gray-600 font-medium">{t.value}{config.unit || ''}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBarGaugeWidget = () => {
+    const config = widget.bar_gauge_config;
+    const data = displayData;
+    if (!config || !data || data.length === 0) return null;
+
+    const min = config.min ?? 0;
+    const max = config.max ?? 100;
+
+    // Get color for value based on thresholds
+    const getColor = (value: number) => {
+      if (!config.thresholds || config.thresholds.length === 0) return '#047857';
+      const sorted = [...config.thresholds].sort((a, b) => b.value - a.value);
+      for (const threshold of sorted) {
+        if (value >= threshold.value) return threshold.color;
+      }
+      return config.thresholds[0]?.color || '#047857';
+    };
+
+    return (
+      <div className="min-h-[260px] w-full flex items-center py-4 outline-none focus:outline-none" tabIndex={-1}>
+        <div className="w-full space-y-3 px-2">
+          {data.slice(0, 8).map((row, idx) => {
+            const keys = Object.keys(row);
+            const label = keys.find(k => typeof row[k] !== 'number');
+            const valueKey = keys.find(k => typeof row[k] === 'number');
+            const value = valueKey ? (row[valueKey] as number) : 0;
+            const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+            const color = getColor(value);
+            const displayValue = value.toFixed(config.decimal_places ?? 0);
+
+            return (
+              <div key={idx} className="space-y-2">
+                <div className="flex items-center justify-between text-base">
+                  <span className="font-semibold text-gray-700">
+                    {label ? String(row[label]) : `Series ${idx + 1}`}
+                  </span>
+                  <span className="font-bold text-black">
+                    {displayValue}{config.unit || ''}
+                  </span>
+                </div>
+                <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${percentage}%`,
+                      background: config.display_mode === 'gradient'
+                        ? `linear-gradient(to right, ${color}cc, ${color})`
+                        : color,
+                    }}
+                  />
+                  {config.display_mode === 'lcd' && (
+                    <div className="absolute inset-0 flex">
+                      {Array.from({ length: 20 }).map((_, i) => (
+                        <div key={i} className="flex-1 border-r border-white/30" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderHeatmapWidget = () => {
+    const config = widget.heatmap_config;
+    const data = displayData;
+    if (!config || !data || data.length === 0) return null;
+
+    // Get unique x and y values
+    const xValues = Array.from(new Set(data.map(row => String(row[config.x_axis_column]))));
+    const yValues = Array.from(new Set(data.map(row => String(row[config.y_axis_column]))));
+
+    // Get min/max for color scaling
+    const values = data.map(row => row[config.value_column] as number).filter(v => typeof v === 'number');
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+
+    // Color scheme mapping
+    const getColorForValue = (value: number) => {
+      const normalized = (value - minValue) / (maxValue - minValue);
+      
+      if (config.color_scheme === 'green-red') {
+        const r = Math.round(255 * normalized);
+        const g = Math.round(255 * (1 - normalized));
+        return `rgb(${r}, ${g}, 0)`;
+      } else if (config.color_scheme === 'blue-yellow') {
+        return normalized > 0.5
+          ? `rgb(255, 255, ${Math.round(255 * (1 - normalized) * 2)})`
+          : `rgb(${Math.round(255 * normalized * 2)}, ${Math.round(255 * normalized * 2)}, 255)`;
+      } else {
+        const gray = Math.round(255 * normalized);
+        return `rgb(${gray}, ${gray}, ${gray})`;
+      }
+    };
+
+    // Create grid matrix
+    const getValueForCell = (x: string, y: string): number | null => {
+      const row = data.find(
+        r => String(r[config.x_axis_column]) === x && String(r[config.y_axis_column]) === y
+      );
+      return row ? (row[config.value_column] as number) : null;
+    };
+
+    return (
+      <div className="min-h-[280px] w-full flex flex-col justify-center py-4 outline-none focus:outline-none" tabIndex={-1}>
+        <div className="overflow-x-auto px-2">
+          <div className="inline-block min-w-full">
+            <div className="flex">
+              {/* Y-axis labels */}
+              <div className="flex flex-col justify-around pr-2 text-sm font-semibold text-gray-600">
+                <div className="h-6" />
+                {yValues.map((y, i) => (
+                  <div key={i} className="h-10 flex items-center text-sm">{y}</div>
+                ))}
+              </div>
+              {/* Grid */}
+              <div className="flex-1">
+                {/* X-axis labels */}
+                <div className="flex mb-1">
+                  {xValues.map((x, i) => (
+                    <div key={i} className="flex-1 text-center text-sm font-semibold text-gray-600 px-1">
+                      {x.length > 8 ? x.slice(0, 8) + '...' : x}
+                    </div>
+                  ))}
+                </div>
+                {/* Cells */}
+                {yValues.map((y, yIdx) => (
+                  <div key={yIdx} className="flex gap-1 mb-1">
+                    {xValues.map((x, xIdx) => {
+                      const value = getValueForCell(x, y);
+                      return (
+                        <div
+                          key={xIdx}
+                          className="flex-1 h-10 rounded border border-gray-300 flex items-center justify-center text-base font-semibold"
+                          style={{
+                            backgroundColor: value !== null ? getColorForValue(value) : '#f3f4f6',
+                            color: value !== null && value > (maxValue - minValue) / 2 ? '#fff' : '#000',
+                          }}
+                          title={value !== null ? `${x}, ${y}: ${value}` : 'No data'}
+                        >
+                          {config.show_values && value !== null ? value.toFixed(0) : ''}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        {config.show_legend && (
+          <div className="mt-6 flex items-center justify-center gap-2 px-2">
+            <span className="text-sm text-gray-600 font-medium">Low</span>
+            <div className="flex h-4 w-32 rounded">{Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex-1"
+                  style={{ backgroundColor: getColorForValue(minValue + (maxValue - minValue) * (i / 9)) }}
+                />
+              ))}
+            </div>
+            <span className="text-sm text-gray-600 font-medium">High</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHistogramWidget = () => {
+    const config = widget.histogram_config;
+    const data = displayData;
+    if (!config || !data || data.length === 0) return null;
+
+    // Extract values from the specified column
+    const values = data
+      .map(row => row[config.value_column] as number)
+      .filter(v => typeof v === 'number' && !isNaN(v));
+
+    if (values.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <span className="text-gray-500">No numeric data for histogram</span>
+        </div>
+      );
+    }
+
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = maxVal - minVal;
+
+    // Calculate buckets
+    const bucketCount = config.bucket_count || 10;
+    const bucketSize = config.bucket_size || range / bucketCount;
+    const buckets: { range: string; count: number; start: number; end: number }[] = [];
+
+    for (let i = 0; i < bucketCount; i++) {
+      const start = minVal + i * bucketSize;
+      const end = start + bucketSize;
+      const count = values.filter(v => v >= start && (i === bucketCount - 1 ? v <= end : v < end)).length;
+      buckets.push({
+        range: `${start.toFixed(config.decimal_places ?? 0)}-${end.toFixed(config.decimal_places ?? 0)}`,
+        count,
+        start,
+        end,
+      });
+    }
+
+    // Calculate mean and median if needed
+    const mean = config.show_mean ? values.reduce((a, b) => a + b, 0) / values.length : undefined;
+    const median = config.show_median
+      ? (() => {
+          const sorted = [...values].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+        })()
+      : undefined;
+
+    // Dynamic height based on bucket count and whether statistics are shown
+    const showStats = mean !== undefined || median !== undefined;
+    const chartHeight = bucketCount <= 6 ? 280 : bucketCount <= 10 ? 360 : 390;
+
+    return (
+      <div className="w-full min-h-[320px] outline-none focus:outline-none" tabIndex={-1}>
+        <div style={{ height: chartHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={buckets} margin={{ top: 24, right: 10, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis
+                dataKey="range"
+                tick={{ fontSize: 12, fill: '#6b7280' }}
+                tickLine={false}
+                axisLine={{ stroke: '#d1d5db' }}
+                angle={-45}
+                textAnchor="end"
+                height={60}
+              />
+              <YAxis
+                label={{ value: 'Frequency', angle: -90, position: 'insideLeft', style: { fontSize: 13, fill: '#6b7280' } }}
+                tick={{ fontSize: 13, fill: '#6b7280' }}
+                tickLine={false}
+                axisLine={{ stroke: '#d1d5db' }}
+              />
+              <Tooltip {...TOOLTIP_STYLE} formatter={(value: number) => [value, 'Count']} />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                {buckets.map((_entry, index) => (
+                  <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        {showStats && (
+          <div className="flex gap-4 justify-center mt-4 mb-3 text-sm">
+            {mean !== undefined && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-blue-500" />
+                <span className="text-gray-600 font-medium">Mean: <span className="font-bold text-black">{mean.toFixed(config.decimal_places ?? 1)}</span></span>
+              </div>
+            )}
+            {median !== undefined && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-purple-500" />
+                <span className="text-gray-600 font-medium">Median: <span className="font-bold text-black">{median.toFixed(config.decimal_places ?? 1)}</span></span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };

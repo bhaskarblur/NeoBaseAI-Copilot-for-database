@@ -40,7 +40,7 @@ export interface WidgetLayout {
 
 // === Widget Types ===
 
-export type WidgetType = 'stat' | 'line' | 'bar' | 'area' | 'pie' | 'table' | 'combo';
+export type WidgetType = 'stat' | 'line' | 'bar' | 'area' | 'pie' | 'table' | 'combo' | 'gauge' | 'bar_gauge' | 'heatmap' | 'histogram';
 
 export interface Widget {
   id: string;
@@ -54,6 +54,10 @@ export interface Widget {
   chart_config_json?: string;
   stat_config?: StatWidgetConfig;
   table_config?: TableWidgetConfig;
+  gauge_config?: GaugeWidgetConfig;
+  bar_gauge_config?: BarGaugeWidgetConfig;
+  heatmap_config?: HeatmapWidgetConfig;
+  histogram_config?: HistogramWidgetConfig;
   last_refreshed_at?: string;
   generated_prompt?: string;
   created_at: string;
@@ -91,6 +95,50 @@ export interface TableWidgetColumn {
   label: string;
   format?: 'text' | 'number' | 'date' | 'currency';
   width?: string;
+}
+
+export interface GaugeWidgetConfig {
+  min: number;              // Minimum value (default: 0)
+  max: number;              // Maximum value (default: 100)
+  thresholds?: Threshold[]; // Color thresholds
+  show_threshold?: boolean; // Show threshold markers
+  decimal_places?: number;  // Value precision
+  unit?: string;            // '%', 'ms', 'req/s', etc.
+}
+
+export interface BarGaugeWidgetConfig {
+  min: number;              // Minimum value
+  max: number;              // Maximum value
+  thresholds?: Threshold[]; // Color thresholds
+  orientation: 'horizontal' | 'vertical';
+  display_mode: 'basic' | 'lcd' | 'gradient';
+  show_unfilled?: boolean;  // Show unfilled portion
+  decimal_places?: number;
+  unit?: string;
+}
+
+export interface HeatmapWidgetConfig {
+  x_axis_column: string;    // Time or category column
+  y_axis_column: string;    // Category column
+  value_column: string;     // Metric/value column
+  color_scheme: 'green-red' | 'blue-yellow' | 'grayscale';
+  show_values?: boolean;    // Display values in cells
+  show_legend?: boolean;    // Show color scale legend
+  bucket_size?: string;     // '1h', '1d' for time-based
+}
+
+export interface HistogramWidgetConfig {
+  value_column: string;     // Column to create histogram from
+  bucket_count: number;     // Number of bins/buckets
+  bucket_size?: number;     // Fixed bucket size (alternative to count)
+  show_mean?: boolean;      // Show mean line
+  show_median?: boolean;    // Show median line
+  decimal_places?: number;
+}
+
+export interface Threshold {
+  value: number;  // Threshold value
+  color: string;  // Color when value exceeds threshold (hex or name)
 }
 
 // === Blueprint Types (Recommendation Flow) ===

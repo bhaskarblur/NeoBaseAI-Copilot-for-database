@@ -47,27 +47,34 @@ export default function DashboardWidgetGrid({
   // Build smart rows from widget list
   const rows = useMemo(() => {
     const statWidgets: Widget[] = [];
+    const gaugeWidgets: Widget[] = [];
     const pieWidgets: Widget[] = [];
-    const otherChartWidgets: Widget[] = []; // line, bar, area
+    const otherChartWidgets: Widget[] = []; // line, bar, area, heatmap, histogram
     const tableWidgets: Widget[] = [];
 
     for (const w of dashboard.widgets) {
       if (w.widget_type === 'stat') statWidgets.push(w);
+      else if (w.widget_type === 'gauge' || w.widget_type === 'bar_gauge') gaugeWidgets.push(w);
       else if (w.widget_type === 'table') tableWidgets.push(w);
       else if (w.widget_type === 'pie') pieWidgets.push(w);
-      else otherChartWidgets.push(w); // line, bar, area
+      else otherChartWidgets.push(w); // line, bar, area, heatmap, histogram
     }
 
-    const result: { widgets: Widget[]; type: 'stat-row' | 'chart-row' | 'table-row' }[] = [];
+    const result: { widgets: Widget[]; type: 'stat-row' | 'gauge-row' | 'chart-row' | 'table-row' }[] = [];
 
     // All stat widgets in one row shared equally
     if (statWidgets.length > 0) {
       result.push({ widgets: statWidgets, type: 'stat-row' });
     }
 
+    // All gauge widgets (gauge + bar_gauge) in one row shared equally
+    if (gaugeWidgets.length > 0) {
+      result.push({ widgets: gaugeWidgets, type: 'gauge-row' });
+    }
+
     // Smart chart layout:
     // - Pie charts NEVER get a full row alone (they center-align and waste space)
-    // - Line/bar/area can take full width (they utilize it well)
+    // - Line/bar/area/heatmap/histogram can take full width (they utilize it well)
     // Strategy: Pair up pies first, then handle other charts
     
     const allCharts = [...pieWidgets, ...otherChartWidgets];
@@ -96,14 +103,24 @@ export default function DashboardWidgetGrid({
 
     // Second pass: Handle remaining non-pie charts
     // These can take full width or pair up
+    // Heatmaps prefer full width due to their 2D nature
     const remainingCharts = otherChartWidgets.filter(w => !used.has(w.id));
-    for (let i = 0; i < remainingCharts.length; i += 2) {
-      if (i + 1 < remainingCharts.length) {
-        // Pair two charts
-        result.push({ widgets: [remainingCharts[i], remainingCharts[i + 1]], type: 'chart-row' });
+    for (let i = 0; i < remainingCharts.length; i++) {
+      const chart = remainingCharts[i];
+      
+      // Heatmaps prefer full width (they need space for both axes)
+      if (chart.widget_type === 'heatmap') {
+        result.push({ widgets: [chart], type: 'chart-row' });
       } else {
-        // Single chart gets full row (OK for line/bar/area)
-        result.push({ widgets: [remainingCharts[i]], type: 'chart-row' });
+        // Other charts can pair up
+        if (i + 1 < remainingCharts.length && remainingCharts[i + 1].widget_type !== 'heatmap') {
+          // Pair two charts
+          result.push({ widgets: [chart, remainingCharts[i + 1]], type: 'chart-row' });
+          i++; // Skip next chart since we paired it
+        } else {
+          // Single chart gets full row
+          result.push({ widgets: [chart], type: 'chart-row' });
+        }
       }
     }
 
@@ -118,16 +135,16 @@ export default function DashboardWidgetGrid({
   return (
     <div className="px-4 md:px-8 lg:px-12 mx-auto space-y-5">
       {rows.map((row, rowIdx) => {
-        if (row.type === 'stat-row') {
-          // Stat widgets share the row equally with responsive behavior
-          const statGridClass = 
+        if (row.type === 'stat-row' || row.type === 'gauge-row') {
+          // Stat and gauge widgets share the row equally with responsive behavior
+          const gridClass = 
             row.widgets.length === 1 ? 'grid-cols-1' :
             row.widgets.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
             row.widgets.length === 3 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
             'grid-cols-1 md:grid-cols-2 lg:grid-cols-4';
           
           return (
-            <div key={`row-${rowIdx}`} className={`grid gap-5 ${statGridClass}`}>
+            <div key={`row-${rowIdx}`} className={`grid gap-5 ${gridClass}`}>
               {row.widgets.map((w) => (
                 <div key={w.id}>{renderWidgetCard(w)}</div>
               ))}

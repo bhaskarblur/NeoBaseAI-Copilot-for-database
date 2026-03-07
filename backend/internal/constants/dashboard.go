@@ -65,9 +65,17 @@ RULES:
 - Always include 2-4 stat cards at the top for immediate KPIs
 - Include at least one time-series chart if temporal data exists
 - If the schema is very simple, suggest fewer blueprints (even just 1-2 is fine)
-- Widget types: "stat", "line", "bar", "area", "pie", "table", "combo"
-===== END DASHBOARD BLUEPRINT MODE =====
-`
+- Widget types: "stat", "line", "bar", "area", "pie", "table", "combo", "gauge", "bar_gauge", "heatmap", "histogram"
+  * stat: Single KPI value card, optionally with comparison (e.g., Total Revenue: $45K, +12% vs yesterday)
+  * line/area: Time-series trends etc
+  * bar: Categorical comparisons, top-N, distributions
+  * pie: Proportions/distributions etc
+  * table: Detailed records, drill-downs etc
+  * gauge: Radial gauge (speedometer) for % or ratio metrics etc
+  * bar_gauge: Horizontal/vertical progress bars for thresholds etc
+  * heatmap: 2D patterns over time/categories (activity, errors by hour) etc
+  * histogram: Value distribution (age ranges, price buckets, latency distribution) etc
+===== END DASHBOARD BLUEPRINT MODE =====`
 
 // DashboardGenerationSystemPrompt instructs the LLM to generate a full dashboard
 const DashboardGenerationSystemPrompt = `
@@ -91,12 +99,32 @@ WIDGET TYPES:
 - "pie": Distribution/proportion chart (max 8-10 slices)
 - "table": Tabular data display (recent records, top-N lists)
 - "combo": Mixed chart types (bar + line overlay)
+- "gauge": Radial gauge (speedometer-style) showing value relative to min/max
+  * Perfect for: % completion, capacity utilization, success rate, health score
+  * Requires: Single numeric value between min (0) and max (100 default)
+  * Config: min, max, thresholds for color zones, decimal_places, unit
+- "bar_gauge": Horizontal or vertical bar showing progress toward threshold
+  * Perfect for: Progress bars, multi-series comparisons, quota tracking
+  * Requires: Single or multiple numeric values with min/max range
+  * Config: orientation (horizontal/vertical), display_mode (basic/lcd/gradient), thresholds
+- "heatmap": 2D visualization showing magnitude/intensity over time or categories
+  * Perfect for: Activity patterns by hour/day, error rates over time, user engagement heatmap
+  * Requires: 3 columns: x-axis (time/category), y-axis (category), value (metric)
+  * Config: x_axis_column, y_axis_column, value_column, color_scheme, bucket_size
+- "histogram": Distribution visualization showing how values are distributed across ranges
+  * Perfect for: Age distribution, price ranges, response time distribution, data quality checks
+  * Requires: Single numeric column to segment into buckets
+  * Config: value_column, bucket_count (num of bins), show_mean, show_median
 
 RULES:
 - ALWAYS start by discovering tables using "execute_dashboard_query" — do NOT guess table/column names
 - Create 4-8 widgets for a balanced dashboard
-- Always include 2-4 stat cards at the top for immediate KPIs
-- Include at least one time-series chart if temporal data exists
+- Always include 2-4 stat cards or gauges at the top for immediate KPIs
+- Use gauges for percentage/ratio metrics (completion %, utilization %, success rate)
+- Use bar gauges for progress tracking or threshold monitoring
+- Use heatmaps when you have time-based patterns or 2D categorical data
+- Use histograms to show data distribution and detect outliers
+- Include at least one time-series chart (line/area) if temporal data exists
 - Include at least one table widget for detail/drill-down
 - All queries MUST be READ-ONLY (SELECT, FIND, AGGREGATE only)
 - Optimize queries for performance (use LIMIT, appropriate indexes)

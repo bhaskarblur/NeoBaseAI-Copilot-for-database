@@ -1511,6 +1511,103 @@ func (s *dashboardService) createWidgetFromConfig(
 		}
 	}
 
+	// Parse gauge_config
+	if gaugeRaw, ok := wConfig["gauge_config"].(map[string]interface{}); ok && widgetType == "gauge" {
+		widget.GaugeConfig = &models.GaugeWidgetConfig{
+			Unit:          getStringVal(gaugeRaw, "unit"),
+			ShowThreshold: getBoolVal(gaugeRaw, "show_threshold"),
+		}
+		if minVal, ok := gaugeRaw["min"].(float64); ok {
+			widget.GaugeConfig.Min = minVal
+		}
+		if maxVal, ok := gaugeRaw["max"].(float64); ok {
+			widget.GaugeConfig.Max = maxVal
+		}
+		if dp, ok := gaugeRaw["decimal_places"].(float64); ok {
+			widget.GaugeConfig.DecimalPlaces = int(dp)
+		}
+		if thresholdsRaw, ok := gaugeRaw["thresholds"].([]interface{}); ok {
+			for _, tRaw := range thresholdsRaw {
+				tMap, ok := tRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				threshold := models.Threshold{
+					Color: getStringVal(tMap, "color"),
+				}
+				if val, ok := tMap["value"].(float64); ok {
+					threshold.Value = val
+				}
+				widget.GaugeConfig.Thresholds = append(widget.GaugeConfig.Thresholds, threshold)
+			}
+		}
+	}
+
+	// Parse bar_gauge_config
+	if barGaugeRaw, ok := wConfig["bar_gauge_config"].(map[string]interface{}); ok && widgetType == "bar_gauge" {
+		widget.BarGaugeConfig = &models.BarGaugeWidgetConfig{
+			Orientation:  getStringVal(barGaugeRaw, "orientation"),
+			DisplayMode:  getStringVal(barGaugeRaw, "display_mode"),
+			ShowUnfilled: getBoolVal(barGaugeRaw, "show_unfilled"),
+			Unit:         getStringVal(barGaugeRaw, "unit"),
+		}
+		if minVal, ok := barGaugeRaw["min"].(float64); ok {
+			widget.BarGaugeConfig.Min = minVal
+		}
+		if maxVal, ok := barGaugeRaw["max"].(float64); ok {
+			widget.BarGaugeConfig.Max = maxVal
+		}
+		if dp, ok := barGaugeRaw["decimal_places"].(float64); ok {
+			widget.BarGaugeConfig.DecimalPlaces = int(dp)
+		}
+		if thresholdsRaw, ok := barGaugeRaw["thresholds"].([]interface{}); ok {
+			for _, tRaw := range thresholdsRaw {
+				tMap, ok := tRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				threshold := models.Threshold{
+					Color: getStringVal(tMap, "color"),
+				}
+				if val, ok := tMap["value"].(float64); ok {
+					threshold.Value = val
+				}
+				widget.BarGaugeConfig.Thresholds = append(widget.BarGaugeConfig.Thresholds, threshold)
+			}
+		}
+	}
+
+	// Parse heatmap_config
+	if heatmapRaw, ok := wConfig["heatmap_config"].(map[string]interface{}); ok && widgetType == "heatmap" {
+		widget.HeatmapConfig = &models.HeatmapWidgetConfig{
+			XAxisColumn: getStringVal(heatmapRaw, "x_axis_column"),
+			YAxisColumn: getStringVal(heatmapRaw, "y_axis_column"),
+			ValueColumn: getStringVal(heatmapRaw, "value_column"),
+			ColorScheme: getStringVal(heatmapRaw, "color_scheme"),
+			ShowValues:  getBoolVal(heatmapRaw, "show_values"),
+			ShowLegend:  getBoolVal(heatmapRaw, "show_legend"),
+			BucketSize:  getStringVal(heatmapRaw, "bucket_size"),
+		}
+	}
+
+	// Parse histogram_config
+	if histogramRaw, ok := wConfig["histogram_config"].(map[string]interface{}); ok && widgetType == "histogram" {
+		widget.HistogramConfig = &models.HistogramWidgetConfig{
+			ValueColumn: getStringVal(histogramRaw, "value_column"),
+			ShowMean:    getBoolVal(histogramRaw, "show_mean"),
+			ShowMedian:  getBoolVal(histogramRaw, "show_median"),
+		}
+		if bc, ok := histogramRaw["bucket_count"].(float64); ok {
+			widget.HistogramConfig.BucketCount = int(bc)
+		}
+		if bs, ok := histogramRaw["bucket_size"].(float64); ok {
+			widget.HistogramConfig.BucketSize = bs
+		}
+		if dp, ok := histogramRaw["decimal_places"].(float64); ok {
+			widget.HistogramConfig.DecimalPlaces = int(dp)
+		}
+	}
+
 	if err := s.dashboardRepo.CreateWidget(ctx, widget); err != nil {
 		log.Printf("[DASHBOARD] Failed to create widget '%s': %v", title, err)
 		return nil
@@ -1581,6 +1678,103 @@ func (s *dashboardService) applyWidgetConfigUpdates(widget *models.Widget, wConf
 					Width:  getStringVal(cMap, "width"),
 				})
 			}
+		}
+	}
+
+	// Update gauge_config if present
+	if gaugeRaw, ok := wConfig["gauge_config"].(map[string]interface{}); ok {
+		widget.GaugeConfig = &models.GaugeWidgetConfig{
+			Unit:          getStringVal(gaugeRaw, "unit"),
+			ShowThreshold: getBoolVal(gaugeRaw, "show_threshold"),
+		}
+		if minVal, ok := gaugeRaw["min"].(float64); ok {
+			widget.GaugeConfig.Min = minVal
+		}
+		if maxVal, ok := gaugeRaw["max"].(float64); ok {
+			widget.GaugeConfig.Max = maxVal
+		}
+		if dp, ok := gaugeRaw["decimal_places"].(float64); ok {
+			widget.GaugeConfig.DecimalPlaces = int(dp)
+		}
+		if thresholdsRaw, ok := gaugeRaw["thresholds"].([]interface{}); ok {
+			for _, tRaw := range thresholdsRaw {
+				tMap, ok := tRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				threshold := models.Threshold{
+					Color: getStringVal(tMap, "color"),
+				}
+				if val, ok := tMap["value"].(float64); ok {
+					threshold.Value = val
+				}
+				widget.GaugeConfig.Thresholds = append(widget.GaugeConfig.Thresholds, threshold)
+			}
+		}
+	}
+
+	// Update bar_gauge_config if present
+	if barGaugeRaw, ok := wConfig["bar_gauge_config"].(map[string]interface{}); ok {
+		widget.BarGaugeConfig = &models.BarGaugeWidgetConfig{
+			Orientation:  getStringVal(barGaugeRaw, "orientation"),
+			DisplayMode:  getStringVal(barGaugeRaw, "display_mode"),
+			ShowUnfilled: getBoolVal(barGaugeRaw, "show_unfilled"),
+			Unit:         getStringVal(barGaugeRaw, "unit"),
+		}
+		if minVal, ok := barGaugeRaw["min"].(float64); ok {
+			widget.BarGaugeConfig.Min = minVal
+		}
+		if maxVal, ok := barGaugeRaw["max"].(float64); ok {
+			widget.BarGaugeConfig.Max = maxVal
+		}
+		if dp, ok := barGaugeRaw["decimal_places"].(float64); ok {
+			widget.BarGaugeConfig.DecimalPlaces = int(dp)
+		}
+		if thresholdsRaw, ok := barGaugeRaw["thresholds"].([]interface{}); ok {
+			for _, tRaw := range thresholdsRaw {
+				tMap, ok := tRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				threshold := models.Threshold{
+					Color: getStringVal(tMap, "color"),
+				}
+				if val, ok := tMap["value"].(float64); ok {
+					threshold.Value = val
+				}
+				widget.BarGaugeConfig.Thresholds = append(widget.BarGaugeConfig.Thresholds, threshold)
+			}
+		}
+	}
+
+	// Update heatmap_config if present
+	if heatmapRaw, ok := wConfig["heatmap_config"].(map[string]interface{}); ok {
+		widget.HeatmapConfig = &models.HeatmapWidgetConfig{
+			XAxisColumn: getStringVal(heatmapRaw, "x_axis_column"),
+			YAxisColumn: getStringVal(heatmapRaw, "y_axis_column"),
+			ValueColumn: getStringVal(heatmapRaw, "value_column"),
+			ColorScheme: getStringVal(heatmapRaw, "color_scheme"),
+			ShowValues:  getBoolVal(heatmapRaw, "show_values"),
+			ShowLegend:  getBoolVal(heatmapRaw, "show_legend"),
+			BucketSize:  getStringVal(heatmapRaw, "bucket_size"),
+		}
+	}
+
+	// Update histogram_config if present
+	if histogramRaw, ok := wConfig["histogram_config"].(map[string]interface{}); ok {
+		widget.HistogramConfig = &models.HistogramWidgetConfig{
+			ValueColumn: getStringVal(histogramRaw, "value_column"),
+			ShowMean:    getBoolVal(histogramRaw, "show_mean"),
+			ShowMedian:  getBoolVal(histogramRaw, "show_median"),
+		}
+		if bc, ok := histogramRaw["bucket_count"].(float64); ok {
+			widget.HistogramConfig.BucketCount = int(bc)
+		}
+		if bs, ok := histogramRaw["bucket_size"].(float64); ok {
+			widget.HistogramConfig.BucketSize = bs
+		}
+		if dp, ok := histogramRaw["decimal_places"].(float64); ok {
+			widget.HistogramConfig.DecimalPlaces = int(dp)
 		}
 	}
 }
@@ -1665,6 +1859,13 @@ func getStringVal(m map[string]interface{}, key string) string {
 		return val
 	}
 	return ""
+}
+
+func getBoolVal(m map[string]interface{}, key string) bool {
+	if val, ok := m[key].(bool); ok {
+		return val
+	}
+	return false
 }
 
 // joinStrings joins string slices with a separator
