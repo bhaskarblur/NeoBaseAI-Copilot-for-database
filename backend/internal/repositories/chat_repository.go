@@ -22,6 +22,7 @@ type ChatRepository interface {
 	Create(chat *models.Chat) error
 	Update(id primitive.ObjectID, chat *models.Chat) error
 	UpdateConnectionSchema(ctx context.Context, id primitive.ObjectID, schema string) error
+	UpdateChatTimestamp(chatID primitive.ObjectID) error
 	Delete(id primitive.ObjectID) error
 	FindByID(id primitive.ObjectID) (*models.Chat, error)
 	FindByUserID(userID primitive.ObjectID, page, pageSize int) ([]*models.Chat, int64, error)
@@ -710,6 +711,12 @@ func (r *chatRepository) FindMessageByID(id primitive.ObjectID) (*models.Message
 	return &message, err
 }
 
+// UpdateChatTimestamp updates the chat's updated_at timestamp asynchronously
+// This is called on dashboard operations (create/update/delete/refresh) to show "last active" time
+func (r *chatRepository) UpdateChatTimestamp(chatID primitive.ObjectID) error {
+	return r.updateChatTimeStamp(chatID)
+}
+
 func (r *chatRepository) updateChatTimeStamp(chatID primitive.ObjectID) error {
 	go func() {
 		filter := bson.M{"_id": chatID}
@@ -718,6 +725,8 @@ func (r *chatRepository) updateChatTimeStamp(chatID primitive.ObjectID) error {
 		if err != nil {
 			log.Printf("Error updating chat timestamp: %v", err)
 		}
+		// Invalidate chat cache after timestamp update
+		go r.updateChatCache(chatID)
 	}()
 	return nil
 }

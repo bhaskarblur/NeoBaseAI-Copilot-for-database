@@ -108,6 +108,9 @@ func (s *dashboardService) CreateDashboard(ctx context.Context, userID, chatID s
 		return nil, 500, fmt.Errorf("failed to create dashboard: %v", err)
 	}
 
+	// Update chat timestamp for last activity
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	resp := s.dashboardToResponse(dashboard, nil)
 	return resp, 201, nil
 }
@@ -221,6 +224,10 @@ func (s *dashboardService) UpdateDashboard(ctx context.Context, userID, chatID, 
 		return nil, 500, fmt.Errorf("failed to update dashboard: %v", err)
 	}
 
+	// Update chat timestamp for last activity
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	widgets, _ := s.dashboardRepo.FindWidgetsByDashboardID(ctx, dashObjID)
 	resp := s.dashboardToResponse(dashboard, widgets)
 	return resp, 200, nil
@@ -249,6 +256,10 @@ func (s *dashboardService) DeleteDashboard(ctx context.Context, userID, chatID, 
 	if err := s.dashboardRepo.DeleteDashboard(ctx, dashObjID); err != nil {
 		return 500, fmt.Errorf("failed to delete dashboard: %v", err)
 	}
+
+	// Update chat timestamp for last activity
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
 
 	return 200, nil
 }
@@ -360,6 +371,9 @@ func (s *dashboardService) AddWidget(ctx context.Context, userID, chatID, dashbo
 	})
 	s.dashboardRepo.UpdateDashboard(ctx, dashObjID, dashboard)
 
+	// Update chat timestamp for last activity
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	resp := s.widgetToResponse(widget)
 	return resp, 201, nil
 }
@@ -450,6 +464,10 @@ func (s *dashboardService) EditWidget(ctx context.Context, userID, chatID, dashb
 		return nil, 500, fmt.Errorf("failed to update widget: %v", err)
 	}
 
+	// Update chat timestamp for last activity
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	resp := s.widgetToResponse(widget)
 	return resp, 200, nil
 }
@@ -486,6 +504,10 @@ func (s *dashboardService) DeleteWidget(ctx context.Context, userID, chatID, das
 		dashboard.Layout = newLayout
 		s.dashboardRepo.UpdateDashboard(ctx, dashObjID, dashboard)
 	}
+
+	// Update chat timestamp for last activity
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
 
 	return 200, nil
 }
@@ -694,6 +716,9 @@ func (s *dashboardService) CreateFromBlueprints(ctx context.Context, userID, cha
 			continue
 		}
 
+		// Update chat timestamp asynchronously
+		go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 		// Send completion event for this dashboard
 		resp := s.dashboardToResponse(dashboard, widgets)
 		if s.streamHandler != nil {
@@ -842,6 +867,9 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 		return 500, fmt.Errorf("failed to update regenerated dashboard: %v", err)
 	}
 
+	// Update chat timestamp asynchronously
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	// 10. Send completion event
 	resp := s.dashboardToResponse(dashboard, newWidgets)
 	if s.streamHandler != nil {
@@ -913,6 +941,10 @@ func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID,
 	}
 	wg.Wait()
 
+	// Update chat timestamp for last activity (after all widgets refreshed)
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	return 200, nil
 }
 
@@ -942,6 +974,11 @@ func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, da
 	}
 
 	s.refreshSingleWidget(ctx, userID, chatID, streamID, widget)
+
+	// Update chat timestamp for last activity
+	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
+	go s.chatRepo.UpdateChatTimestamp(chatObjID)
+
 	return 200, nil
 }
 
