@@ -172,11 +172,13 @@ export const dashboardService = {
     chatId: string,
     dashboardId: string,
     streamId: string,
-    request: RegenerateDashboardRequest
+    request: RegenerateDashboardRequest,
+    signal?: AbortSignal
   ): Promise<void> => {
     await axios.post(
       `${API_URL}/chats/${chatId}/dashboards/${dashboardId}/regenerate?stream_id=${streamId}`,
-      request
+      request,
+      signal ? { signal } : undefined
     );
   },
 

@@ -835,12 +835,17 @@ export default function DashboardView({
     cancelledRef.current = false;
     setGenerationContext('creating');
     setGenerationProgress({ status: 'generating', message: 'Regenerating dashboard...', progress: 5 });
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
     try {
       await dashboardService.regenerateDashboard(chatId, activeDashboard.id, streamId, {
         reason,
         custom_instructions: customInstructions,
-      });
+      }, controller.signal);
     } catch {
+      if (controller.signal.aborted) return;
       toast.error('Failed to regenerate dashboard');
       setGenerationProgress(null);
     }

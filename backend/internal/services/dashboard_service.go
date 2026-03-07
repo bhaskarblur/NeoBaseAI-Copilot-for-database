@@ -794,7 +794,7 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 			if call.Name == constants.DashboardFinalResponseToolName {
 				s.sendDashboardProgress(userID, chatID, streamID, dashboardID, "finalizing", "Finalizing regenerated dashboard...", 80)
 			} else if call.Name == constants.DashboardExecuteQueryToolName {
-				s.sendDashboardProgress(userID, chatID, streamID, dashboardID, "testing_queries", "Testing widget queries...", 50)
+				s.sendDashboardProgress(userID, chatID, streamID, dashboardID, "testing_queries", "Testing widget queries. This may take a few moments...", 50)
 			}
 		},
 		OnToolResult: func(call llm.ToolCall, result llm.ToolResult) {},
@@ -814,28 +814,35 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 		return 500, fmt.Errorf("failed to parse regenerated dashboard response: %v", err)
 	}
 
-	// 6. Delete old widgets
-	if err := s.dashboardRepo.DeleteWidgetsByDashboardID(ctx, dashObjID); err != nil {
-		log.Printf("[DASHBOARD] Warning: failed to delete old widgets: %v", err)
-	}
-
-	// 7. Update dashboard and create new widgets
-	dashboard.Name = s.getStringFromConfig(dashboardConfig, "dashboard_name", dashboard.Name)
-	dashboard.Description = s.getStringFromConfig(dashboardConfig, "dashboard_description", dashboard.Description)
-	dashboard.LLMModel = selectedModel
-	dashboard.Layout = []models.WidgetLayout{} // Reset layout
-
+	// 6. Create new widgets FIRST (before deleting old ones)
 	userObjID, _ := primitive.ObjectIDFromHex(userID)
 	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
 
 	newWidgets, layout := s.createWidgetsFromConfig(ctx, dashObjID, chatObjID, userObjID, dashboardConfig, selectedModel)
+
+	// 7. Validate that new widgets were successfully created
+	if len(newWidgets) == 0 {
+		log.Printf("[DASHBOARD] ERROR: Regeneration failed - no new widgets created. Preserving existing widgets.")
+		return 500, fmt.Errorf("regeneration failed: LLM did not generate any widgets. Your existing dashboard has been preserved")
+	}
+
+	// 8. Only delete old widgets after confirming new widgets exist
+	if err := s.dashboardRepo.DeleteWidgetsByDashboardID(ctx, dashObjID); err != nil {
+		log.Printf("[DASHBOARD] Warning: failed to delete old widgets: %v", err)
+		// Continue anyway since we have new widgets
+	}
+
+	// 9. Update dashboard with new data
+	dashboard.Name = s.getStringFromConfig(dashboardConfig, "dashboard_name", dashboard.Name)
+	dashboard.Description = s.getStringFromConfig(dashboardConfig, "dashboard_description", dashboard.Description)
+	dashboard.LLMModel = selectedModel
 	dashboard.Layout = layout
 
 	if err := s.dashboardRepo.UpdateDashboard(ctx, dashObjID, dashboard); err != nil {
 		return 500, fmt.Errorf("failed to update regenerated dashboard: %v", err)
 	}
 
-	// 8. Send completion event
+	// 10. Send completion event
 	resp := s.dashboardToResponse(dashboard, newWidgets)
 	if s.streamHandler != nil {
 		s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
@@ -847,7 +854,7 @@ func (s *dashboardService) RegenerateDashboard(ctx context.Context, userID, chat
 		})
 	}
 
-	// 9. Refresh widget data
+	// 11. Refresh widget data
 	go func() {
 		refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -1329,6 +1336,13 @@ func (s *dashboardService) createDashboardFromConfig(
 	// Update dashboard with layout
 	if err := s.dashboardRepo.UpdateDashboard(ctx, dashboard.ID, dashboard); err != nil {
 		log.Printf("[DASHBOARD] Warning: failed to update dashboard layout: %v", err)
+	}
+
+	// Validate that widgets were created
+	if len(widgets) == 0 {
+		// Delete the empty dashboard since no widgets were created
+		_ = s.dashboardRepo.DeleteDashboard(ctx, dashboard.ID)
+		return nil, nil, fmt.Errorf("dashboard generation failed: no widgets were created by LLM")
 	}
 
 	return dashboard, widgets, nil

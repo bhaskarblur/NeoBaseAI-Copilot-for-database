@@ -312,7 +312,8 @@ export function AddWidgetModal({
           </div>
           <button
             onClick={onClose}
-            className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
+            disabled={isAdding}
+            className="hover:bg-neo-gray rounded-lg p-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="w-6 h-6" />
           </button>
@@ -367,7 +368,11 @@ export function AddWidgetModal({
               </div>
             )}
           </button>
-          <button onClick={onClose} className="neo-button-secondary flex-1">
+          <button 
+            onClick={onClose} 
+            disabled={isAdding}
+            className="neo-button-secondary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Cancel
           </button>
         </div>
@@ -417,7 +422,8 @@ export function EditWidgetModal({
           </div>
           <button
             onClick={onClose}
-            className="hover:bg-neo-gray rounded-lg p-2 transition-colors"
+            disabled={isEditing}
+            className="hover:bg-neo-gray rounded-lg p-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="w-6 h-6" />
           </button>
@@ -469,7 +475,11 @@ export function EditWidgetModal({
               </div>
             )}
           </button>
-          <button onClick={onClose} className="neo-button-secondary flex-1">
+          <button 
+            onClick={onClose} 
+            disabled={isEditing}
+            className="neo-button-secondary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Cancel
           </button>
         </div>
