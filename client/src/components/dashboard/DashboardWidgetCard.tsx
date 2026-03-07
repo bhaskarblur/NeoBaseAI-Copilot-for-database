@@ -345,7 +345,7 @@ export default function DashboardWidgetCard({
     const singleSeries = numericKeys.length === 1;
     return (
       <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
-        <div style={{ height: showBrush ? 340 : 280 }}>
+        <div style={{ height: showBrush ? 360 : 330 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -403,7 +403,7 @@ export default function DashboardWidgetCard({
     const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
 
     return (
-      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 6 ? 'h-[280px]' : data.length >= 3 ? 'h-[260px]' : 'h-[200px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
+      <div className={`${data.length >= 8 ? 'h-[330px]' : data.length >= 6 ? 'h-[280px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             <Pie

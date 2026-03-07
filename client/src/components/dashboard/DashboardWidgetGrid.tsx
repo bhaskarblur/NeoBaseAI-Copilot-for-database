@@ -47,13 +47,15 @@ export default function DashboardWidgetGrid({
   // Build smart rows from widget list
   const rows = useMemo(() => {
     const statWidgets: Widget[] = [];
-    const chartWidgets: Widget[] = [];
+    const pieWidgets: Widget[] = [];
+    const otherChartWidgets: Widget[] = []; // line, bar, area
     const tableWidgets: Widget[] = [];
 
     for (const w of dashboard.widgets) {
       if (w.widget_type === 'stat') statWidgets.push(w);
       else if (w.widget_type === 'table') tableWidgets.push(w);
-      else chartWidgets.push(w);
+      else if (w.widget_type === 'pie') pieWidgets.push(w);
+      else otherChartWidgets.push(w); // line, bar, area
     }
 
     const result: { widgets: Widget[]; type: 'stat-row' | 'chart-row' | 'table-row' }[] = [];
@@ -63,12 +65,45 @@ export default function DashboardWidgetGrid({
       result.push({ widgets: statWidgets, type: 'stat-row' });
     }
 
-    // Charts: pair them up (2 per row), odd one gets full row
-    for (let i = 0; i < chartWidgets.length; i += 2) {
-      if (i + 1 < chartWidgets.length) {
-        result.push({ widgets: [chartWidgets[i], chartWidgets[i + 1]], type: 'chart-row' });
+    // Smart chart layout:
+    // - Pie charts NEVER get a full row alone (they center-align and waste space)
+    // - Line/bar/area can take full width (they utilize it well)
+    // Strategy: Pair up pies first, then handle other charts
+    
+    const allCharts = [...pieWidgets, ...otherChartWidgets];
+    const used = new Set<string>();
+
+    // First pass: Pair all pie charts with companions
+    for (const pie of pieWidgets) {
+      if (used.has(pie.id)) continue;
+      
+      // Find a companion for this pie (prefer another chart)
+      const companion = allCharts.find(w => 
+        w.id !== pie.id && 
+        !used.has(w.id)
+      );
+      
+      if (companion) {
+        result.push({ widgets: [pie, companion], type: 'chart-row' });
+        used.add(pie.id);
+        used.add(companion.id);
       } else {
-        result.push({ widgets: [chartWidgets[i]], type: 'chart-row' });
+        // No companion available - pie must go alone (rare edge case)
+        result.push({ widgets: [pie], type: 'chart-row' });
+        used.add(pie.id);
+      }
+    }
+
+    // Second pass: Handle remaining non-pie charts
+    // These can take full width or pair up
+    const remainingCharts = otherChartWidgets.filter(w => !used.has(w.id));
+    for (let i = 0; i < remainingCharts.length; i += 2) {
+      if (i + 1 < remainingCharts.length) {
+        // Pair two charts
+        result.push({ widgets: [remainingCharts[i], remainingCharts[i + 1]], type: 'chart-row' });
+      } else {
+        // Single chart gets full row (OK for line/bar/area)
+        result.push({ widgets: [remainingCharts[i]], type: 'chart-row' });
       }
     }
 
