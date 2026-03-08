@@ -241,13 +241,15 @@ func (h *ChatHandler) Delete(c *gin.Context) {
 // @Produce json
 // @Param id path string true "Chat ID"
 // @Param duplicate_messages query bool false "Duplicate messages" default(false)
+// @Param duplicate_dashboards query bool false "Duplicate dashboards" default(false)
 
 func (h *ChatHandler) Duplicate(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 	duplicateMessages := c.Query("duplicate_messages") == "true"
+	duplicateDashboards := c.Query("duplicate_dashboards") == "true"
 
-	response, statusCode, err := h.chatService.Duplicate(userID, chatID, duplicateMessages)
+	response, statusCode, err := h.chatService.Duplicate(userID, chatID, duplicateMessages, duplicateDashboards)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{
@@ -499,6 +501,15 @@ func (h *ChatHandler) HandleStreamEvent(userID, chatID, streamID string, respons
 	case <-time.After(100 * time.Millisecond):
 		log.Printf("Timeout sending event to stream: %s", streamKey)
 	}
+}
+
+// HasStream checks if an SSE stream exists for the given user, chat, and stream ID
+func (h *ChatHandler) HasStream(userID, chatID, streamID string) bool {
+	streamKey := fmt.Sprintf("%s:%s:%s", userID, chatID, streamID)
+	h.streamMutex.RLock()
+	defer h.streamMutex.RUnlock()
+	_, exists := h.streams[streamKey]
+	return exists
 }
 
 // @Summary Stream chat

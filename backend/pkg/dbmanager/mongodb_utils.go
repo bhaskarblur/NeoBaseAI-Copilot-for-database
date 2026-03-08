@@ -222,7 +222,8 @@ func processMongoDBQueryParams(paramsStr string) (string, error) {
 					log.Printf("Extracted projection object: %s", projectObj)
 
 					// Process the projection using our specialized handler
-					processedProjection, err := processProjectionParams(projectObj)
+					// Pass true because this is a $project stage in an aggregation pipeline
+					processedProjection, err := processProjectionParams(projectObj, true)
 					if err != nil {
 						return "", fmt.Errorf("failed to process $project stage: %v", err)
 					}
@@ -730,6 +731,12 @@ func processAggregationResultsFromCursor(cursor *mongo.Cursor, ctx context.Conte
 	// Debug logging for aggregation results
 	log.Printf("processAggregationResultsFromCursor -> Decoded %d results from aggregation", len(results))
 
+	// Log first result for debugging
+	if len(results) > 0 {
+		firstResultJSON, _ := json.Marshal(results[0])
+		log.Printf("First aggregation result: %s", string(firstResultJSON))
+	}
+
 	// Create a wrapper for the results to maintain compatibility with existing code
 	resultMap := map[string]interface{}{
 		"results": results,
@@ -862,10 +869,13 @@ func ProcessDotNotationFields(queryMap map[string]interface{}) {
 }
 
 // processProjectionParams specifically handles MongoDB projection parameters,
-// which often need special treatment due to their simpler structure
-func processProjectionParams(projectionStr string) (string, error) {
+// which often need special treatment due to their simpler structure.
+// isAggregation: true for $project stages in aggregation pipelines (needs $field syntax),
+//
+//	false for find() projections (needs simple key:value syntax)
+func processProjectionParams(projectionStr string, isAggregation bool) (string, error) {
 	// Log the original string for debugging
-	log.Printf("Original MongoDB projection params: %s", projectionStr)
+	log.Printf("Original MongoDB projection params: %s (isAggregation: %v)", projectionStr, isAggregation)
 
 	// Extract only the projection part if it contains modifiers like .sort() or .limit()
 	modifierIndex := -1
@@ -975,20 +985,16 @@ func processProjectionParams(projectionStr string) (string, error) {
 			if strings.Contains(fieldName, placeholder) {
 				// For dot notation fields in aggregation stages (after $lookup and $unwind),
 				// we need to use "$user.email" format instead of just "user.email"
-				// But only if this field has a parent object prefix (like "user." in "user.email")
-				// Check if this looks like a reference to a joined document field
-				if strings.Contains(originalField, ".") {
+				// But for find() projections, we keep simple key:value format
+				if isAggregation && strings.Contains(originalField, ".") {
 					parts := strings.SplitN(originalField, ".", 2)
 					if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-						// This is a potential reference to a field in a joined document
-						// We should use the appropriate format for MongoDB aggregation
+						// This is a reference to a field in a joined document in an aggregation pipeline
+						// We should use the $field format for MongoDB aggregation $project stages
 						if value == "1" || value == "true" {
 							// For inclusion, use the $ prefix format
 							// Convert 'user.email': 1 to 'user.email': "$user.email"
 							log.Printf("Converting dot notation field for aggregation: %s", originalField)
-							// Fix: Ensure proper quoting without double quotes by directly formatting the field name
-							cleanedField := strings.Replace(placeholder, "__DOT_FIELD_", "", 1)
-							cleanedField = strings.Replace(cleanedField, "__", "", 1)
 							// Create a properly formatted field reference with a single set of quotes
 							processedFields = append(processedFields, fmt.Sprintf(`"%s": "$%s"`, originalField, originalField))
 							isPlaceholder = true
@@ -997,10 +1003,11 @@ func processProjectionParams(projectionStr string) (string, error) {
 					}
 				}
 
-				// Regular format for non-special cases
-				// Fix: Ensure we replace the placeholder with a properly quoted field name without double quotes
+				// Regular format for find() projections
+				// Just update the field name to be properly quoted, but DON'T mark as placeholder
+				// so the field will be added normally in the flow below
 				fieldName = fmt.Sprintf(`"%s"`, originalField)
-				isPlaceholder = true
+				// Don't set isPlaceholder=true here - we still need to add the field
 				break
 			}
 		}
@@ -1010,7 +1017,9 @@ func processProjectionParams(projectionStr string) (string, error) {
 			fieldName = "\"" + fieldName + "\""
 		}
 
-		// Add the processed field if not already added (for dot notation special case)
+		// Add the processed field if not already added (for dot notation special case in aggregation)
+		// For aggregation: isPlaceholder=true means we already added it above
+		// For find(): isPlaceholder=false means we update fieldName above and add it here
 		if !isPlaceholder || value != "1" {
 			processedFields = append(processedFields, fieldName+": "+value)
 		}

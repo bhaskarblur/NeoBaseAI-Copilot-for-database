@@ -13,8 +13,10 @@ import ChatHeader from './ChatHeader';
 import MessageInput from './MessageInput';
 import MessageTile from './MessageTile';
 import SearchBar from './SearchBar';
-import { Message } from './types';
+import { Message } from '../../types/query';
 import { ChatSettings } from '../../types/chat';
+import { DashboardViewMode } from '../../types/dashboard';
+import DashboardView from '../dashboard/DashboardView';
 interface ChatWindowProps {
   chat: Chat;
   isExpanded: boolean;
@@ -163,6 +165,7 @@ export default function ChatWindow({
   const pageRef = useRef<number>(1); // Track current page to avoid stale closures
   const hasMoreRef = useRef<boolean>(true); // Track hasMore to avoid stale closures
   const [viewMode, setViewMode] = useState<'chats' | 'pinned'>('chats');
+  const [dashboardViewMode, setDashboardViewMode] = useState<DashboardViewMode>('chat');
   const [pinnedMessages, setPinnedMessages] = useState<Message[]>([]);
   const scrollPositions = useRef<{ chats: number; pinned: number }>({ chats: 0, pinned: 0 });
   const [recommendations, setRecommendations] = useState<string[]>([]);
@@ -529,9 +532,14 @@ export default function ChatWindow({
         currentStreamId = generateStreamId();
       }
 
-      // Check if the connection is already established
+      // First, ensure SSE connection is established
+      await checkSSEConnection();
+      // Wait a bit for the EventSource to fully establish
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Then check if the database connection is already established
       const connectionStatus = await checkConnectionStatus(chat.id);
-      if (!connectionStatus) {
+      if (!connectionStatus?.is_connected) {
         await connectToDatabase(chat.id, currentStreamId);
       }
       console.log('connectionStatus', connectionStatus);
@@ -552,7 +560,7 @@ export default function ChatWindow({
     } finally {
       setIsConnecting(false);
     }
-  }, [chat.id, streamId, generateStreamId, onConnectionStatusChange]);
+  }, [chat.id, streamId, generateStreamId, checkSSEConnection, onConnectionStatusChange]);
 
   const checkConnectionStatus = async (chatId: string) => {
     try {
@@ -1315,6 +1323,8 @@ export default function ChatWindow({
           onToggleSearch={handleToggleSearch}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          dashboardViewMode={dashboardViewMode}
+          onDashboardViewModeChange={setDashboardViewMode}
         />
         
         {showSearch && (
@@ -1328,12 +1338,37 @@ export default function ChatWindow({
             initialQuery={searchQuery}
           />
         )}
-        
       </div>
 
       {/* Tab Switch - Overlay style - Hidden on mobile */}
       {/* Commented out: Toggle for showing messages and pinned messages not needed on desktop */}
 
+      {/* View Container — both views mounted, toggled via opacity */}
+      <div className="relative flex-1 min-h-0">
+        {/* Dashboard View */}
+        <div
+          className={`
+            absolute inset-0 flex flex-col
+            transition-opacity duration-200 ease-in-out
+            ${dashboardViewMode === 'dashboard' ? 'opacity-100 z-[2]' : 'opacity-0 z-0 pointer-events-none'}
+          `}
+        >
+          <DashboardView
+            chatId={chat.id}
+            streamId={streamId}
+            isConnected={isConnected}
+            onReconnect={handleReconnect}
+          />
+        </div>
+
+        {/* Chat View */}
+        <div
+          className={`
+            absolute inset-0 flex flex-col
+            transition-opacity duration-200 ease-in-out
+            ${dashboardViewMode === 'chat' ? 'opacity-100 z-[2]' : 'opacity-0 z-0 pointer-events-none'}
+          `}
+        >
       <div
         ref={chatContainerRef}
         data-chat-container
@@ -1575,8 +1610,10 @@ export default function ChatWindow({
           </button>
         )}
       </div>
+      </div>
+      </div>
 
-      {viewMode === 'chats' && (
+      {viewMode === 'chats' && dashboardViewMode === 'chat' && (
         <MessageInput
           isConnected={isConnected}
           onSendMessage={handleMessageSubmit}

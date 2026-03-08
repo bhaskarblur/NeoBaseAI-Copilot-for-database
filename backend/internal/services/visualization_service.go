@@ -25,6 +25,23 @@ func (s *chatService) GenerateVisualizationForMessage(
 ) (*dtos.VisualizationResponse, error) {
 	log.Printf("GenerateVisualizationForMessage -> userID: %s, chatID: %s, messageID: %s, queryID: %s, selectedLLMModel: %s", userID, chatID, messageID, queryID, selectedLLMModel)
 
+	// Fetch the chat to get connection type
+	chatObjID, err := primitive.ObjectIDFromHex(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat ID: %v", err)
+	}
+
+	chat, err := s.chatRepo.FindByID(chatObjID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chat: %v", err)
+	}
+	if chat == nil {
+		return nil, fmt.Errorf("chat not found: %s", chatID)
+	}
+
+	connectionType := chat.Connection.Type
+	log.Printf("GenerateVisualizationForMessage -> Connection type: %s", connectionType)
+
 	// Fetch messages for this chat
 	msgResp, _, err := s.ListMessages(userID, chatID, 1, 100)
 	if err != nil || msgResp == nil {
@@ -159,28 +176,57 @@ func (s *chatService) GenerateVisualizationForMessage(
 			finalResults = queryResults
 			log.Printf("GenerateVisualizationForMessage -> Using sample data (%d rows) for small dataset", len(queryResults))
 		} else if totalRecords <= MEDIUM_DATASET_THRESHOLD {
-			// Medium dataset: Try to fetch more data with LIMIT
-			log.Printf("GenerateVisualizationForMessage -> Medium dataset detected (%d rows), attempting to fetch more data", totalRecords)
+			// Medium dataset: Re-execute with LIMIT for better visualization
+			log.Printf("GenerateVisualizationForMessage -> Medium dataset detected (%d rows), re-executing with LIMIT", totalRecords)
 
-			// For now, use the sample we have (Phase 2.1 implementation)
-			// Future: Re-execute with LIMIT VISUALIZATION_SAMPLE_SIZE
-			finalResults = queryResults
-			// TODO: Implement re-execution with:
-			// - Original query wrapped with LIMIT
-			// - Smart sampling (every Nth row)
+			// Re-execute the original query with LIMIT to get more representative sample
+			limitedQuery := s.wrapQueryWithLimit(queryData.Query, connectionType, VISUALIZATION_SAMPLE_SIZE)
+
+			if limitedQuery != queryData.Query {
+				// Re-execute the query to get more data
+				reexecutedData, err := s.reExecuteQueryForVisualization(ctx, chatID, limitedQuery, connectionType)
+				if err != nil {
+					log.Printf("GenerateVisualizationForMessage -> Failed to re-execute query with LIMIT: %v, falling back to sample", err)
+					finalResults = queryResults
+				} else if len(reexecutedData) > 0 {
+					log.Printf("GenerateVisualizationForMessage -> Re-executed query returned %d rows", len(reexecutedData))
+					finalResults = reexecutedData
+				} else {
+					log.Printf("GenerateVisualizationForMessage -> Re-executed query returned no data, using original sample")
+					finalResults = queryResults
+				}
+			} else {
+				// Query already has LIMIT or couldn't be wrapped, use sample
+				finalResults = queryResults
+			}
 		} else {
 			// Large dataset: Use aggregation strategy
-			log.Printf("GenerateVisualizationForMessage -> Large dataset detected (%d rows), using aggregation strategy", totalRecords)
+			log.Printf("GenerateVisualizationForMessage -> Large dataset detected (%d rows), attempting smart aggregation", totalRecords)
 			useAggregation = true
 
-			// For now, use sample and mark for aggregation hint
-			// AI will recommend aggregation-friendly charts
-			finalResults = queryResults
+			// Analyze the data to detect aggregation opportunities
+			aggregationStrategy := s.detectAggregationStrategy(queryResults, queryData.Query)
 
-			// TODO: Implement smart aggregation:
-			// - Detect date columns → GROUP BY time period
-			// - Detect categorical columns → GROUP BY category with SUM/AVG
-			// - For numeric-only → Sample every Nth row
+			if aggregationStrategy != nil && aggregationStrategy.AggregatedQuery != "" {
+				log.Printf("GenerateVisualizationForMessage -> Detected aggregation strategy: %s", aggregationStrategy.Type)
+
+				// Try to execute the aggregated query
+				aggregatedData, err := s.reExecuteQueryForVisualization(ctx, chatID, aggregationStrategy.AggregatedQuery, connectionType)
+				if err != nil {
+					log.Printf("GenerateVisualizationForMessage -> Failed to execute aggregated query: %v, using sample with aggregation hint", err)
+					finalResults = queryResults
+				} else if len(aggregatedData) > 0 {
+					log.Printf("GenerateVisualizationForMessage -> Aggregated query returned %d rows", len(aggregatedData))
+					finalResults = aggregatedData
+				} else {
+					log.Printf("GenerateVisualizationForMessage -> Aggregated query returned no data, using sample")
+					finalResults = queryResults
+				}
+			} else {
+				// No aggregation strategy detected, use sample with hint
+				log.Printf("GenerateVisualizationForMessage -> No aggregation strategy detected, using sample data")
+				finalResults = queryResults
+			}
 		}
 	} else {
 		// No pagination info: Use sample data
@@ -1116,6 +1162,214 @@ func (s *chatService) GetVisualizationData(
 	}
 
 	return response, nil
+}
+
+// wrapQueryWithLimit wraps a SQL query with a LIMIT clause intelligently
+// Returns the modified query, or the original query if it already has a LIMIT or can't be wrapped
+func (s *chatService) wrapQueryWithLimit(originalQuery string, dbType string, limit int) string {
+	queryLower := strings.ToLower(strings.TrimSpace(originalQuery))
+
+	// Check if query already has LIMIT clause
+	if strings.Contains(queryLower, " limit ") {
+		log.Printf("wrapQueryWithLimit -> Query already has LIMIT, skipping wrapper")
+		return originalQuery
+	}
+
+	// Handle different database types
+	switch strings.ToUpper(dbType) {
+	case "MYSQL", "POSTGRESQL", "YUGABYTEDB", "CLICKHOUSE":
+		// Standard SQL LIMIT syntax
+		return fmt.Sprintf("%s LIMIT %d", strings.TrimRight(originalQuery, ";"), limit)
+
+	case "MONGODB":
+		// MongoDB uses .limit() method, not SQL LIMIT
+		// LIMITATION: MongoDB medium dataset optimization is not supported.
+		// MongoDB queries cannot be wrapped with SQL LIMIT syntax.
+		// To support this, we would need to parse and modify MongoDB query objects (e.g., {find: ..., limit: 5000})
+		log.Printf("wrapQueryWithLimit -> MongoDB queries use .limit() method, cannot wrap SQL-style")
+		return originalQuery
+
+	case "SQLSERVER":
+		// SQL Server uses TOP clause at the beginning
+		// Simple implementation: wrap in subquery if needed
+		if strings.Contains(queryLower, "select ") {
+			// Check if TOP already exists
+			if strings.Contains(queryLower, " top ") {
+				return originalQuery
+			}
+			// Wrap in subquery with TOP
+			return fmt.Sprintf("SELECT TOP %d * FROM (%s) AS limited_data", limit, originalQuery)
+		}
+		return originalQuery
+
+	default:
+		// Default to standard LIMIT syntax
+		log.Printf("wrapQueryWithLimit -> Unknown database type '%s', using standard LIMIT", dbType)
+		return fmt.Sprintf("%s LIMIT %d", strings.TrimRight(originalQuery, ";"), limit)
+	}
+}
+
+// reExecuteQueryForVisualization re-executes a query for visualization purposes
+// Returns the query results as []map[string]interface{}
+func (s *chatService) reExecuteQueryForVisualization(ctx context.Context, chatID string, query string, dbType string) ([]map[string]interface{}, error) {
+	log.Printf("reExecuteQueryForVisualization -> Executing query for chatID: %s, dbType: %s", chatID, dbType)
+
+	// Execute the query
+	result, err := s.dbManager.ExecuteQuery(ctx, chatID, "", "", "", query, "SELECT", false, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %v", err)
+	}
+
+	if result == nil || result.Result == nil {
+		log.Printf("reExecuteQueryForVisualization -> Query returned no results")
+		return []map[string]interface{}{}, nil
+	}
+
+	// Convert result to []map[string]interface{}
+	var resultData []map[string]interface{}
+	switch v := result.Result.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if m, ok := item.(map[string]interface{}); ok {
+				resultData = append(resultData, m)
+			}
+		}
+	case []map[string]interface{}:
+		resultData = v
+	case map[string]interface{}:
+		// Handle wrapped results with "results" key
+		if resultsInterface, ok := v["results"]; ok {
+			switch resultsVal := resultsInterface.(type) {
+			case []interface{}:
+				for _, item := range resultsVal {
+					if m, ok := item.(map[string]interface{}); ok {
+						resultData = append(resultData, m)
+					}
+				}
+			case []map[string]interface{}:
+				resultData = resultsVal
+			}
+		}
+	default:
+		log.Printf("reExecuteQueryForVisualization -> Unexpected result type: %T", v)
+	}
+
+	log.Printf("reExecuteQueryForVisualization -> Converted %d rows to result data", len(resultData))
+	return resultData, nil
+}
+
+// AggregationStrategy represents a strategy for aggregating large datasets
+type AggregationStrategy struct {
+	Type            string // "time_series", "categorical", "numeric_sample", "none"
+	AggregatedQuery string
+	Description     string
+}
+
+// detectAggregationStrategy analyzes query results and detects opportunities for smart aggregation
+// Returns nil if no aggregation strategy is applicable
+func (s *chatService) detectAggregationStrategy(queryResults []map[string]interface{}, originalQuery string) *AggregationStrategy {
+	if len(queryResults) == 0 {
+		log.Printf("detectAggregationStrategy -> No query results to analyze")
+		return nil
+	}
+
+	// Analyze the data quality to understand column types
+	firstRow := queryResults[0]
+
+	// Detect date/timestamp columns
+	var dateColumns []string
+	var categoricalColumns []string
+	var numericColumns []string
+
+	for col, val := range firstRow {
+		if val == nil {
+			continue
+		}
+
+		switch v := val.(type) {
+		case float64, int, int64, int32, float32:
+			numericColumns = append(numericColumns, col)
+		case string:
+			if isDateLike(v) {
+				dateColumns = append(dateColumns, col)
+			} else {
+				// Consider it categorical - check if it has reasonable cardinality
+				categoricalColumns = append(categoricalColumns, col)
+			}
+		}
+	}
+
+	log.Printf("detectAggregationStrategy -> Detected %d date columns, %d categorical, %d numeric",
+		len(dateColumns), len(categoricalColumns), len(numericColumns))
+
+	// Strategy 1: Time series aggregation (if we have date columns)
+	if len(dateColumns) > 0 && len(numericColumns) > 0 {
+		dateCol := dateColumns[0]
+		numericCol := numericColumns[0]
+
+		// Try to create a time-based aggregation query
+		// LIMITATION: This generates SQL-style aggregation which works for SQL databases only.
+		// MongoDB large dataset optimization is not supported - would need aggregation pipelines:
+		// [{$group: {_id: {$dateToString: {format: "%Y-%m-%d", date: "$field"}}, count: {$sum: 1}}}, {$sort: {_id: 1}}]
+		aggregatedQuery := fmt.Sprintf(
+			"SELECT DATE(%s) AS time_period, COUNT(*) AS count, AVG(%s) AS avg_value FROM (%s) AS subquery GROUP BY DATE(%s) ORDER BY time_period",
+			dateCol, numericCol, strings.TrimRight(originalQuery, ";"), dateCol,
+		)
+
+		return &AggregationStrategy{
+			Type:            "time_series",
+			AggregatedQuery: aggregatedQuery,
+			Description:     fmt.Sprintf("Aggregated by date using column '%s' with metrics on '%s'", dateCol, numericCol),
+		}
+	}
+
+	// Strategy 2: Categorical aggregation (if we have categorical and numeric columns)
+	if len(categoricalColumns) > 0 && len(numericColumns) > 0 {
+		categoryCol := categoricalColumns[0]
+		numericCol := numericColumns[0]
+
+		// Check cardinality - sample first few rows to estimate
+		uniqueCategories := make(map[string]bool)
+		sampleSize := 100
+		if len(queryResults) < sampleSize {
+			sampleSize = len(queryResults)
+		}
+
+		for i := 0; i < sampleSize; i++ {
+			if catVal, ok := queryResults[i][categoryCol]; ok {
+				if catStr, ok := catVal.(string); ok {
+					uniqueCategories[catStr] = true
+				}
+			}
+		}
+
+		// If cardinality is reasonable (< 100 unique values), use categorical aggregation
+		if len(uniqueCategories) < 100 {
+			aggregatedQuery := fmt.Sprintf(
+				"SELECT %s AS category, COUNT(*) AS count, SUM(%s) AS total, AVG(%s) AS average FROM (%s) AS subquery GROUP BY %s ORDER BY count DESC LIMIT 100",
+				categoryCol, numericCol, numericCol, strings.TrimRight(originalQuery, ";"), categoryCol,
+			)
+
+			return &AggregationStrategy{
+				Type:            "categorical",
+				AggregatedQuery: aggregatedQuery,
+				Description:     fmt.Sprintf("Grouped by category '%s' with aggregates on '%s' (estimated %d categories)", categoryCol, numericCol, len(uniqueCategories)),
+			}
+		} else {
+			log.Printf("detectAggregationStrategy -> Categorical column '%s' has too many unique values (%d), skipping", categoryCol, len(uniqueCategories))
+		}
+	}
+
+	// Strategy 3: Numeric sampling (if we only have numeric data)
+	// This is a fallback - just use a statistical sample with LIMIT
+	if len(numericColumns) > 0 {
+		log.Printf("detectAggregationStrategy -> No clear aggregation pattern, will use sample")
+		// Return nil to indicate we should just use the sample we have
+		// The caller will handle this by using the original sample data
+	}
+
+	log.Printf("detectAggregationStrategy -> No applicable aggregation strategy found")
+	return nil
 }
 
 // Helper functions for string manipulation

@@ -27,6 +27,7 @@ import (
 // Used by Handler
 type StreamHandler interface {
 	HandleStreamEvent(userID, chatID, streamID string, response dtos.StreamResponse)
+	HasStream(userID, chatID, streamID string) bool
 }
 
 type ChatService interface {
@@ -42,7 +43,7 @@ type ChatService interface {
 	CreateMessage(ctx context.Context, userID, chatID string, streamID string, content string, llmModel string) (*dtos.MessageResponse, uint16, error)
 	UpdateMessage(ctx context.Context, userID, chatID, messageID string, streamID string, req *dtos.CreateMessageRequest) (*dtos.MessageResponse, uint32, error)
 	DeleteMessages(userID, chatID string) (uint32, error)
-	Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error)
+	Duplicate(userID, chatID string, duplicateMessages bool, duplicateDashboards bool) (*dtos.ChatResponse, uint32, error)
 	ListMessages(userID, chatID string, page, pageSize int) (*dtos.MessageListResponse, uint32, error)
 	PinMessage(userID, chatID, messageID string) (interface{}, uint32, error)
 	UnpinMessage(userID, chatID, messageID string) (interface{}, uint32, error)
@@ -105,6 +106,7 @@ type chatService struct {
 	redisRepo         redis.IRedisRepositories
 	vectorizationSvc  VectorizationService                 // RAG pipeline — can be nil if unavailable
 	kbRepo            repositories.KnowledgeBaseRepository // Knowledge base persistence
+	dashboardRepo     repositories.DashboardRepository     // Dashboard persistence for duplication
 }
 
 func isValidDBType(dbType string) bool {
@@ -161,6 +163,7 @@ func NewChatService(
 	visualizationRepo repositories.IVisualizationRepository,
 	vectorizationSvc VectorizationService,
 	kbRepo repositories.KnowledgeBaseRepository,
+	dashboardRepo repositories.DashboardRepository,
 ) ChatService {
 	// Initialize crypto instance
 	crypto, err := utils.NewFromConfig()
@@ -181,6 +184,7 @@ func NewChatService(
 		redisRepo:         redisRepo,
 		vectorizationSvc:  vectorizationSvc,
 		kbRepo:            kbRepo,
+		dashboardRepo:     dashboardRepo,
 	}
 }
 
@@ -648,6 +652,48 @@ func (s *chatService) Delete(userID, chatID string) (uint32, error) {
 		return http.StatusForbidden, fmt.Errorf("unauthorized access to chat")
 	}
 
+	// Delete dashboards and widgets first (before deleting chat)
+	if s.dashboardRepo != nil {
+		dashboards, err := s.dashboardRepo.FindDashboardsByChatID(context.Background(), chatObjID)
+		if err != nil {
+			log.Printf("Warning: failed to fetch dashboards for deletion: %v", err)
+		} else {
+			for _, dashboard := range dashboards {
+				// Delete widgets first
+				if err := s.dashboardRepo.DeleteWidgetsByDashboardID(context.Background(), dashboard.ID); err != nil {
+					log.Printf("Warning: failed to delete widgets for dashboard %s: %v", dashboard.ID.Hex(), err)
+				}
+				// Delete dashboard
+				if err := s.dashboardRepo.DeleteDashboard(context.Background(), dashboard.ID); err != nil {
+					log.Printf("Warning: failed to delete dashboard %s: %v", dashboard.ID.Hex(), err)
+				}
+			}
+			if len(dashboards) > 0 {
+				log.Printf("Deleted %d dashboards for chat %s", len(dashboards), chatID)
+			}
+		}
+	}
+
+	// Delete visualizations (fetch messages first to get their IDs)
+	if s.visualizationRepo != nil {
+		messages, _, err := s.chatRepo.FindMessagesByChat(chatObjID, 1, 10000) // Large page to get all
+		if err != nil {
+			log.Printf("Warning: failed to fetch messages for visualization cleanup: %v", err)
+		} else {
+			vizDeletedCount := 0
+			for _, msg := range messages {
+				if err := s.visualizationRepo.DeleteVisualizationsByMessageID(context.Background(), msg.ID); err != nil {
+					log.Printf("Warning: failed to delete visualizations for message %s: %v", msg.ID.Hex(), err)
+				} else {
+					vizDeletedCount++
+				}
+			}
+			if vizDeletedCount > 0 {
+				log.Printf("Deleted visualizations for %d messages in chat %s", vizDeletedCount, chatID)
+			}
+		}
+	}
+
 	// Delete chat and its messages
 	if err := s.chatRepo.Delete(chatObjID); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("failed to delete chat: %v", err)
@@ -1017,7 +1063,7 @@ func (s *chatService) DeleteMessages(userID, chatID string) (uint32, error) {
 }
 
 // Duplicate a chat
-func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (*dtos.ChatResponse, uint32, error) {
+func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool, duplicateDashboards bool) (*dtos.ChatResponse, uint32, error) {
 	// Validate user ID
 	userObjID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
@@ -1275,6 +1321,113 @@ func (s *chatService) Duplicate(userID, chatID string, duplicateMessages bool) (
 				log.Printf("Chat duplication -> Copied knowledge base (%d tables) to new chat %s",
 					len(sourceKB.TableDescriptions), newChat.ID.Hex())
 			}
+		}()
+	}
+
+	// Copy dashboards and their widgets in background
+	if duplicateDashboards && s.dashboardRepo != nil {
+		go func() {
+			dashCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+
+			sourceDashboards, err := s.dashboardRepo.FindDashboardsByChatID(dashCtx, chatObjID)
+			if err != nil {
+				log.Printf("Chat duplication -> Warning: failed to fetch source dashboards: %v", err)
+				return
+			}
+			if len(sourceDashboards) == 0 {
+				log.Printf("Chat duplication -> No dashboards to copy for chat %s", chatID)
+				return
+			}
+
+			for _, srcDashboard := range sourceDashboards {
+				// Create new dashboard for the new chat
+				newDashboard := models.NewDashboard(userObjID, newChat.ID, srcDashboard.Name)
+				newDashboard.Description = srcDashboard.Description
+				newDashboard.TemplateType = srcDashboard.TemplateType
+				newDashboard.IsDefault = srcDashboard.IsDefault
+				newDashboard.RefreshInterval = srcDashboard.RefreshInterval
+				newDashboard.TimeRange = srcDashboard.TimeRange
+				newDashboard.GeneratedPrompt = srcDashboard.GeneratedPrompt
+				newDashboard.LLMModel = srcDashboard.LLMModel
+
+				if err := s.dashboardRepo.CreateDashboard(dashCtx, newDashboard); err != nil {
+					log.Printf("Chat duplication -> Warning: failed to create dashboard '%s': %v", srcDashboard.Name, err)
+					continue
+				}
+
+				// Fetch and duplicate widgets
+				srcWidgets, err := s.dashboardRepo.FindWidgetsByDashboardID(dashCtx, srcDashboard.ID)
+				if err != nil {
+					log.Printf("Chat duplication -> Warning: failed to fetch widgets for dashboard '%s': %v", srcDashboard.Name, err)
+					continue
+				}
+
+				// Build widget ID mapping for layout references
+				widgetIDMap := make(map[string]string) // old widget ID -> new widget ID
+				newWidgets := make([]*models.Widget, 0, len(srcWidgets))
+
+				for _, srcWidget := range srcWidgets {
+					newWidget := models.NewWidget(newDashboard.ID, newChat.ID, userObjID, srcWidget.Title, srcWidget.WidgetType, srcWidget.Query)
+					newWidget.Description = srcWidget.Description
+					newWidget.QueryType = srcWidget.QueryType
+					newWidget.Tables = srcWidget.Tables
+					newWidget.ChartConfigJSON = srcWidget.ChartConfigJSON
+					newWidget.GeneratedPrompt = srcWidget.GeneratedPrompt
+					newWidget.LLMModel = srcWidget.LLMModel
+
+					if srcWidget.StatConfig != nil {
+						statCopy := *srcWidget.StatConfig
+						newWidget.StatConfig = &statCopy
+					}
+					if srcWidget.TableConfig != nil {
+						tableCopy := *srcWidget.TableConfig
+						newWidget.TableConfig = &tableCopy
+					}
+
+					widgetIDMap[srcWidget.ID.Hex()] = newWidget.ID.Hex()
+					newWidgets = append(newWidgets, newWidget)
+				}
+
+				if len(newWidgets) > 0 {
+					if err := s.dashboardRepo.CreateWidgets(dashCtx, newWidgets); err != nil {
+						log.Printf("Chat duplication -> Warning: failed to create widgets for dashboard '%s': %v", srcDashboard.Name, err)
+						// Try individual creation as fallback
+						for _, w := range newWidgets {
+							if err := s.dashboardRepo.CreateWidget(dashCtx, w); err != nil {
+								log.Printf("Chat duplication -> Warning: failed to create widget '%s': %v", w.Title, err)
+							}
+						}
+					}
+				}
+
+				// Remap layout widget IDs to the new widget IDs
+				newLayout := make([]models.WidgetLayout, 0, len(srcDashboard.Layout))
+				for _, srcLayout := range srcDashboard.Layout {
+					newWidgetID, ok := widgetIDMap[srcLayout.WidgetID]
+					if !ok {
+						continue
+					}
+					newLayout = append(newLayout, models.WidgetLayout{
+						WidgetID: newWidgetID,
+						X:        srcLayout.X,
+						Y:        srcLayout.Y,
+						W:        srcLayout.W,
+						H:        srcLayout.H,
+						MinW:     srcLayout.MinW,
+						MinH:     srcLayout.MinH,
+					})
+				}
+				newDashboard.Layout = newLayout
+				if err := s.dashboardRepo.UpdateDashboard(dashCtx, newDashboard.ID, newDashboard); err != nil {
+					log.Printf("Chat duplication -> Warning: failed to update dashboard layout: %v", err)
+				}
+
+				log.Printf("Chat duplication -> Copied dashboard '%s' with %d widgets to new chat %s",
+					srcDashboard.Name, len(newWidgets), newChat.ID.Hex())
+			}
+
+			log.Printf("Chat duplication -> Copied %d dashboards to new chat %s", len(sourceDashboards), newChat.ID.Hex())
 		}()
 	}
 

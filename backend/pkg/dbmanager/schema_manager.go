@@ -876,7 +876,6 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 		tableNames = append(tableNames, tableName)
 	}
 	sort.Strings(tableNames)
-	log.Printf("FormatSchemaForLLM -> Sorted %d table names", len(tableNames))
 
 	// Format schema for LLM for tables, columns, indexes, foreign keys, constraints, etc.
 	for _, tableName := range tableNames {
@@ -895,16 +894,9 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 			columnNames = append(columnNames, columnName)
 		}
 		sort.Strings(columnNames)
-		log.Printf("FormatSchemaForLLM -> Table %s has %d columns", tableName, len(columnNames))
-
-		// Check if we have any columns
-		if len(columnNames) == 0 {
-			log.Printf("FormatSchemaForLLM -> Warning: No columns found for table %s", tableName)
-		}
 
 		for _, columnName := range columnNames {
 			column := table.Columns[columnName]
-			log.Printf("FormatSchemaForLLM -> Formatting column: %s of type %s", columnName, column.Type)
 
 			nullable := "NOT NULL"
 			if column.IsNullable {
@@ -931,10 +923,8 @@ func (m *SchemaManager) FormatSchemaForLLM(schema *SchemaInfo) string {
 
 			if isPrimaryKey {
 				result.WriteString(" PRIMARY KEY")
-				log.Printf("FormatSchemaForLLM -> Column %s is a PRIMARY KEY", columnName)
 			} else if isUnique {
 				result.WriteString(" UNIQUE")
-				log.Printf("FormatSchemaForLLM -> Column %s has a UNIQUE constraint", columnName)
 			}
 
 			if column.DefaultValue != "" {

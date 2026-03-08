@@ -7,7 +7,7 @@ import chatService from '../../services/chatService';
 import ConfirmationModal from '../modals/ConfirmationModal';
 import RollbackConfirmationModal from '../modals/RollbackConfirmationModal';
 import LoadingSteps from './LoadingSteps';
-import { Message, QueryResult } from './types';
+import { Message, QueryResult } from '../../types/query';
 import MarkdownRenderer from './MarkdownRenderer';
 import { formatActionAt } from '../../utils/message';
 import analyticsService from '../../services/analyticsService';

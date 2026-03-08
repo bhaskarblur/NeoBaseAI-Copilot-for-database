@@ -55,6 +55,9 @@ func Initialize() {
 	// Initialize visualization repository with Redis support
 	visualizationRepo := repositories.NewVisualizationRepository(mongodbClient, redisRepo)
 
+	// Initialize dashboard repository with Redis support
+	dashboardRepo := repositories.NewDashboardRepository(mongodbClient, redisRepo)
+
 	// Provide all dependencies to the container
 	if err := DiContainer.Provide(func() *mongodb.MongoDBClient { return mongodbClient }); err != nil {
 		log.Fatalf("Failed to provide MongoDB client: %v", err)
@@ -74,6 +77,10 @@ func Initialize() {
 
 	if err := DiContainer.Provide(func() repositories.IVisualizationRepository { return visualizationRepo }); err != nil {
 		log.Fatalf("Failed to provide visualization repository: %v", err)
+	}
+
+	if err := DiContainer.Provide(func() repositories.DashboardRepository { return dashboardRepo }); err != nil {
+		log.Fatalf("Failed to provide dashboard repository: %v", err)
 	}
 
 	// Provide DB Manager
@@ -409,6 +416,16 @@ func Initialize() {
 		log.Fatalf("Failed to provide LLM manager: %v", err)
 	}
 
+	// Knowledge Base Repository
+	if err := DiContainer.Provide(func(
+		mongoClient *mongodb.MongoDBClient,
+		redisRepo redis.IRedisRepositories,
+	) repositories.KnowledgeBaseRepository {
+		return repositories.NewKnowledgeBaseRepository(mongoClient, redisRepo)
+	}); err != nil {
+		log.Fatalf("Failed to provide knowledge base repository: %v", err)
+	}
+
 	// Update Chat Service provider to include DB manager setup
 	if err := DiContainer.Provide(func(
 		chatRepo repositories.ChatRepository,
@@ -417,6 +434,8 @@ func Initialize() {
 		llmManager *llm.Manager,
 		redisRepo redis.IRedisRepositories,
 		mongoClient *mongodb.MongoDBClient,
+		kbRepo repositories.KnowledgeBaseRepository,
+		dashboardRepo repositories.DashboardRepository,
 	) services.ChatService {
 		// Get a default LLM client - try in order of preference
 		var llmClient llm.Client
@@ -442,9 +461,6 @@ func Initialize() {
 		if llmClient == nil {
 			log.Printf("Warning: No LLM client available. Please configure OPENAI_API_KEY or GEMINI_API_KEY")
 		}
-
-		// Initialize Knowledge Base repository
-		kbRepo := repositories.NewKnowledgeBaseRepository(mongoClient, redisRepo)
 
 		// Initialize embedding provider (can be nil if no API keys)
 		embeddingProvider, embErr := embedding.AutoDetectProvider(
@@ -504,7 +520,7 @@ func Initialize() {
 			}()
 		}
 
-		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo, vectorizationSvc, kbRepo)
+		chatService := services.NewChatService(chatRepo, dbManager, llmClient, llmManager, redisRepo, visualizationRepo, vectorizationSvc, kbRepo, dashboardRepo)
 
 		// Set chat service as stream handler for DB manager
 		dbManager.SetStreamHandler(chatService)
@@ -525,6 +541,31 @@ func Initialize() {
 		return services.NewGitHubService(redisRepo)
 	}); err != nil {
 		log.Fatalf("Failed to provide github handler: %v", err)
+	}
+
+	// Dashboard Service
+	if err := DiContainer.Provide(func(
+		dashboardRepo repositories.DashboardRepository,
+		chatRepo repositories.ChatRepository,
+		dbManager *dbmanager.Manager,
+		llmManager *llm.Manager,
+		redisRepo redis.IRedisRepositories,
+		kbRepo repositories.KnowledgeBaseRepository,
+	) services.DashboardService {
+		return services.NewDashboardService(dashboardRepo, chatRepo, dbManager, llmManager, redisRepo, kbRepo)
+	}); err != nil {
+		log.Fatalf("Failed to provide dashboard service: %v", err)
+	}
+
+	// Dashboard Import/Export Service
+	if err := DiContainer.Provide(func(
+		dashboardRepo repositories.DashboardRepository,
+		chatRepo repositories.ChatRepository,
+		dbManager *dbmanager.Manager,
+	) services.DashboardImportExportService {
+		return services.NewDashboardImportExportService(dashboardRepo, chatRepo, dbManager)
+	}); err != nil {
+		log.Fatalf("Failed to provide dashboard import/export service: %v", err)
 	}
 
 	// Provide handlers
@@ -558,6 +599,21 @@ func Initialize() {
 		return handlers.NewVisualizationHandler(chatService)
 	}); err != nil {
 		log.Fatalf("Failed to provide visualization handler: %v", err)
+	}
+
+	// Dashboard Handler
+	if err := DiContainer.Provide(func(
+		dashboardService services.DashboardService,
+		dashboardImportExportService services.DashboardImportExportService,
+		chatService services.ChatService,
+		chatHandler *handlers.ChatHandler,
+	) *handlers.DashboardHandler {
+		// Reuse chat handler as stream handler so dashboard events
+		// flow through the same SSE connection
+		dashboardService.SetStreamHandler(chatHandler)
+		return handlers.NewDashboardHandler(dashboardService, dashboardImportExportService)
+	}); err != nil {
+		log.Fatalf("Failed to provide dashboard handler: %v", err)
 	}
 }
 
@@ -613,6 +669,18 @@ func GetWaitlistHandler() (*handlers.WaitlistHandler, error) {
 func GetVisualizationHandler() (*handlers.VisualizationHandler, error) {
 	var handler *handlers.VisualizationHandler
 	err := DiContainer.Invoke(func(h *handlers.VisualizationHandler) {
+		handler = h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+// GetDashboardHandler retrieves the DashboardHandler from the DI container
+func GetDashboardHandler() (*handlers.DashboardHandler, error) {
+	var handler *handlers.DashboardHandler
+	err := DiContainer.Invoke(func(h *handlers.DashboardHandler) {
 		handler = h
 	})
 	if err != nil {

@@ -33,6 +33,7 @@ func SetupDefaultRoutes(router *gin.Engine) {
 	SetupAuthRoutes(router)
 	SetupChatRoutes(router)
 	SetupVisualizationRoutes(router)
+	SetupDashboardRoutes(router)
 	SetupWaitlistRoutes(router)
 	SetupUploadRoutes(router)
 	SetupGoogleOAuthRoutes(router)

@@ -580,7 +580,8 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 
 				// Parse the projection
 				// Use our specialized projection processor for better handling
-				jsonProjStr, err := processProjectionParams(projectionStr)
+				// Pass false because this is a find() projection, not an aggregation $project
+				jsonProjStr, err := processProjectionParams(projectionStr, false)
 				if err != nil {
 					return &QueryExecutionResult{
 						Error: &dtos.QueryError{
@@ -744,7 +745,8 @@ func (tx *MongoDBTransaction) ExecuteQuery(ctx context.Context, query string) (*
 			}
 
 			// Parse the projection document using our specialized processor
-			jsonProjStr, err := processProjectionParams(projectionJSON)
+			// Pass false because this is a find() projection, not an aggregation $project
+			jsonProjStr, err := processProjectionParams(projectionJSON, false)
 			if err != nil {
 				return &QueryExecutionResult{
 					Error: &dtos.QueryError{

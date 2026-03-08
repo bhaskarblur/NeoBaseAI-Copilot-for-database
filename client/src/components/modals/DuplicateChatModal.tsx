@@ -4,7 +4,7 @@ import { useState } from 'react';
 interface DuplicateChatModalProps {
   chatName: string;
   chatId: string;
-  onConfirm: (chatId: string, duplicateMessages: boolean) => Promise<void>;
+  onConfirm: (chatId: string, duplicateMessages: boolean, duplicateDashboards: boolean) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -16,6 +16,7 @@ export default function DuplicateChatModal({
 }: DuplicateChatModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [duplicateMessages, setDuplicateMessages] = useState(false);
+  const [duplicateDashboards, setDuplicateDashboards] = useState(false);
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -38,7 +39,7 @@ export default function DuplicateChatModal({
             Are you sure you want to duplicate "{chatName}"? This will create a new chat with the same database connection.
           </p>
 
-          <div className="mb-6">
+          <div className="mb-4">
             <label className="flex items-center gap-2 cursor-pointer">
               <input 
                 type="checkbox" 
@@ -53,12 +54,27 @@ export default function DuplicateChatModal({
             </p>
           </div>
 
+          <div className="mb-6">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={duplicateDashboards} 
+                onChange={(e) => setDuplicateDashboards(e.target.checked)}
+                className="w-5 h-5 rounded border-2 border-black focus:ring-2 focus:ring-blue-500"
+              />
+              <span className="text-base">Duplicate all dashboards</span>
+            </label>
+            <p className="text-gray-500 text-sm mt-1 ml-7">
+              All dashboards and widgets will be copied to the new chat.
+            </p>
+          </div>
+
           <div className="flex gap-4">
             <button
               onClick={async () => {
                 setIsLoading(true);
                 try {
-                  await onConfirm(chatId, duplicateMessages);
+                  await onConfirm(chatId, duplicateMessages, duplicateDashboards);
                 } finally {
                   setIsLoading(false);
                 }

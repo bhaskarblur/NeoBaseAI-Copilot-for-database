@@ -387,7 +387,7 @@ export default function Sidebar({
     });
   };
 
-  const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean) => {
+  const handleDuplicateConfirm = async (chatId: string, duplicateMessages: boolean, duplicateDashboards: boolean) => {
     try {
       const connectionToDuplicate = connections.find(chat => chat.id === chatId);
       
@@ -404,7 +404,7 @@ export default function Sidebar({
       }
 
       // Call the duplicateChat service and get the duplicated chat
-      const duplicatedChat = await chatService.duplicateChat(chatId, duplicateMessages);
+      const duplicatedChat = await chatService.duplicateChat(chatId, duplicateMessages, duplicateDashboards);
       
       // Call the onDuplicateConnection callback with the ID of the duplicated chat
       if (onDuplicateConnection) {
@@ -475,7 +475,7 @@ export default function Sidebar({
                           <div key={connection.id} className="relative group">
                             <button
                               onClick={() => handleSelectConnection(connection.id)}
-                              className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-50'
+                              className={`w-full h-full cursor-pointer ${isExpanded ? 'p-4' : 'p-3'} rounded-lg transition-all ${selectedConnection?.id === connection.id ? 'bg-[#FFDB58]' : 'bg-white hover:bg-gray-100'
                                 }`}
                               title={connection.connection.database}
                             >
