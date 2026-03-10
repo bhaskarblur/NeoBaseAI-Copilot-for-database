@@ -418,7 +418,7 @@ export default function DashboardWidgetCard({
     const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
 
     return (
-      <div className={`${data.length >= 10 ? 'h-[340px]' : data.length >= 8 ? 'h-[310px]' : data.length >= 6 ? 'h-[290px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
+      <div className={`${data.length >= 10 ? 'h-[580px] md:h-[380px]' : data.length >= 8 ? 'h-[360px] md:h-[310px]' : data.length >= 6 ? 'h-[320px] md:h-[290px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
         <ResponsiveContainer width="100%" height="100%">
           <RechartsPieChart>
             <Pie
