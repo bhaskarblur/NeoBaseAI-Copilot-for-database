@@ -3,6 +3,16 @@
 
 <img width="1850" height="971" alt="neobase-banner" src="https://github.com/user-attachments/assets/1c88e3d2-6ae8-4398-a816-c5bf7224d08a" />
 
+<div align="center">
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/VT9NRub86D)
+[![Product Hunt](https://img.shields.io/badge/Product%20Hunt-Featured-DA552F?style=for-the-badge&logo=producthunt&logoColor=white)](https://www.producthunt.com/posts/neobase-2)
+[![Website](https://img.shields.io/badge/Website-neobase.ai-FFDB58?style=for-the-badge&logo=google-chrome&logoColor=black)](https://neobase.cloud)
+[![GitHub Stars](https://img.shields.io/github/stars/bhaskarblur/neobase-ai-dba?style=for-the-badge&logo=github&color=yellow)](https://github.com/bhaskarblur/neobase-ai-dba)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE.md)
+
+</div>
+
 # NeoBase - AI Copilot for Database
 
 **NeoBase** is an AI database copilot that allows you to chat with your data and visualize, analyze it quickly and easily. With a sleek Neo Brutalism design and real-time conversation, NeoBase makes database visualization intuitive and efficient.
@@ -74,13 +84,13 @@ Each database type has specialized prompt logic for:
 - Neo4j DB (Priority 3)
 
 ## Supported LLM Clients
-- **OpenAI** (14 models) - GPT-5.2, O3, GPT-4.1, GPT-4o, and more cutting-edge models
-- **Google Gemini** (7 models) - Gemini 3 Pro, Gemini 2.5 Flash/Pro, Gemini 2.0, and more
-- **Anthropic Claude** (10 models) - Claude Opus 4.5 (world's best), Sonnet 4.5, Sonnet 4 (default), Haiku 4.5, 3.5 series, and 3.0 series
+- **OpenAI** (18 models) - GPT-5.2, O3/O4, GPT-4.1, GPT-4o, and more cutting-edge models
+- **Google Gemini** (9 models) - **Gemini 3 Pro/Flash** (latest), Gemini 2.5 Pro/Flash, and more
+- **Anthropic Claude** (12 models) - **Claude Opus 4.6** (most intelligent), Sonnet 4.6/4.5, Sonnet 4 (default), and more
 - **Ollama** (30+ models) - Self-hosted open-source models including DeepSeek R1, Llama 3.1/3.3, Qwen 2.5/3, Mistral, and more
 
 ### Dynamic Model Selection
-Select different AI models for each message without restarting. Choose from **60 pre-configured models** across 4 providers with automatic API key filtering and intelligent routing.
+Select different AI models for each message without restarting. Choose from **65+ pre-configured models** across 4 providers with automatic API key filtering and intelligent routing.
 
 ### Configurable AI Providers
 Enable or disable AI providers through simple environment variables:

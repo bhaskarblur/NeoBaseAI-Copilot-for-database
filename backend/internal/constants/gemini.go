@@ -3,19 +3,20 @@ package constants
 import "github.com/google/generative-ai-go/genai"
 
 var GeminiLLMModels = []LLMModel{
+	// Gemini 3 Series (Latest & Most Powerful)
 	{
-		ID:                  "gemini-3.1-pro-preview",
+		ID:                  "gemini-3-pro",
 		Provider:            Gemini,
-		DisplayName:         "Gemini 3.1 Pro (Most Intelligent)",
+		DisplayName:         "Gemini 3 Pro (Most Intelligent)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
 		MaxCompletionTokens: 65536,
 		Temperature:         1,
 		InputTokenLimit:     1048576,
-		Description:         "Refined Gemini 3 Pro with better thinking, improved token efficiency, and factual consistency. Optimized for coding and agentic workflows",
+		Description:         "Most intelligent Gemini model with breakthrough reasoning capabilities. Best for complex coding, analysis, and agentic workflows",
 	},
 	{
-		ID:                  "gemini-3-flash-preview",
+		ID:                  "gemini-3-flash",
 		Provider:            Gemini,
 		DisplayName:         "Gemini 3 Flash (Frontier Speed)",
 		IsEnabled:           true,
@@ -23,7 +24,29 @@ var GeminiLLMModels = []LLMModel{
 		MaxCompletionTokens: 65536,
 		Temperature:         1,
 		InputTokenLimit:     1048576,
-		Description:         "Best model in the world for multimodal understanding with state-of-the-art reasoning and agentic capabilities",
+		Description:         "Fastest Gemini 3 model with exceptional multimodal understanding. Best for high-throughput tasks requiring speed and intelligence",
+	},
+	{
+		ID:                  "gemini-3.1-pro-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3.1 Pro Preview (Experimental)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 65536,
+		Temperature:         1,
+		InputTokenLimit:     1048576,
+		Description:         "Experimental preview of Gemini 3.1 with improved thinking and token efficiency. Early access to next-generation features",
+	},
+	{
+		ID:                  "gemini-3-flash-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3 Flash Preview (Experimental)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 65536,
+		Temperature:         1,
+		InputTokenLimit:     1048576,
+		Description:         "Preview version of Gemini 3 Flash with latest experimental features and performance optimizations",
 	},
 	// Gemini 2.5 Series (Advanced)
 	{
