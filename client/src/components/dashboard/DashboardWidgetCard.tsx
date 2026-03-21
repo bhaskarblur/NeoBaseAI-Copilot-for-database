@@ -5,6 +5,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   BarChart3,
+  ChevronLeft,
+  ChevronRight,
   Gauge,
   Grid3x3,
   Info,
@@ -46,6 +48,8 @@ interface DashboardWidgetCardProps {
   onEdit?: () => void;
   onRefresh?: () => void;
   onCancelRefresh?: () => void;
+  onNextPage?: () => void;
+  onPreviousPage?: () => void;
   onDataUpdate?: (data: Record<string, unknown>[]) => void;
   onError?: (error: string) => void;
 }
@@ -142,6 +146,8 @@ export default function DashboardWidgetCard({
   onEdit,
   onRefresh,
   onCancelRefresh,
+  onNextPage,
+  onPreviousPage,
 }: DashboardWidgetCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
@@ -157,6 +163,8 @@ export default function DashboardWidgetCard({
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   // Sort tooltip hover state
   const [hoveredSortColumn, setHoveredSortColumn] = useState<string | null>(null);
+  // In-memory page for non-cursor table widgets
+  const [localPage, setLocalPage] = useState(1);
 
   // Ref to store previous data so we can show it while loading (Grafana-style)
   const prevDataRef = useRef<Record<string, unknown>[] | undefined>(undefined);
@@ -221,6 +229,11 @@ export default function DashboardWidgetCard({
     }
   }, [widget.data, widget.widget_type]);
 
+  // Reset local page when data is refreshed
+  useEffect(() => {
+    setLocalPage(1);
+  }, [widget.data]);
+
   // Use current data or previous data for Grafana-style "show stale data while loading"
   const displayData = widget.data && widget.data.length > 0 ? widget.data : prevDataRef.current;
 
@@ -251,14 +264,14 @@ export default function DashboardWidgetCard({
     if (!displayData || displayData.length === 0) {
       if (widget.is_loading) {
         return (
-          <div className="flex items-center justify-center h-full min-h-[120px]">
+          <div className="flex items-center justify-center h-full min-h-[100px]">
             <span className="text-base text-gray-400">Loading data...</span>
           </div>
         );
       }
       return (
-        <div className="flex items-center justify-center h-full min-h-[120px]">
-          <span className="text-center text-base text-gray-500">No data loaded.<br />Try refreshing.</span>
+        <div className="flex items-center justify-center h-full min-h-[100px]">
+          <span className="text-center text-base text-gray-500">No data found</span>
         </div>
       );
     }
@@ -869,11 +882,16 @@ export default function DashboardWidgetCard({
         return sortConfig.direction === 'asc' ? comparison : -comparison;
       });
     }
-    
-    const displayRows = sortedData.slice(0, pageSize);
+
+    const totalPages = Math.ceil(sortedData.length / pageSize);
+    // For cursor-based pagination the backend delivers exactly one page; for in-memory, slice by localPage
+    const isCursorWidget = !!widget.table_config?.cursor_field;
+    const effectivePage = isCursorWidget ? 1 : Math.min(localPage, Math.max(1, totalPages));
+    const displayRows = sortedData.slice((effectivePage - 1) * pageSize, effectivePage * pageSize);
     
     // Handle sort toggle
     const handleSort = (columnKey: string) => {
+      setLocalPage(1); // Reset to first page on sort
       setSortConfig((current) => {
         if (current?.key === columnKey) {
           // Toggle direction or clear
@@ -1100,9 +1118,57 @@ export default function DashboardWidgetCard({
             ))}
           </tbody>
         </table>
-        {data.length > pageSize && (
-          <div className="sticky bottom-0 text-center py-2 text-xs text-gray-400 bg-white border-t border-gray-100">
-            Showing {pageSize} of {data.length} rows
+        
+        {/* Pagination UI */}
+        {(isCursorWidget ? (widget.current_page && widget.current_page > 1) || widget.has_more || (widget.cursor_stack?.length ?? 0) > 0 : totalPages > 1) && (
+          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2">
+            <div className="flex items-center justify-between text-sm">
+              <div className="text-gray-500">
+                {isCursorWidget ? (
+                  widget.current_page ? (
+                    <span>Page {widget.current_page}</span>
+                  ) : (
+                    <span>Showing <span className='text-gray-700'>{Math.min(pageSize, data.length)} rows</span></span>
+                  )
+                ) : (
+                  <span>Page <span className='text-gray-700'>{effectivePage}</span> of <span className='text-gray-700'>{totalPages}</span></span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => isCursorWidget ? onPreviousPage?.() : setLocalPage(p => Math.max(1, p - 1))}
+                  disabled={isCursorWidget ? (widget.cursor_stack?.length ?? 0) <= 1 || widget.is_loading : effectivePage <= 1 || widget.is_loading}
+                  className="
+                    flex items-center gap-1 px-3 py-1.5 rounded-lg
+                    text-sm font-medium
+                    transition-colors
+                    disabled:opacity-40 disabled:cursor-not-allowed
+                    enabled:hover:bg-gray-100 enabled:text-black
+                    text-gray-600
+                  "
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+
+                <button
+                  onClick={() => isCursorWidget ? onNextPage?.() : setLocalPage(p => Math.min(totalPages, p + 1))}
+                  disabled={isCursorWidget ? !widget.has_more || widget.is_loading : effectivePage >= totalPages || widget.is_loading}
+                  className="
+                    flex items-center gap-1 px-3 py-1.5 rounded-lg
+                    text-sm font-medium
+                    transition-colors
+                    disabled:opacity-40 disabled:cursor-not-allowed
+                    enabled:hover:bg-gray-100 enabled:text-black
+                    text-gray-600
+                  "
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

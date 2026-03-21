@@ -290,7 +290,7 @@ export default function DashboardView({
 
     const handleWidgetData = (e: Event) => {
       const data = (e as CustomEvent).detail as DashboardWidgetDataEvent;
-      handleWidgetDataUpdate(data.widget_id, data.data);
+      handleWidgetDataUpdate(data.widget_id, data);
     };
 
     const handleWidgetError = (e: Event) => {
@@ -465,7 +465,7 @@ export default function DashboardView({
     handleRefreshDashboard(true);
   }, [activeDashboard?.id, activeDashboard?.widgets, streamId, isConnected, handleRefreshDashboard]);
 
-  const handleRefreshWidget = useCallback(async (widgetId: string, retryCount = 0) => {
+  const handleRefreshWidget = useCallback(async (widgetId: string, retryCount = 0, cursor?: string) => {
     if (!activeDashboard) return;
 
     // Ensure SSE connection before refresh
@@ -490,7 +490,7 @@ export default function DashboardView({
     startLoadingTimeout(widgetId);
 
     try {
-      await dashboardService.refreshWidget(chatId, activeDashboard.id, widgetId, sid);
+      await dashboardService.refreshWidget(chatId, activeDashboard.id, widgetId, sid, cursor);
     } catch (err: any) {
       console.error('Failed to refresh widget:', err);
       
@@ -516,7 +516,7 @@ export default function DashboardView({
           await new Promise((r) => setTimeout(r, 300));
           toast.success('Connected! Refreshing widget...', { id: 'reconnect-widget' });
           // Retry the widget refresh with incremented retry count
-          handleRefreshWidget(widgetId, retryCount + 1);
+          handleRefreshWidget(widgetId, retryCount + 1, cursor);
           return;
         } catch (reconnectErr) {
           console.error('Failed to reconnect:', reconnectErr);
@@ -543,6 +543,69 @@ export default function DashboardView({
       toast.error('Failed to refresh widget');
     }
   }, [activeDashboard, chatId, ensureSSEConnection, startLoadingTimeout, clearLoadingTimeout, onReconnect]);
+
+  // Handle widget pagination - Next Page
+  const handleWidgetNextPage = useCallback((widgetId: string) => {
+    if (!activeDashboard) return;
+    
+    const widget = activeDashboard.widgets.find(w => w.id === widgetId);
+    if (!widget || !widget.table_config?.cursor_field || !widget.has_more || widget.is_loading) return;
+    
+    const cursorToUse = widget.next_cursor ?? null;
+    
+    // Refresh with the next cursor
+    handleRefreshWidget(widgetId, 0, cursorToUse || undefined);
+    
+    // Push the cursor we're navigating to onto the stack and increment page
+    // cursor_stack[0] = null (page 1, no cursor), cursor_stack[1] = cursor for page 2, etc.
+    setActiveDashboard((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        widgets: prev.widgets.map((w) =>
+          w.id === widgetId ? {
+            ...w,
+            current_page: (w.current_page || 1) + 1,
+            cursor_stack: [...(w.cursor_stack ?? [null]), cursorToUse],
+          } : w
+        ),
+      };
+    });
+  }, [activeDashboard, handleRefreshWidget]);
+
+  // Handle widget pagination - Previous Page (uses cursor stack for backward navigation)
+  const handleWidgetPreviousPage = useCallback((widgetId: string) => {
+    if (!activeDashboard) return;
+    
+    const widget = activeDashboard.widgets.find(w => w.id === widgetId);
+    if (!widget || !widget.table_config?.cursor_field || widget.is_loading) return;
+    
+    // cursor_stack stores the cursor used to load each page.
+    // To go back, pop the last entry and reload using the new top-of-stack cursor.
+    const currentStack = widget.cursor_stack ?? [null];
+    if (currentStack.length <= 1) return; // Already on first page
+    
+    const newStack = currentStack.slice(0, -1);
+    const prevCursor = newStack[newStack.length - 1]; // null = first page (no cursor)
+    
+    // Update cursor stack and page number before triggering refresh
+    setActiveDashboard((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        widgets: prev.widgets.map((w) =>
+          w.id === widgetId ? {
+            ...w,
+            current_page: Math.max(1, (w.current_page || 1) - 1),
+            cursor_stack: newStack,
+          } : w
+        ),
+      };
+    });
+    
+    // Reload the page with the previous cursor (null = first page)
+    handleRefreshWidget(widgetId, 0, prevCursor ?? undefined);
+  }, [activeDashboard, handleRefreshWidget]);
 
   const handleRefreshIntervalChange = async (interval: number) => {
     if (!activeDashboard) return;
@@ -645,7 +708,7 @@ export default function DashboardView({
     }
   };
 
-  const handleWidgetDataUpdate = useCallback((widgetId: string, data: Record<string, unknown>[]) => {
+  const handleWidgetDataUpdate = useCallback((widgetId: string, event: DashboardWidgetDataEvent) => {
     clearLoadingTimeout(widgetId);
     setIndividuallyRefreshingWidgets((prev) => {
       const next = new Set(prev);
@@ -656,11 +719,19 @@ export default function DashboardView({
       if (!prev) return null;
       return {
         ...prev,
-        widgets: prev.widgets.map((w) =>
-          w.id === widgetId
-            ? { ...w, data, is_loading: false, error: undefined, last_refreshed_at: new Date().toISOString() }
-            : w
-        ),
+        widgets: prev.widgets.map((w) => {
+          if (w.id !== widgetId) return w;
+          return {
+            ...w,
+            data: event.data ?? undefined,
+            is_loading: false,
+            error: undefined,
+            last_refreshed_at: new Date().toISOString(),
+            // Persist cursor pagination state from SSE event
+            next_cursor: event.next_cursor ?? null,
+            has_more: event.has_more,
+          };
+        }),
       };
     });
   }, [clearLoadingTimeout]);
@@ -1033,6 +1104,8 @@ export default function DashboardView({
                 onEditWidget={(widgetId) => setEditingWidgetId(widgetId)}
                 onRefreshWidget={handleRefreshWidget}
                 onCancelWidgetRefresh={handleCancelWidgetRefresh}
+                onWidgetNextPage={handleWidgetNextPage}
+                onWidgetPreviousPage={handleWidgetPreviousPage}
                 individuallyRefreshingWidgets={individuallyRefreshingWidgets}
                 onAddWidget={() => setShowAddWidgetModal(true)}
               />
