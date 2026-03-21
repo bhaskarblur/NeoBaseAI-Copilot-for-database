@@ -1519,8 +1519,25 @@ func mongoFormatCursorValue(v string) string {
 
 // mongoInjectTemplatedCursor replaces {{cursor_value}} (quoted or bare) with the
 // correctly formatted BSON literal. Called from BuildCursorQuery's template path.
+// It detects when the placeholder is already inside ISODate(...) or ObjectId(...) wrappers
+// to avoid double-wrapping (e.g. ISODate(ISODate("...")) ).
 func mongoInjectTemplatedCursor(query, cursorValue string) string {
 	const placeholder = "{{cursor_value}}"
+
+	// Check if placeholder is already wrapped in ISODate() or ObjectId().
+	// If so, just do a plain replacement of the placeholder with the raw value
+	// (the wrapper is already present in the template).
+	alreadyWrapped := strings.Contains(query, `ISODate("`+placeholder+`")`) ||
+		strings.Contains(query, `ISODate('`+placeholder+`')`) ||
+		strings.Contains(query, `ObjectId("`+placeholder+`")`) ||
+		strings.Contains(query, `ObjectId('`+placeholder+`')`)
+
+	if alreadyWrapped {
+		// Plain replacement — the AI template already has the correct BSON wrapper
+		return strings.ReplaceAll(query, placeholder, cursorValue)
+	}
+
+	// Standard replacement — format the cursor value with appropriate BSON wrapper
 	replacement := mongoFormatCursorValue(cursorValue)
 	query = strings.Replace(query, "'"+placeholder+"'", replacement, -1)
 	query = strings.Replace(query, `"`+placeholder+`"`, replacement, -1)

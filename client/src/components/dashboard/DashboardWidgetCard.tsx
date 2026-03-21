@@ -1121,12 +1121,12 @@ export default function DashboardWidgetCard({
         
         {/* Pagination UI */}
         {(isCursorWidget ? (widget.current_page && widget.current_page > 1) || widget.has_more || (widget.cursor_stack?.length ?? 0) > 0 : totalPages > 1) && (
-          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2">
+          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-2 py-2">
             <div className="flex items-center justify-between text-sm">
               <div className="text-gray-500">
                 {isCursorWidget ? (
                   widget.current_page ? (
-                    <span>Page {widget.current_page}</span>
+                    <span>Page <span className='text-gray-700'>{widget.current_page}</span>, <span>Showing <span className='text-gray-700'>{Math.min(pageSize, data.length)} rows</span></span></span>
                   ) : (
                     <span>Showing <span className='text-gray-700'>{Math.min(pageSize, data.length)} rows</span></span>
                   )
@@ -1144,7 +1144,7 @@ export default function DashboardWidgetCard({
                     text-sm font-medium
                     transition-colors
                     disabled:opacity-40 disabled:cursor-not-allowed
-                    enabled:hover:bg-gray-100 enabled:text-black
+                    enabled:hover:bg-gray-200 enabled:text-black
                     text-gray-600
                   "
                 >
@@ -1160,7 +1160,7 @@ export default function DashboardWidgetCard({
                     text-sm font-medium
                     transition-colors
                     disabled:opacity-40 disabled:cursor-not-allowed
-                    enabled:hover:bg-gray-100 enabled:text-black
+                    enabled:hover:bg-gray-200 enabled:text-black
                     text-gray-600
                   "
                 >
@@ -1274,7 +1274,7 @@ export default function DashboardWidgetCard({
           {renderWidgetContent()}
           {/* Error overlay on top of stale data */}
           {widget.error && displayData && displayData.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border-t border-red-200 text-sm text-red-500">
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border-t border-red-200 text-sm text-red-500">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{widget.error}</span>
             </div>

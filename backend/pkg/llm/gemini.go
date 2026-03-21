@@ -22,6 +22,20 @@ type GeminiClient struct {
 	DBConfigs           []LLMDBConfig
 }
 
+// safeSendMessage wraps session.SendMessage with panic recovery.
+// The Gemini SDK panics with a nil pointer dereference when the API
+// returns 0 candidates (it accesses Candidates[0].Content unconditionally).
+func safeSendMessage(session *genai.ChatSession, ctx context.Context, parts ...genai.Part) (result *genai.GenerateContentResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Gemini safeSendMessage -> recovered from panic: %v", r)
+			result = nil
+			err = fmt.Errorf("gemini SendMessage returned empty candidates (recovered from SDK panic)")
+		}
+	}()
+	return session.SendMessage(ctx, parts...)
+}
+
 func NewGeminiClient(config Config) (*GeminiClient, error) {
 	if config.APIKey == "" {
 		return nil, fmt.Errorf("gemini API key is required")
@@ -183,7 +197,7 @@ func (c *GeminiClient) GenerateResponse(ctx context.Context, messages []*models.
 		return "", ctx.Err()
 	}
 	// Send empty message to get response based on history
-	result, err := session.SendMessage(ctx, genai.Text("Please provide a response based on our conversation history."))
+	result, err := safeSendMessage(session, ctx, genai.Text("Please provide a response based on our conversation history."))
 	if err != nil {
 		log.Printf("Gemini API error: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
@@ -267,7 +281,7 @@ func (c *GeminiClient) GenerateRawJSON(ctx context.Context, systemPrompt string,
 	}
 
 	session := geminiModel.StartChat()
-	result, err := session.SendMessage(ctx, genai.Text(userMessage))
+	result, err := safeSendMessage(session, ctx, genai.Text(userMessage))
 	if err != nil {
 		log.Printf("Gemini GenerateRawJSON API error: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
@@ -381,7 +395,7 @@ func (c *GeminiClient) GenerateRecommendations(ctx context.Context, messages []*
 		return "", ctx.Err()
 	}
 	// Send empty message to get response based on history
-	result, err := session.SendMessage(ctx, genai.Text("Please provide query recommendations based on our conversation history."))
+	result, err := safeSendMessage(session, ctx, genai.Text("Please provide query recommendations based on our conversation history."))
 	if err != nil {
 		log.Printf("Gemini API error: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
@@ -466,7 +480,7 @@ func (c *GeminiClient) GenerateVisualization(ctx context.Context, systemPrompt s
 	}
 
 	// Send request for visualization
-	result, err := session.SendMessage(ctx, genai.Text("Generate the visualization configuration as JSON."))
+	result, err := safeSendMessage(session, ctx, genai.Text("Generate the visualization configuration as JSON."))
 	if err != nil {
 		log.Printf("Gemini API error in GenerateVisualization: %v", err)
 		return "", fmt.Errorf("gemini API error: %v", err)
@@ -608,7 +622,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 	}
 
 	// Initial prompt to kick off tool use
-	result, err := session.SendMessage(ctx, genai.Text("Please analyze the request and use the available tools to provide an accurate response. Start by examining what you need, then call generate_final_response when ready."))
+	result, err := safeSendMessage(session, ctx, genai.Text("Please analyze the request and use the available tools to provide an accurate response. Start by examining what you need, then call generate_final_response when ready."))
 	if err != nil {
 		return nil, fmt.Errorf("gemini tool-calling API error: %v", err)
 	}
@@ -635,7 +649,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 			}
 			log.Printf("Gemini GenerateWithTools -> Empty response at iteration %d, retrying (%d/%d)", iteration, emptyRetries, maxEmptyRetries)
 			var retryErr error
-			result, retryErr = session.SendMessage(ctx, genai.Text("Your previous response was empty. Please continue — either call the appropriate tool or call generate_final_response with your answer."))
+			result, retryErr = safeSendMessage(session, ctx, genai.Text("Your previous response was empty. Please continue — either call the appropriate tool or call generate_final_response with your answer."))
 			if retryErr != nil {
 				return nil, fmt.Errorf("gemini retry after empty response failed: %v", retryErr)
 			}
@@ -697,7 +711,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 				}
 				log.Printf("Gemini GenerateWithTools -> Plain text at iteration %d, nudging to use generate_final_response (%d/%d)", iteration, emptyRetries, maxEmptyRetries)
 				var retryErr error
-				result, retryErr = session.SendMessage(ctx, genai.Text("You returned a plain text response instead of calling the generate_final_response tool. You MUST call generate_final_response with your complete answer including any SQL queries in the 'queries' array. Do not respond with plain text."))
+				result, retryErr = safeSendMessage(session, ctx, genai.Text("You returned a plain text response instead of calling the generate_final_response tool. You MUST call generate_final_response with your complete answer including any SQL queries in the 'queries' array. Do not respond with plain text."))
 				if retryErr != nil {
 					return nil, fmt.Errorf("gemini retry after plain text failed: %v", retryErr)
 				}
@@ -710,7 +724,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 			}
 			log.Printf("Gemini GenerateWithTools -> Empty text at iteration %d, retrying (%d/%d)", iteration, emptyRetries, maxEmptyRetries)
 			var retryErr error
-			result, retryErr = session.SendMessage(ctx, genai.Text("Your previous response was empty. Please call generate_final_response with your complete answer, or call an appropriate tool if you need more information."))
+			result, retryErr = safeSendMessage(session, ctx, genai.Text("Your previous response was empty. Please call generate_final_response with your complete answer, or call an appropriate tool if you need more information."))
 			if retryErr != nil {
 				return nil, fmt.Errorf("gemini retry after empty text failed: %v", retryErr)
 			}
@@ -775,7 +789,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, messages []*models
 		emptyRetries = 0
 
 		// Send tool results back to the session
-		result, err = session.SendMessage(ctx, responseParts...)
+		result, err = safeSendMessage(session, ctx, responseParts...)
 		if err != nil {
 			return nil, fmt.Errorf("gemini tool-calling API error at iteration %d: %v", iteration, err)
 		}
