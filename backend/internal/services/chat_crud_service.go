@@ -75,7 +75,7 @@ type ChatService interface {
 	DownloadSpreadsheetTableDataWithFilter(userID, chatID, tableName string, rowIDs []string) (*dtos.SpreadsheetDownloadResponse, uint32, error)
 
 	RefreshSchema(ctx context.Context, userID, chatID string, sync bool) (uint32, error)
-	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error)
+	GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int, cursor *string) (*dtos.QueryResultsResponse, uint32, error)
 	GetQueryRecommendations(ctx context.Context, userID, chatID string, streamID string) (*dtos.QueryRecommendationsResponse, uint32, error)
 	GetImportMetadata(ctx context.Context, userID, chatID string) (*dtos.ImportMetadata, uint32, error)
 

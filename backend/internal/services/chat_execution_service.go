@@ -1056,6 +1056,28 @@ func (s *chatService) processLLMResponse(ctx context.Context, userID, chatID, us
 						pagination.CountQuery = utils.StringPtr(cq)
 						log.Printf("processLLMResponse -> pagination.CountQuery: %v", cq)
 					}
+					// Cursor-based pagination fields
+					if cf, ok := pagMap["cursor_field"].(string); ok && cf != "" {
+						pagination.CursorField = utils.StringPtr(cf)
+						log.Printf("processLLMResponse -> pagination.CursorField: %v", cf)
+					}
+					if cd, ok := pagMap["cursor_direction"].(string); ok && cd != "" {
+						pagination.CursorDirection = utils.StringPtr(cd)
+						log.Printf("processLLMResponse -> pagination.CursorDirection: %v", cd)
+					}
+					switch ps := pagMap["page_size"].(type) {
+					case float64:
+						if ps > 0 {
+							psi := int(ps)
+							pagination.PageSize = &psi
+							log.Printf("processLLMResponse -> pagination.PageSize: %v", psi)
+						}
+					case string:
+						if psi, err := strconv.Atoi(ps); err == nil && psi > 0 {
+							pagination.PageSize = &psi
+							log.Printf("processLLMResponse -> pagination.PageSize: %v", psi)
+						}
+					}
 				}
 			}
 			var tables *string
@@ -1750,7 +1772,15 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery is present, will use it to cap the result to 50 records. query.Pagination.PaginatedQuery: %+v", *query.Pagination.PaginatedQuery)
 		// Capping the result to 50 records by default and skipping 0 records, we do not need to run the query.Query as we have better paginated query & already have the total records count
 
-		queryToExecute = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1)
+		if query.Pagination.CursorField != nil && *query.Pagination.CursorField != "" {
+			// Cursor-based pagination: initial load uses the original query (no cursor yet)
+			// Subsequent pages use GetQueryResults with the cursor value
+			log.Printf("ChatService -> ExecuteQuery -> Cursor-based pagination detected, using original query for initial load")
+			queryToExecute = query.Query
+		} else {
+			// Offset-based pagination: initial load starts at offset 0
+			queryToExecute = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(0), 1)
+		}
 	}
 
 	log.Printf("ChatService -> ExecuteQuery -> queryToExecute: %+v", queryToExecute)
@@ -2974,10 +3004,12 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 	}
 }
 
-// Fetches paginated results for a query, default first 50 records of a large result are stored in execution_result so it fetches records after first 50 recordds
-func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int) (*dtos.QueryResultsResponse, uint32, error) {
-	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d", userID, chatID, messageID, queryID, streamID, offset)
-	_, _, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+// Fetches paginated results for a query using cursor-based pagination for efficiency.
+// Supports both cursor (preferred) and offset (backward compatibility) pagination.
+// Cursor-based pagination is more efficient for large datasets as it doesn't require scanning all previous rows.
+func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int, cursor *string) (*dtos.QueryResultsResponse, uint32, error) {
+	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d, cursor: %v", userID, chatID, messageID, queryID, streamID, offset, cursor)
+	chat, _, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
@@ -2996,10 +3028,44 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 			return nil, status, err
 		}
 	}
-	log.Printf("ChatService -> GetQueryResults -> query.Pagination.PaginatedQuery: %+v", query.Pagination.PaginatedQuery)
-	offSettPaginatedQuery := strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
-	log.Printf("ChatService -> GetQueryResults -> offSettPaginatedQuery: %+v", offSettPaginatedQuery)
-	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, offSettPaginatedQuery, *query.QueryType, false, false)
+
+	// Determine pagination strategy: cursor-based (preferred) or offset-based (fallback)
+	var paginatedQuery string
+	var pageSize int
+
+	if query.Pagination.CursorField != nil && cursor != nil {
+		// Cursor-based pagination (more efficient)
+		log.Printf("ChatService -> GetQueryResults -> Using cursor-based pagination with cursor: %s", *cursor)
+
+		dbType := ""
+		if chat != nil {
+			dbType = chat.Connection.Type
+		}
+		switch dbType {
+		case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL,
+			constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeClickhouse:
+			paginatedQuery = dbmanager.InjectCursorIntoSQLQuery(*query.Pagination.PaginatedQuery, *cursor)
+		default:
+			// MongoDB (and unknown types with {{cursor_value}} template)
+			paginatedQuery = dbmanager.InjectCursorIntoMongoQuery(*query.Pagination.PaginatedQuery, *cursor)
+		}
+		log.Printf("ChatService -> GetQueryResults -> Cursor-injected query: %s", paginatedQuery)
+
+		if query.Pagination.PageSize != nil {
+			pageSize = *query.Pagination.PageSize
+		} else {
+			pageSize = 50 // default batch size — cursor queries use .limit(50)
+		}
+	} else {
+		// Offset-based pagination (backward compatibility)
+		log.Printf("ChatService -> GetQueryResults -> Using offset-based pagination with offset: %d", offset)
+		paginatedQuery = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
+		pageSize = 50 // legacy default
+	}
+
+	log.Printf("ChatService -> GetQueryResults -> paginatedQuery: %+v", paginatedQuery)
+
+	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, paginatedQuery, *query.QueryType, false, false)
 	if queryErr != nil {
 		log.Printf("ChatService -> GetQueryResults -> queryErr: %+v", queryErr)
 		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
@@ -3034,8 +3100,28 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		formattedResultJSON = resultMapFormatting
 	}
 
-	// log.Printf("ChatService -> GetQueryResults -> formattedResultJSON: %+v", formattedResultJSON)
+	// Extract next cursor value and determine if more results exist
+	var nextCursor *string
+	hasMore := false
 
+	if query.Pagination.CursorField != nil && len(resultListFormatting) > 0 {
+		// Get the last record to extract cursor value
+		if len(resultListFormatting) == pageSize {
+			// If we got a full page, there might be more results
+			lastRecord := resultListFormatting[len(resultListFormatting)-1]
+			if recordMap, ok := lastRecord.(map[string]interface{}); ok {
+				// Extract cursor value from the last record
+				if cursorValue, exists := recordMap[*query.Pagination.CursorField]; exists {
+					cursorStr := fmt.Sprintf("%v", cursorValue)
+					nextCursor = &cursorStr
+					hasMore = true
+					log.Printf("ChatService -> GetQueryResults -> Next cursor: %s, hasMore: %t", *nextCursor, hasMore)
+				}
+			}
+		}
+	}
+
+	// Send SSE event with pagination info
 	s.sendStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
 		Event: "query-paginated-results",
 		Data: map[string]interface{}{
@@ -3045,8 +3131,11 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 			"execution_result":    formattedResultJSON,
 			"error":               queryErr,
 			"total_records_count": query.Pagination.TotalRecordsCount,
+			"next_cursor":         nextCursor,
+			"has_more":            hasMore,
 		},
 	})
+
 	return &dtos.QueryResultsResponse{
 		ChatID:            chatID,
 		MessageID:         messageID,
@@ -3054,6 +3143,8 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		ExecutionResult:   formattedResultJSON,
 		Error:             queryErr,
 		TotalRecordsCount: query.Pagination.TotalRecordsCount,
+		NextCursor:        nextCursor,
+		HasMore:           hasMore,
 	}, http.StatusOK, nil
 }
 

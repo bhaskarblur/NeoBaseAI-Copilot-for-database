@@ -410,12 +410,19 @@ func (h *DashboardHandler) RefreshDashboard(c *gin.Context) {
 
 // RefreshWidget triggers a refresh of a single widget
 // POST /api/chats/:id/dashboards/:dashboardId/widgets/:widgetId/refresh
+// Query params: stream_id (required), cursor (optional for cursor-based pagination)
 func (h *DashboardHandler) RefreshWidget(c *gin.Context) {
 	userID := c.GetString("userID")
 	chatID := c.Param("id")
 	dashboardID := c.Param("dashboardId")
 	widgetID := c.Param("widgetId")
 	streamID := c.Query("stream_id")
+	
+	// Optional cursor for pagination
+	var cursor *string
+	if cursorStr := c.Query("cursor"); cursorStr != "" {
+		cursor = &cursorStr
+	}
 
 	if streamID == "" {
 		errorMsg := "stream_id query parameter is required"
@@ -426,7 +433,7 @@ func (h *DashboardHandler) RefreshWidget(c *gin.Context) {
 		return
 	}
 
-	statusCode, err := h.dashboardService.RefreshWidget(c, userID, chatID, dashboardID, widgetID, streamID)
+	statusCode, err := h.dashboardService.RefreshWidget(c, userID, chatID, dashboardID, widgetID, streamID, cursor)
 	if err != nil {
 		errorMsg := err.Error()
 		c.JSON(int(statusCode), dtos.Response{

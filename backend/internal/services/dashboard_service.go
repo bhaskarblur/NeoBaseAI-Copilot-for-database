@@ -39,7 +39,7 @@ type DashboardService interface {
 
 	// Data refresh
 	RefreshDashboard(ctx context.Context, userID, chatID, dashboardID, streamID string) (uint32, error)
-	RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string) (uint32, error)
+	RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string, cursor *string) (uint32, error)
 
 	// Stream handler for SSE
 	SetStreamHandler(handler StreamHandler)
@@ -948,7 +948,7 @@ func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID,
 	return 200, nil
 }
 
-func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string) (uint32, error) {
+func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string, cursor *string) (uint32, error) {
 	// Check if database connection exists
 	if !s.dbManager.IsConnected(chatID) {
 		return 400, fmt.Errorf("database connection not found for this chat - please connect to database first")
@@ -973,7 +973,7 @@ func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, da
 		return 403, fmt.Errorf("unauthorized access to widget")
 	}
 
-	s.refreshSingleWidget(ctx, userID, chatID, streamID, widget)
+	s.refreshSingleWidgetWithCursor(ctx, userID, chatID, streamID, widget, cursor)
 
 	// Update chat timestamp for last activity
 	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
@@ -984,14 +984,30 @@ func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, da
 
 // refreshSingleWidget executes a widget's query and sends the result via SSE
 func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chatID, streamID string, widget *models.Widget) {
+	s.refreshSingleWidgetWithCursor(ctx, userID, chatID, streamID, widget, nil)
+}
+
+// refreshSingleWidgetWithCursor executes a widget's query with cursor-based pagination support
+func (s *dashboardService) refreshSingleWidgetWithCursor(ctx context.Context, userID, chatID, streamID string, widget *models.Widget, cursor *string) {
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(constants.WidgetQueryTimeoutSeconds)*time.Second)
 	defer cancel()
 
 	widgetID := widget.ID.Hex()
 	startTime := time.Now()
 
+	// Prepare query with cursor-based pagination if applicable.
+	// All DB-specific cursor injection logic lives in pkg/dbmanager — not here.
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+	queryToExecute := dbmanager.InjectCursorIntoMongoQuery(widget.Query, cursorVal)
+	if queryToExecute != widget.Query {
+		log.Printf("[DASHBOARD] Cursor injection for widget %s (cursor=%q): %s", widgetID, cursorVal, queryToExecute)
+	}
+
 	// Execute the widget query
-	result, queryErr := s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", widget.Query, "SELECT", false, false)
+	result, queryErr := s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", queryToExecute, "SELECT", false, false)
 
 	executionTimeMs := float64(time.Since(startTime).Milliseconds())
 
@@ -1035,6 +1051,31 @@ func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chat
 		}
 	}
 
+	// Extract next cursor if cursor-based pagination is used
+	var nextCursor *string
+	hasMore := false
+
+	if widget.TableConfig != nil && widget.TableConfig.CursorField != nil {
+		pageSize := widget.TableConfig.PageSize
+		if pageSize == 0 {
+			pageSize = 25 // Default page size
+		}
+
+		// Check if we got a full page of results
+		if len(data) == pageSize {
+			hasMore = true
+			// Extract cursor value from last record
+			if len(data) > 0 {
+				lastRecord := data[len(data)-1]
+				if cursorValue, exists := lastRecord[*widget.TableConfig.CursorField]; exists {
+					cursorStr := fmt.Sprintf("%v", cursorValue)
+					nextCursor = &cursorStr
+					log.Printf("[DASHBOARD] Extracted next_cursor for widget %s: %s", widgetID, cursorStr)
+				}
+			}
+		}
+	}
+
 	// Send via SSE
 	if s.streamHandler != nil {
 		rowCount := 0
@@ -1048,6 +1089,8 @@ func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chat
 				Data:            data,
 				RowCount:        rowCount,
 				ExecutionTimeMs: executionTimeMs,
+				NextCursor:      nextCursor,
+				HasMore:         hasMore,
 			},
 		})
 	}
