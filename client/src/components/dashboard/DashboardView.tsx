@@ -386,12 +386,22 @@ export default function DashboardView({
     const sid = streamIdRef.current;
     if (!sid) return;
 
-    // Set all widgets to loading state with timeouts
+    // Set all widgets to loading state with timeouts, and clear pagination cache since data will be fresh
     setActiveDashboard((prev) => {
       if (!prev) return null;
       return {
         ...prev,
-        widgets: prev.widgets.map((w) => ({ ...w, is_loading: true, error: undefined })),
+        widgets: prev.widgets.map((w) => ({
+          ...w,
+          is_loading: true,
+          error: undefined,
+          // Clear cursor/pagination state so stale cached pages don't survive a full refresh
+          page_data_cache: undefined,
+          cursor_stack: undefined,
+          current_page: 1,
+          next_cursor: null,
+          has_more: false,
+        })),
       };
     });
     activeDashboard.widgets.forEach((w) => startLoadingTimeout(w.id));
@@ -552,11 +562,41 @@ export default function DashboardView({
     if (!widget || !widget.table_config?.cursor_field || !widget.has_more || widget.is_loading) return;
     
     const cursorToUse = widget.next_cursor ?? null;
-    
-    // Refresh with the next cursor
+    const currentPage = widget.current_page || 1;
+    const nextPage = currentPage + 1;
+    const currentData = widget.data;
+    const cachedNextData = widget.page_data_cache?.[nextPage];
+
+    if (cachedNextData) {
+      // Next page already fetched before — restore instantly from cache, no API call
+      setActiveDashboard((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          widgets: prev.widgets.map((w) =>
+            w.id === widgetId ? {
+              ...w,
+              current_page: nextPage,
+              cursor_stack: [...(w.cursor_stack ?? [null]), cursorToUse],
+              data: cachedNextData.data,
+              next_cursor: cachedNextData.next_cursor,
+              has_more: cachedNextData.has_more,
+              // Cache current page before leaving (has_more=true since we navigated past it)
+              page_data_cache: {
+                ...(w.page_data_cache ?? {}),
+                [currentPage]: { data: currentData ?? [], next_cursor: cursorToUse, has_more: true },
+              },
+            } : w
+          ),
+        };
+      });
+      return;
+    }
+
+    // Cache miss — fetch from API
     handleRefreshWidget(widgetId, 0, cursorToUse || undefined);
     
-    // Push the cursor we're navigating to onto the stack and increment page
+    // Push cursor onto stack, increment page, cache current page's data
     // cursor_stack[0] = null (page 1, no cursor), cursor_stack[1] = cursor for page 2, etc.
     setActiveDashboard((prev) => {
       if (!prev) return null;
@@ -565,30 +605,83 @@ export default function DashboardView({
         widgets: prev.widgets.map((w) =>
           w.id === widgetId ? {
             ...w,
-            current_page: (w.current_page || 1) + 1,
+            current_page: nextPage,
             cursor_stack: [...(w.cursor_stack ?? [null]), cursorToUse],
+            // Cache current page with full state so going back (or forward again) is instant
+            page_data_cache: {
+              ...(w.page_data_cache ?? {}),
+              [currentPage]: { data: currentData ?? [], next_cursor: cursorToUse, has_more: true },
+            },
           } : w
         ),
       };
     });
   }, [activeDashboard, handleRefreshWidget]);
 
-  // Handle widget pagination - Previous Page (uses cursor stack for backward navigation)
+  // Handle widget pagination - Previous Page (uses cached data — no API call needed)
   const handleWidgetPreviousPage = useCallback((widgetId: string) => {
     if (!activeDashboard) return;
     
     const widget = activeDashboard.widgets.find(w => w.id === widgetId);
     if (!widget || !widget.table_config?.cursor_field || widget.is_loading) return;
     
-    // cursor_stack stores the cursor used to load each page.
-    // To go back, pop the last entry and reload using the new top-of-stack cursor.
     const currentStack = widget.cursor_stack ?? [null];
     if (currentStack.length <= 1) return; // Already on first page
     
     const newStack = currentStack.slice(0, -1);
-    const prevCursor = newStack[newStack.length - 1]; // null = first page (no cursor)
+    const currentPage = widget.current_page || 1;
+    const prevPage = Math.max(1, currentPage - 1);
+    const cachedData = widget.page_data_cache?.[prevPage];
+    // The cursor that was POPPED = the cursor needed to go forward from prevPage to currentPage.
+    // This is the correct next_cursor to restore on the previous page.
+    const poppedCursor = currentStack[currentStack.length - 1];
     
-    // Update cursor stack and page number before triggering refresh
+    if (cachedData) {
+      // Instant back-navigation using cached data — no API call.
+      // Also save current page so forward navigation is also instant.
+      const currentData = widget.data;
+      setActiveDashboard((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          widgets: prev.widgets.map((w) =>
+            w.id === widgetId ? {
+              ...w,
+              current_page: prevPage,
+              cursor_stack: newStack,
+              data: cachedData.data,
+              // Restore the correct next_cursor: the cursor that was removed from the stack
+              // (= the cursor used to load the page we're leaving from the previous page)
+              next_cursor: poppedCursor,
+              has_more: true, // we know there's at least the current page ahead
+              // Save current page to cache so Next is also instant
+              page_data_cache: {
+                ...(w.page_data_cache ?? {}),
+                [currentPage]: { data: currentData ?? [], next_cursor: w.next_cursor ?? null, has_more: w.has_more ?? false },
+              },
+            } : w
+          ),
+        };
+      });
+    } else {
+      // Fallback: cache miss — make an API call (e.g. after a manual refresh)
+      // The cursor to reach the previous page is what was used to load it (newStack top).
+      const prevCursor = newStack[newStack.length - 1];
+      setActiveDashboard((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          widgets: prev.widgets.map((w) =>
+            w.id === widgetId ? { ...w, current_page: prevPage, cursor_stack: newStack } : w
+          ),
+        };
+      });
+      handleRefreshWidget(widgetId, 0, prevCursor ?? undefined);
+    }
+  }, [activeDashboard, handleRefreshWidget]);
+
+  // Manual widget refresh: clear pagination cache first, then trigger refresh
+  const handleManualRefreshWidget = useCallback((widgetId: string) => {
     setActiveDashboard((prev) => {
       if (!prev) return null;
       return {
@@ -596,16 +689,17 @@ export default function DashboardView({
         widgets: prev.widgets.map((w) =>
           w.id === widgetId ? {
             ...w,
-            current_page: Math.max(1, (w.current_page || 1) - 1),
-            cursor_stack: newStack,
+            page_data_cache: undefined,
+            cursor_stack: undefined,
+            current_page: 1,
+            next_cursor: null,
+            has_more: false,
           } : w
         ),
       };
     });
-    
-    // Reload the page with the previous cursor (null = first page)
-    handleRefreshWidget(widgetId, 0, prevCursor ?? undefined);
-  }, [activeDashboard, handleRefreshWidget]);
+    handleRefreshWidget(widgetId);
+  }, [handleRefreshWidget]);
 
   const handleRefreshIntervalChange = async (interval: number) => {
     if (!activeDashboard) return;
@@ -730,6 +824,9 @@ export default function DashboardView({
             // Persist cursor pagination state from SSE event
             next_cursor: event.next_cursor ?? null,
             has_more: event.has_more,
+            // Keep page_data_cache as-is on SSE data updates;
+            // cache is cleared explicitly on manual/dashboard refreshes.
+            page_data_cache: w.page_data_cache,
           };
         }),
       };
@@ -1102,7 +1199,7 @@ export default function DashboardView({
                 dashboard={activeDashboard}
                 onDeleteWidget={handleDeleteWidget}
                 onEditWidget={(widgetId) => setEditingWidgetId(widgetId)}
-                onRefreshWidget={handleRefreshWidget}
+                onRefreshWidget={handleManualRefreshWidget}
                 onCancelWidgetRefresh={handleCancelWidgetRefresh}
                 onWidgetNextPage={handleWidgetNextPage}
                 onWidgetPreviousPage={handleWidgetPreviousPage}

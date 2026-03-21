@@ -76,6 +76,8 @@ export interface Widget {
   // Cursor stack for backward navigation: each entry is the cursor used to load that page
   // cursor_stack[0] = null (initial page), cursor_stack[1] = cursor for page 2, etc.
   cursor_stack?: (string | null)[];
+  // Per-page data cache for instant bi-directional navigation (keyed by page number, 1-based)
+  page_data_cache?: Record<number, { data: Record<string, unknown>[]; next_cursor: string | null; has_more: boolean }>;
 }
 
 export interface StatWidgetConfig {
