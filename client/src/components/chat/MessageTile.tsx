@@ -39,6 +39,19 @@ interface PageData {
     cursor?: string | null;        // Cursor used to fetch this page (cursor-based pagination)
 }
 
+// Extract cursor value from a record, handling field aliasing (e.g. cursor_field="createdAt" but key="Created At")
+function extractCursorValue(record: Record<string, any>, cursorField: string): string | null {
+    // Direct match
+    if (record[cursorField] != null) return String(record[cursorField]);
+    // Normalized matching: lowercase and strip spaces/underscores
+    const norm = (s: string) => s.toLowerCase().replace(/[\s_]/g, '');
+    const target = norm(cursorField);
+    for (const key of Object.keys(record)) {
+        if (norm(key) === target && record[key] != null) return String(record[key]);
+    }
+    return null;
+}
+
 interface MessageTileProps {
     chatId: string;
     message: Message;
@@ -333,8 +346,8 @@ export default function MessageTile({
                     let hasMore = false;
                     if (isCursorBased && resultArray.length > 0) {
                         const lastRecord = resultArray[resultArray.length - 1];
-                        if (lastRecord && lastRecord[cursorField!] !== undefined && lastRecord[cursorField!] !== null) {
-                            nextCursor = String(lastRecord[cursorField!]);
+                        if (lastRecord) {
+                            nextCursor = extractCursorValue(lastRecord, cursorField!);
                         }
                         // hasMore is true when there are more records beyond what we've loaded
                         const numericTotal = typeof totalRecords === 'number' ? totalRecords : null;
@@ -504,7 +517,7 @@ export default function MessageTile({
                 if (isCursorQuery && fullData.length > 0) {
                     const cursorField = query.pagination!.cursor_field!;
                     const lastRecord = fullData[fullData.length - 1];
-                    derivedNextCursor = lastRecord[cursorField] == null ? null : String(lastRecord[cursorField]);
+                    derivedNextCursor = extractCursorValue(lastRecord, cursorField);
                     // hasMore: more records exist beyond page 1 — use totalRecords when available
                     derivedHasMore = fullData.length > DEFAULT_PAGE_SIZE ||
                         (totalRecords != null && totalRecords > DEFAULT_PAGE_SIZE);
@@ -1531,8 +1544,8 @@ export default function MessageTile({
                 let batchEndCursor: string | null = responseData.next_cursor || null;
                 if (!batchEndCursor && fullBatch.length > 0 && query.pagination?.cursor_field) {
                     const lastRecord = fullBatch[fullBatch.length - 1];
-                    if (lastRecord && lastRecord[query.pagination.cursor_field] != null) {
-                        batchEndCursor = String(lastRecord[query.pagination.cursor_field]);
+                    if (lastRecord) {
+                        batchEndCursor = extractCursorValue(lastRecord, query.pagination.cursor_field);
                     }
                 }
 
