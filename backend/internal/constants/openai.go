@@ -230,7 +230,7 @@ const OpenAILLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}}. CURSOR-BASED (preferred for SELECT/find queries on large data): use '{{cursor_value}}' placeholder in the WHERE/filter condition. SQL example: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB example: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). cursor_field MUST be in SELECT/projection. OFFSET-BASED (fallback for aggregations without natural cursor): OFFSET offset_size LIMIT 50. Set cursor_field empty for offset mode. EMPTY STRING when user requests < 50 records. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset condition — it fetches the first page of results."
+                               "description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}} or offset_size. CURSOR-BASED (preferred for SELECT/find queries on large data): use '{{cursor_value}}' placeholder in the WHERE/filter condition. SQL example: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB find example: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). cursor_field MUST be in SELECT/projection. OFFSET-BASED (for aggregations without natural cursor): use 'offset_size' placeholder. SQL: OFFSET offset_size LIMIT 50. MongoDB find: .skip(offset_size).limit(50). MongoDB aggregate: db.col.aggregate([..., {$skip: offset_size}, {$limit: 50}]). IMPORTANT: use 'offset_size' NOT '{{cursor_value}}' for $skip/$offset pagination. Set cursor_field empty for offset mode. EMPTY STRING when user requests < 50 records. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset/skip condition — it fetches the first page of results."
                            },
                            "cursor_field": {
                                "type": "string",
@@ -306,7 +306,7 @@ const OpenAILLMResponseSchema = `{
                    }
                }
            },
-           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected. NEVER generate action buttons for pagination (e.g., Show next N records, Load more, Next page) — pagination is handled automatically by the system."
        },
        "assistantMessage": {
            "type": "string",

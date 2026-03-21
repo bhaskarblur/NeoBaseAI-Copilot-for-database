@@ -83,7 +83,7 @@ var ToolFinalResponseSchema = map[string]interface{}{
 							},
 							"paginatedQuery": map[string]interface{}{
 								"type":        "string",
-								"description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}}. The query with LIMIT/OFFSET or cursor placeholder applied for pagination.",
+								"description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}} or offset_size. Use '{{cursor_value}}' for cursor-based pagination or 'offset_size' for offset/skip-based pagination. IMPORTANT: for $skip/$offset use 'offset_size' NOT '{{cursor_value}}'.",
 							},
 							"countQuery": map[string]interface{}{
 								"type":        "string",
@@ -129,7 +129,7 @@ var ToolFinalResponseSchema = map[string]interface{}{
 		},
 		"actionButtons": map[string]interface{}{
 			"type":        "array",
-			"description": "Suggested follow-up actions the user can take.",
+			"description": "Suggested follow-up actions the user can take. NEVER generate action buttons for pagination (e.g., Show next N records, Load more, Next page) — pagination is handled automatically by the system.",
 			"items": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{

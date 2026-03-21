@@ -50,6 +50,7 @@ Also, if the rollback is hard to achieve as the AI requires actual value of the 
    - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
+   - **NEVER generate action buttons for pagination** (e.g., "Show next N records", "Load more", "Next page"). Pagination is handled automatically by the system UI.
 
 ---
 
