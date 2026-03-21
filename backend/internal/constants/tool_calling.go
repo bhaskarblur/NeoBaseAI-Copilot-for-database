@@ -83,7 +83,7 @@ var ToolFinalResponseSchema = map[string]interface{}{
 							},
 							"paginatedQuery": map[string]interface{}{
 								"type":        "string",
-								"description": "The query with LIMIT/OFFSET applied for first page.",
+								"description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}}. The query with LIMIT/OFFSET or cursor placeholder applied for pagination.",
 							},
 							"countQuery": map[string]interface{}{
 								"type":        "string",
