@@ -67,6 +67,15 @@ export interface Widget {
   data?: Record<string, unknown>[];
   is_loading?: boolean;
   error?: string;
+  
+  // Cursor-based pagination state (client-side only)
+  current_page?: number;
+  next_cursor?: string | null;
+  has_more?: boolean;
+  cursor_field?: string;
+  // Cursor stack for backward navigation: each entry is the cursor used to load that page
+  // cursor_stack[0] = null (initial page), cursor_stack[1] = cursor for page 2, etc.
+  cursor_stack?: (string | null)[];
 }
 
 export interface StatWidgetConfig {
@@ -88,6 +97,7 @@ export interface TableWidgetConfig {
   sort_by?: string;
   sort_direction?: 'asc' | 'desc';
   page_size?: number;
+  cursor_field?: string;  // Field used for cursor-based pagination (e.g., "id", "created_at")
 }
 
 export interface TableWidgetColumn {
@@ -208,10 +218,15 @@ export interface DashboardGenerationCompleteEvent {
 
 export interface DashboardWidgetDataEvent {
   widget_id: string;
-  data: Record<string, unknown>[];
+  // null when the event is an error (backend sends nil slice → JSON null)
+  data: Record<string, unknown>[] | null;
   row_count: number;
   execution_time_ms: number;
   error?: string;
+  // next_cursor has omitempty on the backend (pointer type), so absent when not paginating
+  next_cursor?: string | null;
+  // has_more has no omitempty — always present; false on error / non-paginated events
+  has_more: boolean;
 }
 
 // === Dashboard View State ===

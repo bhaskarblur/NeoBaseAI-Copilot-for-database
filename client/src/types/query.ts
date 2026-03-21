@@ -4,6 +4,9 @@ export interface QueryResult {
     pagination?: {
         total_records_count?: number;
         paginated_query?: string;
+        cursor_field?: string;        // Field used for cursor pagination (e.g., 'id', 'created_at')
+        cursor_direction?: string;     // 'ASC' or 'DESC'
+        page_size?: number;            // Records per page
     };
     description: string;
     execution_time?: number | null;

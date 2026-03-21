@@ -205,15 +205,21 @@ export const dashboardService = {
   /**
    * Trigger a refresh of a single widget
    * Data is delivered via SSE events
+   * @param cursor - Optional cursor value for pagination
    */
   refreshWidget: async (
     chatId: string,
     dashboardId: string,
     widgetId: string,
-    streamId: string
+    streamId: string,
+    cursor?: string
   ): Promise<void> => {
+    const params = new URLSearchParams({ stream_id: streamId });
+    if (cursor) {
+      params.append('cursor', cursor);
+    }
     await axios.post(
-      `${API_URL}/chats/${chatId}/dashboards/${dashboardId}/widgets/${widgetId}/refresh?stream_id=${streamId}`
+      `${API_URL}/chats/${chatId}/dashboards/${dashboardId}/widgets/${widgetId}/refresh?${params.toString()}`
     );
   },
 

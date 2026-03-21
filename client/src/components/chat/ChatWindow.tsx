@@ -1462,8 +1462,6 @@ export default function ChatWindow({
                   userId={userId || ''}
                   userName={userName || ''}
                   searchQuery={showSearch ? searchQuery : ''}
-                  isSearchResult={showSearch && searchResults.some(r => r === `msg-${message.id}`)}
-                  isCurrentSearchResult={showSearch && searchResults[currentSearchIndex] === `msg-${message.id}`}
                   searchResultRefs={searchResultRefs}
                   buttonCallback={(action, label) => handleButtonCallback(message, action, label)}
                 />
@@ -1556,8 +1554,6 @@ export default function ChatWindow({
                   userId={userId || ''}
                   userName={userName || ''}
                   searchQuery={showSearch ? searchQuery : ''}
-                  isSearchResult={false}
-                  isCurrentSearchResult={false}
                   searchResultRefs={searchResultRefs}
                   buttonCallback={handleWelcomeButtonCallback}
                 />

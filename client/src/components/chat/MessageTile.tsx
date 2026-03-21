@@ -26,11 +26,17 @@ interface QueryResultState {
     currentPage: number;
     pageSize: number;
     totalRecords: number | null;
+    cursor: string | null;         // Current cursor value for cursor-based pagination
+    nextCursor: string | null;     // Cursor for next page
+    hasMore: boolean;              // Whether more results exist
 }
 
 interface PageData {
     data: any[];
     totalRecords: number;
+    nextCursor?: string | null;    // Cursor for next page (cursor-based pagination)
+    hasMore?: boolean;             // Whether more results exist (cursor-based pagination)
+    cursor?: string | null;        // Cursor used to fetch this page (cursor-based pagination)
 }
 
 interface MessageTileProps {
@@ -51,8 +57,6 @@ interface MessageTileProps {
     onQueryUpdate: (callback: () => void) => void;
     onEditQuery: (id: string, queryId: string, query: string) => void;
     searchQuery?: string;
-    isSearchResult?: boolean;
-    isCurrentSearchResult?: boolean;
     searchResultRefs?: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
     buttonCallback?: (action: string, label?: string) => void;
     userId?: string;
@@ -127,7 +131,7 @@ export default function MessageTile({
     const [currentQuery, setCurrentQuery] = useState('');
     const abortControllerRef = useRef<Record<string, AbortController>>({});
     const [queryResults, setQueryResults] = useState<Record<string, QueryResultState>>({});
-    const pageDataCacheRef = useRef<Record<string, Record<number, PageData>>>({});
+    const pageDataCacheRef = useRef<Record<string, Record<number, PageData | undefined>>>({});
     const [editingQueries, setEditingQueries] = useState<Record<string, boolean>>({});
     const [editedQueryTexts, setEditedQueryTexts] = useState<Record<string, string>>({});
     // Add state for tracking which download dropdown is open
@@ -246,12 +250,6 @@ export default function MessageTile({
         };
     }, [openDownloadMenu]);
 
-    // Ensure message is valid to prevent errors
-    if (!message) {
-        console.error('MessageTile received invalid message');
-        return null;
-    }
-
     useEffect(() => {
         const streamQueries = async () => {
             if (!message.queries || !message.is_streaming) return;
@@ -327,6 +325,23 @@ export default function MessageTile({
                     // For initial data, always show first page (25 records)
                     const pageData = resultArray.slice(0, 25);
 
+                    // For cursor-based queries, extract the nextCursor from the last record
+                    // so page 2+ can be fetched with a cursor
+                    const cursorField = query.pagination?.cursor_field;
+                    const isCursorBased = !!cursorField;
+                    let nextCursor: string | null = null;
+                    let hasMore = false;
+                    if (isCursorBased && resultArray.length > 0) {
+                        const lastRecord = resultArray[resultArray.length - 1];
+                        if (lastRecord && lastRecord[cursorField!] !== undefined && lastRecord[cursorField!] !== null) {
+                            nextCursor = String(lastRecord[cursorField!]);
+                        }
+                        // hasMore is true when there are more records beyond what we've loaded
+                        const numericTotal = typeof totalRecords === 'number' ? totalRecords : null;
+                        hasMore = resultArray.length >= 50 ||
+                            (numericTotal != null && numericTotal > Math.min(resultArray.length, 25));
+                    }
+
                     // Cache both pages from initial 50 records if available
                     if (!pageDataCacheRef.current[query.id]) {
                         pageDataCacheRef.current[query.id] = {};
@@ -336,14 +351,16 @@ export default function MessageTile({
                         // Cache first page (1-25)
                         pageDataCacheRef.current[query.id][1] = {
                             data: resultArray.slice(0, 25),
-                            totalRecords
+                            totalRecords,
+                            ...(isCursorBased ? { nextCursor, hasMore, cursor: null } : {})
                         };
 
                         // Cache second page (26-50) if it exists
                         if (resultArray.length > 25) {
                             pageDataCacheRef.current[query.id][2] = {
                                 data: resultArray.slice(25, 50),
-                                totalRecords
+                                totalRecords,
+                                ...(isCursorBased ? { nextCursor, hasMore, cursor: null } : {})
                             };
                         }
                     }
@@ -354,7 +371,10 @@ export default function MessageTile({
                         error: null,
                         currentPage: 1,
                         pageSize: 25,
-                        totalRecords: totalRecords
+                        totalRecords: totalRecords,
+                        cursor: null,
+                        nextCursor: nextCursor,
+                        hasMore: hasMore
                     };
                 }
             });
@@ -476,22 +496,58 @@ export default function MessageTile({
                 const fullData = parseResults(response.data.execution_result);
                 const totalRecords = response.data.total_records_count;
 
+                // For cursor-based pagination, derive hasMore/nextCursor from the result data
+                // (backend ExecuteQuery doesn't return these, but we can infer them)
+                const isCursorQuery = query.pagination?.cursor_field != null;
+                let derivedNextCursor: string | null = null;
+                let derivedHasMore = false;
+                if (isCursorQuery && fullData.length > 0) {
+                    const cursorField = query.pagination!.cursor_field!;
+                    const lastRecord = fullData[fullData.length - 1];
+                    derivedNextCursor = lastRecord[cursorField] == null ? null : String(lastRecord[cursorField]);
+                    // hasMore: more records exist beyond page 1 — use totalRecords when available
+                    derivedHasMore = fullData.length > DEFAULT_PAGE_SIZE ||
+                        (totalRecords != null && totalRecords > DEFAULT_PAGE_SIZE);
+                }
+
                 // Slice the data into pages of 25
-                const pageData = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
+                const pageData = isCursorQuery
+                    ? fullData.slice(0, DEFAULT_PAGE_SIZE)
+                    : sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
 
-                // Cache both pages from the API response
-                const basePage = Math.floor((1 - 1) / 2) * 2 + 1;
-                const firstHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
-                const secondHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 2);
+                // Initialize cache for this query
+                if (!pageDataCacheRef.current[queryId]) {
+                    pageDataCacheRef.current[queryId] = {};
+                }
 
-                pageDataCacheRef.current[queryId][basePage] = {
-                    data: firstHalf,
-                    totalRecords
-                };
-                pageDataCacheRef.current[queryId][basePage + 1] = {
-                    data: secondHalf,
-                    totalRecords
-                };
+                if (isCursorQuery) {
+                    // For cursor queries cache pages 1 and 2 from the initial 50-record load
+                    const hasPage2 = fullData.length > DEFAULT_PAGE_SIZE;
+                    pageDataCacheRef.current[queryId][1] = {
+                        data: pageData,
+                        totalRecords,
+                        nextCursor: derivedNextCursor,
+                        hasMore: derivedHasMore,  // use full derivedHasMore (considers totalRecords)
+                        cursor: null,
+                    };
+                    // Cache page 2 (records 26-50) so navigation doesn't skip them
+                    if (hasPage2) {
+                        pageDataCacheRef.current[queryId][2] = {
+                            data: fullData.slice(DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE * 2),
+                            totalRecords,
+                            nextCursor: derivedNextCursor,      // cursor(50) – used to fetch page 3 from API
+                            hasMore: fullData.length >= DEFAULT_PAGE_SIZE * 2, // true if backend returned a full 50-record page
+                            cursor: null,
+                        };
+                    }
+                } else {
+                    // Offset pagination: cache both pages from the API response
+                    const firstHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 1);
+                    const secondHalf = sliceIntoPages(fullData, DEFAULT_PAGE_SIZE, 2);
+                    pageDataCacheRef.current[queryId][1] = { data: firstHalf, totalRecords };
+                    pageDataCacheRef.current[queryId][2] = { data: secondHalf, totalRecords };
+                }
+
                 onQueryUpdate(() => {
                     if (!response.data.execution_result) {
                         console.log('response.data.execution_result is empty', response.data.execution_result);
@@ -529,7 +585,10 @@ export default function MessageTile({
                             error: null,
                             currentPage: 1,
                             pageSize: DEFAULT_PAGE_SIZE,
-                            totalRecords: totalRecords
+                            totalRecords: totalRecords,
+                            cursor: null,
+                            nextCursor: derivedNextCursor,
+                            hasMore: derivedHasMore,
                         }
                     }));
                 });
@@ -621,7 +680,10 @@ export default function MessageTile({
                             loading: false,
                             error: null,
                             currentPage: 1,
-                            totalRecords: totalRecords
+                            totalRecords: totalRecords,
+                            cursor: null,
+                            nextCursor: null,
+                            hasMore: false
                         }
                     }));
                     
@@ -1276,7 +1338,10 @@ export default function MessageTile({
         // Parse the data - handle both array and object with results property
         const parsedData = parseResults(state.data);
         const totalRecords = state.totalRecords || parsedData.length;
-        const showPagination = totalRecords > state.pageSize;
+        const useCursorPagination = query.pagination?.cursor_field != null;
+        const showPagination = useCursorPagination 
+            ? (state.currentPage > 1 || state.hasMore)  // Show pagination for cursor if we can go back or forward
+            : totalRecords > state.pageSize;             // Show pagination for offset if there are more records
 
         // Don't slice the data here since we're getting paginated data from API
         const currentPageData = parsedData;
@@ -1339,15 +1404,19 @@ export default function MessageTile({
                                         <span className="bg-gray-700 rounded px-2 py-1 min-w-[2rem] text-center">
                                             {state.currentPage}
                                         </span>
-                                        <span className="text-gray-400">of</span>
-                                        <span className="bg-gray-700 rounded px-2 py-1 min-w-[2rem] text-center">
-                                            {Math.max(1, Math.ceil(totalRecords / state.pageSize))}
-                                        </span>
+                                        {totalRecords > 0 && (
+                                            <>
+                                                <span className="text-gray-400">of</span>
+                                                <span className="bg-gray-700 rounded px-2 py-1 min-w-[2rem] text-center">
+                                                    {Math.max(1, Math.ceil(totalRecords / state.pageSize))}
+                                                </span>
+                                            </>
+                                        )}
                                     </div>
 
                                     <button
                                         onClick={() => handlePageChange(query.id, state.currentPage + 1)}
-                                        disabled={state.currentPage >= Math.ceil(totalRecords / state.pageSize)}
+                                        disabled={useCursorPagination ? !state.hasMore : state.currentPage >= Math.ceil(totalRecords / state.pageSize)}
                                         className="
                                             flex items-center justify-center
                                             w-8 h-8
@@ -1381,7 +1450,7 @@ export default function MessageTile({
         if (!query) return;
 
         const state = queryResults[queryId];
-        const newOffset = (page - 1) * state.pageSize;
+        const useCursorPagination = query.pagination?.cursor_field != null;
 
         // Initialize page data cache for this query if it doesn't exist
         if (!pageDataCacheRef.current[queryId]) {
@@ -1394,6 +1463,137 @@ export default function MessageTile({
         }));
 
         try {
+            // For cursor-based pagination
+            if (useCursorPagination) {
+                // Check cache first
+                const cachedData = pageDataCacheRef.current[queryId][page];
+                if (cachedData) {
+                    onQueryUpdate(() => {
+                        setQueryResults(prev => ({
+                            ...prev,
+                            [queryId]: {
+                                ...prev[queryId],
+                                loading: false,
+                                currentPage: page,
+                                data: cachedData.data,
+                                error: null,
+                                totalRecords: cachedData.totalRecords,
+                                nextCursor: cachedData.nextCursor ?? null,
+                                hasMore: cachedData.hasMore ?? false,
+                                cursor: cachedData.cursor ?? null,
+                            } satisfies QueryResultState,
+                        }));
+                    });
+                    return;
+                }
+
+                // For cursor pagination, we can only go forward
+                if (page < state.currentPage) {
+                    // Going backward - use cache only
+                    const cachedData = pageDataCacheRef.current[queryId][page];
+                    if (cachedData) {
+                        onQueryUpdate(() => {
+                            setQueryResults(prev => ({
+                                ...prev,
+                                [queryId]: {
+                                    ...prev[queryId],
+                                    loading: false,
+                                    currentPage: page,
+                                    data: cachedData.data,
+                                    error: null,
+                                    totalRecords: cachedData.totalRecords,
+                                    nextCursor: cachedData.nextCursor ?? null,
+                                    hasMore: cachedData.hasMore ?? false,
+                                    cursor: cachedData.cursor ?? null,
+                                } satisfies QueryResultState,
+                            }));
+                        });
+                    }
+                    return;
+                }
+
+                // Fetch next page using cursor
+                const response = await axios.post(`${import.meta.env.VITE_API_URL}/chats/${chatId}/queries/results`, {
+                    message_id: message.id,
+                    query_id: queryId,
+                    stream_id: streamId,
+                    cursor: state.nextCursor  // Use nextCursor for pagination
+                });
+
+                const responseData = response.data.data;
+                // Backend returns a batch of up to 50 records. Split into two 25-record pages.
+                const fullBatch = parseResults(responseData.execution_result);
+                const pageData = fullBatch.slice(0, DEFAULT_PAGE_SIZE);
+                const nextPageData = fullBatch.length > DEFAULT_PAGE_SIZE ? fullBatch.slice(DEFAULT_PAGE_SIZE) : null;
+                const totalRecords = responseData.total_records_count || state.totalRecords;
+
+                // Extract cursor from the last record of the full batch (for fetching the NEXT batch)
+                let batchEndCursor: string | null = responseData.next_cursor || null;
+                if (!batchEndCursor && fullBatch.length > 0 && query.pagination?.cursor_field) {
+                    const lastRecord = fullBatch[fullBatch.length - 1];
+                    if (lastRecord && lastRecord[query.pagination.cursor_field] != null) {
+                        batchEndCursor = String(lastRecord[query.pagination.cursor_field]);
+                    }
+                }
+
+                const hasMoreBeyondBatch = responseData.has_more ||
+                    (totalRecords != null && totalRecords > 0 && (page + 1) * state.pageSize < totalRecords);
+                // If the batch is empty, there's no more data (cursor hit the end or comparison failed)
+                const hasMoreForCurrentPage = fullBatch.length > 0 && (nextPageData !== null || hasMoreBeyondBatch);
+
+                // Cache current page (first 25 of batch)
+                pageDataCacheRef.current[queryId][page] = {
+                    data: pageData,
+                    totalRecords,
+                    nextCursor: null,       // page+1 served from cache; no fetch needed from this page
+                    hasMore: hasMoreForCurrentPage,
+                    cursor: state.nextCursor
+                };
+
+                // Pre-cache next page (second 25 of batch) so it's served immediately
+                if (nextPageData) {
+                    pageDataCacheRef.current[queryId][page + 1] = {
+                        data: nextPageData,
+                        totalRecords,
+                        nextCursor: batchEndCursor,   // cursor to fetch the batch AFTER this one
+                        hasMore: hasMoreBeyondBatch,
+                        cursor: state.nextCursor
+                    };
+                }
+
+                // Retroactively mark previous page as hasMore=true now that we fetched this page
+                const prevPage = page - 1;
+                const prevCached = pageDataCacheRef.current[queryId][prevPage];
+                if (prevPage >= 1 && prevCached) {
+                    pageDataCacheRef.current[queryId][prevPage] = {
+                        ...prevCached,
+                        nextCursor: state.nextCursor,
+                        hasMore: true,
+                    };
+                }
+
+                onQueryUpdate(() => {
+                    setQueryResults(prev => ({
+                        ...prev,
+                        [queryId]: {
+                            ...prev[queryId],
+                            loading: false,
+                            currentPage: page,
+                            data: pageData,
+                            error: null,
+                            totalRecords,
+                            nextCursor: null,           // page+1 in cache, nextCursor comes from there
+                            hasMore: hasMoreForCurrentPage,
+                            cursor: state.nextCursor ?? null,
+                        } satisfies QueryResultState,
+                    }));
+                });
+                return;
+            }
+
+            // Legacy offset-based pagination (backward compatibility)
+            const newOffset = (page - 1) * state.pageSize;
+
             // Wrap state updates in preserveScroll
             if (newOffset < 50 && query.execution_result) {
                 const resultArray = parseResults(query.execution_result);
@@ -1419,7 +1619,10 @@ export default function MessageTile({
                             currentPage: page,
                             data: pageData,
                             error: null,
-                            totalRecords
+                            totalRecords,
+                            cursor: null,
+                            nextCursor: null,
+                            hasMore: false
                         }
                     }));
                 });
@@ -1437,7 +1640,10 @@ export default function MessageTile({
                             currentPage: page,
                             data: cachedData.data,
                             error: null,
-                            totalRecords: cachedData.totalRecords
+                            totalRecords: cachedData.totalRecords,
+                            cursor: null,
+                            nextCursor: null,
+                            hasMore: false
                         }
                     }));
                 });
@@ -1485,7 +1691,10 @@ export default function MessageTile({
                         currentPage: page,
                         data: pageData,
                         error: null,
-                        totalRecords
+                        totalRecords,
+                        cursor: null,
+                        nextCursor: null,
+                        hasMore: false
                     }
                 }));
             });
