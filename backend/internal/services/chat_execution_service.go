@@ -1770,9 +1770,11 @@ func (s *chatService) ExecuteQuery(ctx context.Context, userID, chatID string, r
 
 	if query.Pagination != nil && query.Pagination.PaginatedQuery != nil && *query.Pagination.PaginatedQuery != "" {
 		log.Printf("ChatService -> ExecuteQuery -> query.Pagination.PaginatedQuery is present, will use it to cap the result to 50 records. query.Pagination.PaginatedQuery: %+v", *query.Pagination.PaginatedQuery)
-		// Capping the result to 50 records by default and skipping 0 records, we do not need to run the query.Query as we have better paginated query & already have the total records count
 
-		if query.Pagination.CursorField != nil && *query.Pagination.CursorField != "" {
+		isCursorBased := (query.Pagination.CursorField != nil && *query.Pagination.CursorField != "") ||
+			strings.Contains(*query.Pagination.PaginatedQuery, "{{cursor_value}}")
+
+		if isCursorBased {
 			// Cursor-based pagination: initial load uses the original query (no cursor yet)
 			// Subsequent pages use GetQueryResults with the cursor value
 			log.Printf("ChatService -> ExecuteQuery -> Cursor-based pagination detected, using original query for initial load")
@@ -3033,34 +3035,55 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	var paginatedQuery string
 	var pageSize int
 
-	if query.Pagination.CursorField != nil && cursor != nil {
-		// Cursor-based pagination (more efficient)
+	// Detect cursor-based pagination by either explicit CursorField or {{cursor_value}} in the template
+	isCursorBased := (query.Pagination.CursorField != nil && *query.Pagination.CursorField != "") ||
+		(query.Pagination.PaginatedQuery != nil && strings.Contains(*query.Pagination.PaginatedQuery, "{{cursor_value}}"))
+
+	if isCursorBased && cursor != nil {
+		// Cursor-based pagination — all DB-specific logic delegated to dbmanager.BuildCursorQuery.
+		// Page 1 uses query.Query directly (cursor is empty). Pages 2+ inject cursor dynamically.
 		log.Printf("ChatService -> GetQueryResults -> Using cursor-based pagination with cursor: %s", *cursor)
 
 		dbType := ""
 		if chat != nil {
 			dbType = chat.Connection.Type
 		}
-		switch dbType {
-		case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL,
-			constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeClickhouse:
-			paginatedQuery = dbmanager.InjectCursorIntoSQLQuery(*query.Pagination.PaginatedQuery, *cursor)
-		default:
-			// MongoDB (and unknown types with {{cursor_value}} template)
-			paginatedQuery = dbmanager.InjectCursorIntoMongoQuery(*query.Pagination.PaginatedQuery, *cursor)
+
+		cursorDirection := ""
+		if query.Pagination.CursorDirection != nil {
+			cursorDirection = *query.Pagination.CursorDirection
 		}
+
+		cursorField := ""
+		if query.Pagination.CursorField != nil {
+			cursorField = *query.Pagination.CursorField
+		}
+
+		templateQuery := ""
+		if query.Pagination.PaginatedQuery != nil {
+			templateQuery = *query.Pagination.PaginatedQuery
+		}
+
+		paginatedQuery = dbmanager.BuildCursorQuery(
+			dbType,
+			query.Query,   // baseQuery (page 1 query, used as fallback for dynamic injection)
+			templateQuery, // paginatedQuery from AI (may or may not have {{cursor_value}})
+			cursorField,
+			cursorDirection,
+			*cursor,
+		)
 		log.Printf("ChatService -> GetQueryResults -> Cursor-injected query: %s", paginatedQuery)
 
 		if query.Pagination.PageSize != nil {
 			pageSize = *query.Pagination.PageSize
 		} else {
-			pageSize = 50 // default batch size — cursor queries use .limit(50)
+			pageSize = 50 // default page size if not specified
 		}
 	} else {
 		// Offset-based pagination (backward compatibility)
 		log.Printf("ChatService -> GetQueryResults -> Using offset-based pagination with offset: %d", offset)
 		paginatedQuery = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
-		pageSize = 50 // legacy default
+		pageSize = 50 // legacy default page size for offset pagination if not specified in the query
 	}
 
 	log.Printf("ChatService -> GetQueryResults -> paginatedQuery: %+v", paginatedQuery)

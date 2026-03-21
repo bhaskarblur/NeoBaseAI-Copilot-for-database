@@ -996,12 +996,44 @@ func (s *dashboardService) refreshSingleWidgetWithCursor(ctx context.Context, us
 	startTime := time.Now()
 
 	// Prepare query with cursor-based pagination if applicable.
-	// All DB-specific cursor injection logic lives in pkg/dbmanager — not here.
+	// Page 1 (no cursor): use widget.Query (clean first-page query from AI).
+	// Pages 2+ (cursor present): use widget.PaginatedQuery with {{cursor_value}} replaced.
 	cursorVal := ""
 	if cursor != nil {
 		cursorVal = *cursor
 	}
-	queryToExecute := dbmanager.InjectCursorIntoMongoQuery(widget.Query, cursorVal)
+
+	dbType := ""
+	if connInfo, exists := s.dbManager.GetConnectionInfo(chatID); exists {
+		dbType = connInfo.Config.Type
+	}
+
+	cursorField := ""
+	cursorDirection := ""
+	if widget.TableConfig != nil {
+		if widget.TableConfig.CursorField != nil {
+			cursorField = *widget.TableConfig.CursorField
+		}
+		if widget.TableConfig.CursorDirection != nil {
+			cursorDirection = *widget.TableConfig.CursorDirection
+		}
+	}
+
+	// Use PaginatedQuery (with {{cursor_value}}) for pages 2+; fall back to Query for page 1
+	paginatedQuery := widget.PaginatedQuery
+	if paginatedQuery == "" {
+		// Backward compat: old widgets don't have PaginatedQuery; use Query as both
+		paginatedQuery = widget.Query
+	}
+
+	queryToExecute := dbmanager.BuildCursorQuery(
+		dbType,
+		widget.Query,   // baseQuery (page 1 — clean, no cursor)
+		paginatedQuery, // paginatedQuery (pages 2+ — has {{cursor_value}})
+		cursorField,
+		cursorDirection,
+		cursorVal,
+	)
 	if queryToExecute != widget.Query {
 		log.Printf("[DASHBOARD] Cursor injection for widget %s (cursor=%q): %s", widgetID, cursorVal, queryToExecute)
 	}
@@ -1141,6 +1173,7 @@ func (s *dashboardService) widgetToResponse(widget *models.Widget) *dtos.WidgetR
 		Description:     widget.Description,
 		WidgetType:      widget.WidgetType,
 		Query:           widget.Query,
+		PaginatedQuery:  widget.PaginatedQuery,
 		QueryType:       widget.QueryType,
 		Tables:          widget.Tables,
 		ChartConfigJSON: widget.ChartConfigJSON,
@@ -1177,10 +1210,12 @@ func (s *dashboardService) widgetToResponse(widget *models.Widget) *dtos.WidgetR
 			}
 		}
 		resp.TableConfig = &dtos.TableWidgetConfigDTO{
-			Columns:       columns,
-			SortBy:        widget.TableConfig.SortBy,
-			SortDirection: widget.TableConfig.SortDirection,
-			PageSize:      widget.TableConfig.PageSize,
+			Columns:         columns,
+			SortBy:          widget.TableConfig.SortBy,
+			SortDirection:   widget.TableConfig.SortDirection,
+			PageSize:        widget.TableConfig.PageSize,
+			CursorField:     widget.TableConfig.CursorField,
+			CursorDirection: widget.TableConfig.CursorDirection,
 		}
 	}
 
@@ -1502,6 +1537,7 @@ func (s *dashboardService) createWidgetFromConfig(
 	widget.Description = getStringVal(wConfig, "description")
 	widget.Tables = getStringVal(wConfig, "tables")
 	widget.LLMModel = selectedModel
+	widget.PaginatedQuery = getStringVal(wConfig, "paginated_query")
 
 	// Parse stat_config
 	if statRaw, ok := wConfig["stat_config"].(map[string]interface{}); ok && widgetType == "stat" {
@@ -1537,6 +1573,12 @@ func (s *dashboardService) createWidgetFromConfig(
 		}
 		if ps, ok := tableRaw["page_size"].(float64); ok {
 			widget.TableConfig.PageSize = int(ps)
+		}
+		if cf := getStringVal(tableRaw, "cursor_field"); cf != "" {
+			widget.TableConfig.CursorField = &cf
+		}
+		if cd := getStringVal(tableRaw, "cursor_direction"); cd != "" {
+			widget.TableConfig.CursorDirection = &cd
 		}
 		if colsRaw, ok := tableRaw["columns"].([]interface{}); ok {
 			for _, cRaw := range colsRaw {
@@ -1673,6 +1715,9 @@ func (s *dashboardService) applyWidgetConfigUpdates(widget *models.Widget, wConf
 	if query := getStringVal(wConfig, "query"); query != "" {
 		widget.Query = query
 	}
+	if pq := getStringVal(wConfig, "paginated_query"); pq != "" {
+		widget.PaginatedQuery = pq
+	}
 	if tables := getStringVal(wConfig, "tables"); tables != "" {
 		widget.Tables = tables
 	}
@@ -1707,6 +1752,12 @@ func (s *dashboardService) applyWidgetConfigUpdates(widget *models.Widget, wConf
 		}
 		if ps, ok := tableRaw["page_size"].(float64); ok {
 			widget.TableConfig.PageSize = int(ps)
+		}
+		if cf := getStringVal(tableRaw, "cursor_field"); cf != "" {
+			widget.TableConfig.CursorField = &cf
+		}
+		if cd := getStringVal(tableRaw, "cursor_direction"); cd != "" {
+			widget.TableConfig.CursorDirection = &cd
 		}
 		if colsRaw, ok := tableRaw["columns"].([]interface{}); ok {
 			for _, cRaw := range colsRaw {
