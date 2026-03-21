@@ -137,7 +137,16 @@ var GeminiLLMResponseSchema = &genai.Schema{
 						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
-								Type: genai.TypeString,
+								Type:        genai.TypeString,
+								Description: "CURSOR-BASED (preferred for SELECT/find on large data): use '{{cursor_value}}' placeholder. cursor_field MUST appear in SELECT/projection. SQL: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). OFFSET-BASED (fallback for aggregations): OFFSET offset_size LIMIT 50 or .skip(offset_size).limit(50). Set cursor_field empty for offset. EMPTY STRING when user requests < 50 records.",
+							},
+							"cursor_field": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "Field/column used as the pagination cursor (e.g. 'id', 'created_at', 'createdAt'). Must be present in SELECT/projection result. Leave EMPTY STRING for offset-based pagination.",
+							},
+							"page_size": &genai.Schema{
+								Type:        genai.TypeNumber,
+								Description: "Number of records per page. Use 50.",
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,

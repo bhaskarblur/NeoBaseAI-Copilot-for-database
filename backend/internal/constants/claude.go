@@ -182,7 +182,15 @@ const ClaudeLLMResponseSchemaJSON = `{
 						"properties": {
 							"paginatedQuery": {
 								"type": "string",
-								"description": "Paginated version of the query with LIMIT/OFFSET or equivalent"
+								"description": "CURSOR-BASED (preferred for SELECT/find queries on large data): use '{{cursor_value}}' placeholder. SQL example: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB example: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). OFFSET-BASED (fallback for aggregations without natural cursor): OFFSET offset_size LIMIT 50 or .skip(offset_size).limit(50). EMPTY STRING when user requests < 50 records."
+							},
+							"cursor_field": {
+								"type": "string",
+								"description": "Field/column used as the pagination cursor (e.g. 'id', 'created_at', 'createdAt'). Must be present in the SELECT/projection result. Leave EMPTY STRING for offset-based pagination."
+							},
+							"page_size": {
+								"type": "number",
+								"description": "Number of records per page. Use 50."
 							},
 							"countQuery": {
 								"type": "string",
