@@ -78,7 +78,10 @@ type VisualizationData struct {
 }
 
 type Pagination struct {
-	TotalRecordsCount int `json:"total_records_count"` // Total records count of the query
+	TotalRecordsCount int     `json:"total_records_count"` // Total records count of the query
+	CursorField       *string `json:"cursor_field,omitempty"`       // Field used for cursor pagination
+	CursorDirection   *string `json:"cursor_direction,omitempty"`   // ASC or DESC
+	PageSize          *int    `json:"page_size,omitempty"`          // Records per page
 	// We do not return the paginatedQuery and countQuery in the response
 }
 
@@ -166,6 +169,9 @@ func ToQueryDtoWithDecryption(queries *[]models.Query, decryptFunc func(string) 
 			}
 			pagination = &Pagination{
 				TotalRecordsCount: totalCount,
+				CursorField:       query.Pagination.CursorField,
+				CursorDirection:   query.Pagination.CursorDirection,
+				PageSize:          query.Pagination.PageSize,
 			}
 		}
 		log.Printf("ToQueryDto -> final exampleResult: %v", exampleResult)

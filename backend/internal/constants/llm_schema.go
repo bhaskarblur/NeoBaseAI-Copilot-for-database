@@ -33,6 +33,10 @@ type QueryInfo struct {
 
 type Pagination struct {
 	TotalRecordsCount *int    `json:"total_records_count"` // Total number of records that the original query returns, found by running the countQuery
-	PaginatedQuery    *string `json:"paginated_query"`     // (Empty "" if the original query is to find count) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. The query should have a replaceable placeholder such as offset_size. (skip(offset_size) should come before limit(50))
-	CountQuery        *string `json:"count_query"`         // (Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query, this query will not fetch original query data but only fetch count of the original query from the DB so that we can use the total count for pagination
+	PaginatedQuery    *string `json:"paginated_query"`     // Paginated version of the query. For cursor-based: use {{cursor_value}} placeholder. For offset-based (fallback): use offset_size placeholder.
+	CountQuery        *string `json:"count_query"`         // (Only applicable for Fetching, Getting data) A fetch count query to get the total count of the original query
+	// Cursor-based pagination fields
+	CursorField     *string `json:"cursor_field,omitempty"`     // Field used as the pagination cursor (e.g. "_id", "id", "created_at"). Empty for offset-based.
+	CursorDirection *string `json:"cursor_direction,omitempty"` // "ASC" or "DESC"
+	PageSize        *int    `json:"page_size,omitempty"`        // Number of records per page (default 50)
 }

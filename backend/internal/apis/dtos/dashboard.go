@@ -178,6 +178,9 @@ type DashboardWidgetDataEvent struct {
 	RowCount        int                      `json:"row_count"`
 	ExecutionTimeMs float64                  `json:"execution_time_ms"`
 	Error           string                   `json:"error,omitempty"`
+	// Cursor-based pagination fields
+	NextCursor *string `json:"next_cursor,omitempty"` // Cursor for next page
+	HasMore    bool    `json:"has_more"`              // Whether more results exist
 }
 
 // === Import/Export DTOs ===
