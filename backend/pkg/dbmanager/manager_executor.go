@@ -106,6 +106,40 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 	}
 
 	log.Printf("Manager -> ExecuteQuery -> Driver: %v", driver)
+
+	// Validate query safety before executing
+	if !isRollback { // Skip validation for rollback queries
+		validator := GetValidatorForDatabase(conn.Config.Type)
+		if validator != nil {
+			// Try to get cached schema for better validation
+			var tableMetadata map[string]TableSchema
+			if m.schemaManager != nil {
+				// Retrieve cached schema from storage
+				storage, err := m.schemaManager.storageService.Retrieve(execCtx, chatID)
+				if err == nil && storage != nil && storage.FullSchema != nil {
+					tableMetadata = storage.FullSchema.Tables
+					log.Printf("Manager -> ExecuteQuery -> Using cached schema with %d tables for validation", len(tableMetadata))
+				} else {
+					log.Printf("Manager -> ExecuteQuery -> No cached schema available, proceeding with basic validation")
+					tableMetadata = make(map[string]TableSchema)
+				}
+			} else {
+				tableMetadata = make(map[string]TableSchema)
+			}
+
+			// Validate the query
+			if err := validator.ValidateSafety(query, queryType, tableMetadata); err != nil {
+				log.Printf("Manager -> ExecuteQuery -> Query safety validation failed: %v", err)
+				return nil, &dtos.QueryError{
+					Code:    "SAFETY_VIOLATION",
+					Message: "Query blocked by safety validation",
+					Details: err.Error(),
+				}
+			}
+			log.Printf("Manager -> ExecuteQuery -> Query passed safety validation")
+		}
+	}
+
 	// Begin transaction
 	tx := driver.BeginTx(execCtx, conn)
 	if tx == nil {
