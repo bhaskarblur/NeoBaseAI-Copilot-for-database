@@ -37,8 +37,15 @@ func BuildCursorQuery(dbType, baseQuery, paginatedQuery, cursorField, cursorDire
 		}
 	}
 
-	// Fallback: no {{cursor_value}} in paginatedQuery — return baseQuery as-is.
-	// This shouldn't happen with correctly generated AI output but provides a safe default.
+	// Fallback: no {{cursor_value}} in paginatedQuery.
+	// For MongoDB, dynamically inject a cursor condition into the base query.
+	if (dbType == constants.DatabaseTypeMongoDB) && cursorField != "" {
+		log.Printf("[CURSOR] No {{cursor_value}} in template — attempting dynamic cursor injection (field=%s, dir=%s)", cursorField, cursorDirection)
+		if injected := mongoDynamicCursorInject(baseQuery, cursorField, cursorDirection, cursorValue); injected != baseQuery {
+			return injected
+		}
+	}
+
 	log.Printf("[CURSOR] WARNING: no {{cursor_value}} in paginatedQuery — returning baseQuery unchanged")
 	return baseQuery
 }

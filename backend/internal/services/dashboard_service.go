@@ -1045,17 +1045,70 @@ func (s *dashboardService) refreshSingleWidgetWithCursor(ctx context.Context, us
 
 	if queryErr != nil {
 		log.Printf("[DASHBOARD] Widget query failed - WidgetID: %s, Error: %s", widgetID, queryErr.Message)
-		if s.streamHandler != nil {
-			s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-				Event: constants.SSEEventDashboardWidgetError,
-				Data: dtos.DashboardWidgetDataEvent{
-					WidgetID:        widgetID,
-					Error:           queryErr.Message,
-					ExecutionTimeMs: executionTimeMs,
-				},
-			})
+
+		// Auto-fix: when the paginatedQuery template is broken, ask the LLM to fix it.
+		// Only triggered when a cursor is in use (page 2+) and the widget has a paginatedQuery.
+		if cursorVal != "" && widget.PaginatedQuery != "" && dbType != "" {
+			log.Printf("[QUERY_FIX] Attempting auto-fix of widget paginatedQuery for widgetID: %s", widgetID)
+
+			// Get LLM client — use chat preferences if available, otherwise first enabled provider.
+			var fixClient llm.Client
+			chatObjID, chatErr := primitive.ObjectIDFromHex(chatID)
+			if chatErr == nil {
+				if chat, chatFetchErr := s.chatRepo.FindByID(chatObjID); chatFetchErr == nil {
+					if c, _, err := s.getLLMClient(chat); err == nil {
+						fixClient = c
+					}
+				}
+			}
+
+			if fixClient != nil {
+				if fixedQuery, fixErr := autoFixPaginatedQuery(
+					queryCtx, fixClient, s.dbManager,
+					chatID, dbType, "SELECT",
+					widget.PaginatedQuery, // original template with {{cursor_value}}
+					cursorVal,             // sample cursor for test-only substitution
+					queryErr.Message,
+				); fixErr == nil {
+					// Inject the actual cursor value into the fixed template before retrying.
+					fixedInjected := dbmanager.BuildCursorQuery(dbType, widget.Query, fixedQuery, cursorField, cursorDirection, cursorVal)
+					result, queryErr = s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", fixedInjected, "SELECT", false, false)
+					executionTimeMs = float64(time.Since(startTime).Milliseconds())
+					if queryErr == nil {
+						log.Printf("[QUERY_FIX] Widget retry succeeded with auto-fixed paginatedQuery")
+						// Persist the fixed paginatedQuery on the widget asynchronously.
+						widget.PaginatedQuery = fixedQuery
+						go func() {
+							saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							defer cancel()
+							if saveErr := s.dashboardRepo.UpdateWidget(saveCtx, widget.ID, widget); saveErr != nil {
+								log.Printf("[QUERY_FIX] Failed to persist fixed widget paginatedQuery: %v", saveErr)
+							} else {
+								log.Printf("[QUERY_FIX] Persisted fixed widget paginatedQuery for widgetID: %s", widgetID)
+							}
+						}()
+					} else {
+						log.Printf("[QUERY_FIX] Widget retry still failed after auto-fix: %s", queryErr.Message)
+					}
+				} else {
+					log.Printf("[QUERY_FIX] Widget auto-fix failed: %v", fixErr)
+				}
+			}
 		}
-		return
+
+		if queryErr != nil {
+			if s.streamHandler != nil {
+				s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: constants.SSEEventDashboardWidgetError,
+					Data: dtos.DashboardWidgetDataEvent{
+						WidgetID:        widgetID,
+						Error:           queryErr.Message,
+						ExecutionTimeMs: executionTimeMs,
+					},
+				})
+			}
+			return
+		}
 	}
 
 	// Parse result data

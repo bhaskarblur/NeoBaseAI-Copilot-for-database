@@ -3011,7 +3011,7 @@ func (s *chatService) RefreshSchema(ctx context.Context, userID, chatID string, 
 // Cursor-based pagination is more efficient for large datasets as it doesn't require scanning all previous rows.
 func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messageID, queryID, streamID string, offset int, cursor *string) (*dtos.QueryResultsResponse, uint32, error) {
 	log.Printf("ChatService -> GetQueryResults -> userID: %s, chatID: %s, messageID: %s, queryID: %s, streamID: %s, offset: %d, cursor: %v", userID, chatID, messageID, queryID, streamID, offset, cursor)
-	chat, _, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
+	chat, msg, query, err := s.verifyQueryOwnership(userID, chatID, messageID, queryID)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
@@ -3039,10 +3039,14 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	isCursorBased := (query.Pagination.CursorField != nil && *query.Pagination.CursorField != "") ||
 		(query.Pagination.PaginatedQuery != nil && strings.Contains(*query.Pagination.PaginatedQuery, "{{cursor_value}}"))
 
-	if isCursorBased && cursor != nil {
+	if isCursorBased {
 		// Cursor-based pagination — all DB-specific logic delegated to dbmanager.BuildCursorQuery.
 		// Page 1 uses query.Query directly (cursor is empty). Pages 2+ inject cursor dynamically.
-		log.Printf("ChatService -> GetQueryResults -> Using cursor-based pagination with cursor: %s", *cursor)
+		cursorVal := ""
+		if cursor != nil {
+			cursorVal = *cursor
+		}
+		log.Printf("ChatService -> GetQueryResults -> Using cursor-based pagination with cursor: %q", cursorVal)
 
 		dbType := ""
 		if chat != nil {
@@ -3070,7 +3074,7 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 			templateQuery, // paginatedQuery from AI (may or may not have {{cursor_value}})
 			cursorField,
 			cursorDirection,
-			*cursor,
+			cursorVal,
 		)
 		log.Printf("ChatService -> GetQueryResults -> Cursor-injected query: %s", paginatedQuery)
 
@@ -3083,6 +3087,8 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 		// Offset-based pagination (backward compatibility)
 		log.Printf("ChatService -> GetQueryResults -> Using offset-based pagination with offset: %d", offset)
 		paginatedQuery = strings.Replace(*query.Pagination.PaginatedQuery, "offset_size", strconv.Itoa(offset), 1)
+		// Also handle AI using {{cursor_value}} as an offset placeholder (e.g. $skip: {{cursor_value}})
+		paginatedQuery = strings.ReplaceAll(paginatedQuery, "{{cursor_value}}", strconv.Itoa(offset))
 		pageSize = 50 // legacy default page size for offset pagination if not specified in the query
 	}
 
@@ -3091,7 +3097,98 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 	result, queryErr := s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, paginatedQuery, *query.QueryType, false, false)
 	if queryErr != nil {
 		log.Printf("ChatService -> GetQueryResults -> queryErr: %+v", queryErr)
-		return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
+
+		// Auto-fix: call the LLM to repair the broken paginatedQuery and retry.
+		// This is triggered only for cursor-based pagination templates that fail.
+		if isCursorBased && query.Pagination != nil && query.Pagination.PaginatedQuery != nil {
+			log.Printf("[QUERY_FIX] Attempting auto-fix of paginatedQuery for queryID: %s", queryID)
+
+			// Derive dbType at fix site (same value as inside isCursorBased block above).
+			fixDBType := ""
+			if chat != nil {
+				fixDBType = chat.Connection.Type
+			}
+
+			// Sample cursor: the value that was in use when the error occurred.
+			// cursor is the function parameter (*string) — always accessible here.
+			cursorValForFix := ""
+			if cursor != nil {
+				cursorValForFix = *cursor
+			}
+
+			// Prefer the LLM provider that generated this query; fall back to default.
+			fixClient := s.llmClient
+			if s.llmManager != nil && msg != nil && msg.LLMModel != nil {
+				if sel := constants.GetLLMModel(*msg.LLMModel); sel != nil {
+					if pc, pcErr := s.llmManager.GetClient(sel.Provider); pcErr == nil {
+						fixClient = pc
+					}
+				}
+			}
+
+			if fixedQuery, fixErr := autoFixPaginatedQuery(
+				ctx, fixClient, s.dbManager,
+				chatID, fixDBType, *query.QueryType,
+				*query.Pagination.PaginatedQuery, // original template with {{cursor_value}}
+				cursorValForFix,                  // sample cursor for test-only substitution
+				queryErr.Message,
+			); fixErr == nil {
+				// Inject the actual cursor value into the fixed template before retrying.
+				// fixedQuery is the template (with {{cursor_value}}); cursorValForFix is the real cursor.
+				fixCursorField := ""
+				if query.Pagination.CursorField != nil {
+					fixCursorField = *query.Pagination.CursorField
+				}
+				fixCursorDir := ""
+				if query.Pagination.CursorDirection != nil {
+					fixCursorDir = *query.Pagination.CursorDirection
+				}
+				fixedInjected := dbmanager.BuildCursorQuery(fixDBType, query.Query, fixedQuery, fixCursorField, fixCursorDir, cursorValForFix)
+				// Retry with the cursor-injected LLM-fixed query
+				result, queryErr = s.dbManager.ExecuteQuery(ctx, chatID, messageID, queryID, streamID, fixedInjected, *query.QueryType, false, false)
+				if queryErr == nil {
+					log.Printf("[QUERY_FIX] Retry succeeded with auto-fixed paginatedQuery")
+					// Persist the fix asynchronously so future paginations use the corrected template.
+					*query.Pagination.PaginatedQuery = fixedQuery
+					if msg != nil {
+						msgID := msg.ID
+						go func() {
+							saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							defer cancel()
+							_ = saveCtx
+							// Re-fetch the message so we update the authoritative copy.
+							savedMsg, fetchErr := s.chatRepo.FindMessageByID(msgID)
+							if fetchErr != nil || savedMsg == nil {
+								log.Printf("[QUERY_FIX] Could not fetch message for persistence: %v", fetchErr)
+								return
+							}
+							queryObjID, _ := primitive.ObjectIDFromHex(queryID)
+							if savedMsg.Queries != nil {
+								for i, q := range *savedMsg.Queries {
+									if q.ID == queryObjID && q.Pagination != nil && q.Pagination.PaginatedQuery != nil {
+										(*savedMsg.Queries)[i].Pagination.PaginatedQuery = &fixedQuery
+										break
+									}
+								}
+							}
+							if saveErr := s.chatRepo.UpdateMessage(msgID, savedMsg); saveErr != nil {
+								log.Printf("[QUERY_FIX] Failed to persist fixed paginatedQuery: %v", saveErr)
+							} else {
+								log.Printf("[QUERY_FIX] Persisted fixed paginatedQuery for queryID: %s", queryID)
+							}
+						}()
+					}
+				} else {
+					log.Printf("[QUERY_FIX] Retry still failed after auto-fix: %s", queryErr.Message)
+				}
+			} else {
+				log.Printf("[QUERY_FIX] Auto-fix failed: %v", fixErr)
+			}
+		}
+
+		if queryErr != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf(queryErr.Message)
+		}
 	}
 
 	// Convert Result to JSON string
@@ -3133,11 +3230,33 @@ func (s *chatService) GetQueryResults(ctx context.Context, userID, chatID, messa
 			// If we got a full page, there might be more results
 			lastRecord := resultListFormatting[len(resultListFormatting)-1]
 			if recordMap, ok := lastRecord.(map[string]interface{}); ok {
-				// Extract cursor value from the last record
+				// Extract cursor value from the last record — try direct match first,
+				// then fall back to normalized matching for aliased fields
+				// (e.g. cursor_field="createdAt" but result has "Created At" due to $project)
 				if cursorValue, exists := recordMap[*query.Pagination.CursorField]; exists {
 					cursorStr := fmt.Sprintf("%v", cursorValue)
 					nextCursor = &cursorStr
 					hasMore = true
+				} else {
+					// Normalized matching: strip spaces, underscores, compare lowercase
+					norm := func(s string) string {
+						s = strings.ToLower(s)
+						s = strings.ReplaceAll(s, " ", "")
+						s = strings.ReplaceAll(s, "_", "")
+						return s
+					}
+					normalizedField := norm(*query.Pagination.CursorField)
+					for key, val := range recordMap {
+						if norm(key) == normalizedField {
+							cursorStr := fmt.Sprintf("%v", val)
+							nextCursor = &cursorStr
+							hasMore = true
+							log.Printf("ChatService -> GetQueryResults -> Cursor extracted via normalized match: field=%q matched key=%q", *query.Pagination.CursorField, key)
+							break
+						}
+					}
+				}
+				if nextCursor != nil {
 					log.Printf("ChatService -> GetQueryResults -> Next cursor: %s, hasMore: %t", *nextCursor, hasMore)
 				}
 			}

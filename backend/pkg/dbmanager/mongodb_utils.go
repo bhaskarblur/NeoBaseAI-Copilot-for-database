@@ -1517,6 +1517,63 @@ func mongoFormatCursorValue(v string) string {
 	return fmt.Sprintf(`"%s"`, v)
 }
 
+// mongoDynamicCursorInject inserts a cursor filter condition into a MongoDB query
+// that was NOT generated with a {{cursor_value}} template. This is a fallback for
+// queries where the LLM set cursor_field but did not generate a proper paginatedQuery.
+func mongoDynamicCursorInject(query, cursorField, cursorDirection, cursorValue string) string {
+	// Determine comparison operator from direction
+	op := "$gt"
+	if strings.EqualFold(cursorDirection, "desc") || cursorDirection == "-1" {
+		op = "$lt"
+	}
+
+	formattedValue := mongoFormatCursorValue(cursorValue)
+	matchCondition := fmt.Sprintf(`"%s": {%s: %s}`, cursorField, op, formattedValue)
+
+	// Aggregate query: insert {$match: ...} at the start of the pipeline
+	if strings.Contains(query, ".aggregate(") {
+		aggIdx := strings.Index(query, ".aggregate(")
+		if aggIdx == -1 {
+			return query
+		}
+		// Find the opening bracket '[' of the pipeline
+		rest := query[aggIdx+len(".aggregate("):]
+		bracketIdx := strings.Index(rest, "[")
+		if bracketIdx == -1 {
+			return query
+		}
+		insertPos := aggIdx + len(".aggregate(") + bracketIdx + 1 // position after '['
+		matchStage := fmt.Sprintf(`{$match: {%s}}, `, matchCondition)
+		result := query[:insertPos] + matchStage + query[insertPos:]
+		log.Printf("[CURSOR] Dynamic cursor injection (aggregate): %s", result)
+		return result
+	}
+
+	// Find query: inject cursor condition into the filter
+	if strings.Contains(query, ".find(") {
+		findIdx := strings.Index(query, ".find(")
+		if findIdx == -1 {
+			return query
+		}
+		filterStart := findIdx + len(".find(")
+		if filterStart >= len(query) || query[filterStart] != '{' {
+			return query
+		}
+		// Check if filter is empty: {}
+		if filterStart+1 < len(query) && query[filterStart+1] == '}' {
+			result := query[:filterStart+1] + matchCondition + query[filterStart+1:]
+			log.Printf("[CURSOR] Dynamic cursor injection (find empty): %s", result)
+			return result
+		}
+		// Non-empty filter: insert at beginning
+		result := query[:filterStart+1] + matchCondition + ", " + query[filterStart+1:]
+		log.Printf("[CURSOR] Dynamic cursor injection (find): %s", result)
+		return result
+	}
+
+	return query
+}
+
 // mongoInjectTemplatedCursor replaces {{cursor_value}} (quoted or bare) with the
 // correctly formatted BSON literal. Called from BuildCursorQuery's template path.
 // It detects when the placeholder is already inside ISODate(...) or ObjectId(...) wrappers
@@ -1524,9 +1581,30 @@ func mongoFormatCursorValue(v string) string {
 func mongoInjectTemplatedCursor(query, cursorValue string) string {
 	const placeholder = "{{cursor_value}}"
 
-	// Check if placeholder is already wrapped in ISODate() or ObjectId().
-	// If so, just do a plain replacement of the placeholder with the raw value
-	// (the wrapper is already present in the template).
+	replacement := mongoFormatCursorValue(cursorValue)
+
+	// First, handle the case where the AI has wrapped the placeholder in ISODate/ObjectId
+	// AND that whole construct is additionally quoted as a string:
+	// e.g.  "$lt": "ISODate("{{cursor_value}}")"  or  "$lt": 'ISODate("{{cursor_value}}")'
+	// The outer string-quotes must be stripped so MongoDB receives a proper BSON literal.
+	outerQuotedPatterns := []struct{ old, new string }{
+		{`"ISODate("` + placeholder + `")"`, replacement},
+		{`"ISODate('` + placeholder + `')"`, replacement},
+		{`'ISODate("` + placeholder + `")'`, replacement},
+		{`'ISODate('` + placeholder + `')'`, replacement},
+		{`"ObjectId("` + placeholder + `")"`, replacement},
+		{`"ObjectId('` + placeholder + `')"`, replacement},
+		{`'ObjectId("` + placeholder + `")'`, replacement},
+		{`'ObjectId('` + placeholder + `')'`, replacement},
+	}
+	for _, p := range outerQuotedPatterns {
+		if strings.Contains(query, p.old) {
+			return strings.ReplaceAll(query, p.old, p.new)
+		}
+	}
+
+	// Check if placeholder is already wrapped in ISODate() or ObjectId() without outer quotes.
+	// If so, just replace the placeholder with the raw cursor value (wrapper already in template).
 	alreadyWrapped := strings.Contains(query, `ISODate("`+placeholder+`")`) ||
 		strings.Contains(query, `ISODate('`+placeholder+`')`) ||
 		strings.Contains(query, `ObjectId("`+placeholder+`")`) ||
@@ -1537,8 +1615,7 @@ func mongoInjectTemplatedCursor(query, cursorValue string) string {
 		return strings.ReplaceAll(query, placeholder, cursorValue)
 	}
 
-	// Standard replacement — format the cursor value with appropriate BSON wrapper
-	replacement := mongoFormatCursorValue(cursorValue)
+	// Standard replacement — strip surrounding string-quotes and substitute BSON literal
 	query = strings.Replace(query, "'"+placeholder+"'", replacement, -1)
 	query = strings.Replace(query, `"`+placeholder+`"`, replacement, -1)
 	query = strings.Replace(query, placeholder, replacement, -1)
