@@ -29,7 +29,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                 hasFetchedRef.current = true;
             } catch (error) {
                 console.error('Error fetching star count:', error);
-                setStarCount(1); // I Starred it manually :)
+                setStarCount(100); // I Starred it manually :)
                 hasFetchedRef.current = true;
             } finally {
                 isFetchingRef.current = false;
@@ -79,7 +79,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                     rounded-full 
                     text-xs 
                     font-mono
-                ">{formatStarCount(starCount || 60)}</span>
+                ">{formatStarCount(starCount || 100)}</span>
             ) : (
                 <>
                     <span>Star Us</span>
@@ -90,7 +90,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                         rounded-full 
                         text-xs 
                         font-mono
-                    ">{formatStarCount(starCount || 60)}</span>
+                    ">{formatStarCount(starCount || 100)}</span>
                 </>
             )}
         </a>
