@@ -1,1185 +1,177 @@
 import {
-  Activity,
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  BarChart3,
-  ChevronLeft,
-  ChevronRight,
-  Gauge,
-  Grid3x3,
-  Info,
-  MoreHorizontal,
-  Pencil,
-  PieChart,
-  RefreshCcw,
-  Table2,
-  Trash2,
-  TrendingUp,
-  X,
+    AlertTriangle,
+    Info,
+    MoreHorizontal,
+    Pencil,
+    RefreshCcw,
+    Trash2,
+    X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmationModal from '../modals/ConfirmationModal';
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart as RechartsPieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  Brush,
-} from 'recharts';
 import { Widget, WidgetLayout, WidgetType } from '../../types/dashboard';
+import AreaChartWidget from './widgets/AreaChartWidget';
+import BarChartWidget from './widgets/BarChartWidget';
+import BarGaugeWidget from './widgets/BarGaugeWidget';
+import GaugeWidget from './widgets/GaugeWidget';
+import HeatmapWidget from './widgets/HeatmapWidget';
+import HistogramWidget from './widgets/HistogramWidget';
+import LineChartWidget from './widgets/LineChartWidget';
+import PieChartWidget from './widgets/PieChartWidget';
+import StatWidget from './widgets/StatWidget';
+import TableWidget from './widgets/TableWidget';
+import {
+    GRAFANA_LOADING_STYLE,
+    WIDGET_TYPE_ICONS,
+    formatRelativeTime,
+} from './widgets/widgetConstants';
 
 interface DashboardWidgetCardProps {
-  widget: Widget;
-  layout?: WidgetLayout;
-  onDelete: () => void;
-  onEdit?: () => void;
-  onRefresh?: () => void;
-  onCancelRefresh?: () => void;
-  onNextPage?: () => void;
-  onPreviousPage?: () => void;
-  onDataUpdate?: (data: Record<string, unknown>[]) => void;
-  onError?: (error: string) => void;
+    widget: Widget;
+    layout?: WidgetLayout;
+    onDelete: () => void;
+    onEdit?: () => void;
+    onRefresh?: () => void;
+    onCancelRefresh?: () => void;
+    onNextPage?: () => void;
+    onPreviousPage?: () => void;
+    onDataUpdate?: (data: Record<string, unknown>[]) => void;
+    onError?: (error: string) => void;
 }
-
-// Balanced yellow / green / amber palette
-const CHART_COLORS = ['#047857', '#f59e0b', '#10b981', '#d97706', '#14b8a6', '#FBBF24', '#059669', '#b45309'];
-
-const WIDGET_TYPE_ICONS: Record<WidgetType, React.ReactNode> = {
-  stat: <TrendingUp className="w-5 h-5" />,
-  line: <TrendingUp className="w-5 h-5" />,
-  bar: <BarChart3 className="w-5 h-5" />,
-  area: <BarChart3 className="w-5 h-5" />,
-  pie: <PieChart className="w-5 h-5" />,
-  table: <Table2 className="w-5 h-5" />,
-  combo: <BarChart3 className="w-5 h-5" />,
-  gauge: <Gauge className="w-5 h-5" />,
-  bar_gauge: <Activity className="w-5 h-5" />,
-  heatmap: <Grid3x3 className="w-5 h-5" />,
-  histogram: <BarChart3 className="w-5 h-5" />,
-};
-
-/* Grafana-style loading bar keyframes via inline style tag */
-const GRAFANA_LOADING_STYLE = `
-@keyframes grafana-loading-bar {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(0%); }
-  100% { transform: translateX(200%); }
-}
-`;
-
-// Common tooltip style for all charts — white text on dark background
-const TOOLTIP_STYLE = {
-  contentStyle: {
-    backgroundColor: '#1a1a1a',
-    border: '2px solid #333',
-    borderRadius: 8,
-    padding: '10px 14px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-  },
-  labelStyle: { color: '#fff', fontWeight: 800 as const, fontSize: 14, marginBottom: 4 },
-  itemStyle: { color: '#e5e7eb', fontSize: 14, padding: '2px 0' },
-  cursor: { fill: 'rgba(255, 215, 0, 0.08)' },
-};
-
-// Capitalize first letter of each word for legend labels
-const legendFormatter = (value: string) => {
-  if (!value || value.length === 0 || value.trim() === '') return 'No Label';
-  return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-};
-
-// Try to parse any date-like string into short human-readable format for axes
-const tryFormatDate = (value: unknown): string => {
-  if (typeof value !== 'string') return String(value ?? '');
-  if (/^\d{4}-\d{2}/.test(value) || /^\d{4}\/\d{2}/.test(value)) {
-    try {
-      const d = new Date(value);
-      if (!isNaN(d.getTime())) {
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
-      }
-    } catch { /* fall through */ }
-  }
-  return value;
-};
-
-// Tooltip label formatter — capitalize + human-readable date
-const tooltipLabelFormatter = (label: string | number) => {
-  if (label == null) return '';
-  const s = String(label);
-  // Try to format as date first
-  const dateFormatted = tryFormatDate(s);
-  if (dateFormatted !== s) return dateFormatted;
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-};
-
-// Date detection & formatting helpers
-const isDateString = (value: unknown): boolean =>
-  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
-
-const formatDateValue = (dateStr: string, friendly: boolean): string => {
-  if (!friendly) return dateStr;
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: 'numeric', minute: '2-digit', hour12: true,
-    });
-  } catch { return dateStr; }
-};
 
 export default function DashboardWidgetCard({
-  widget,
-  onDelete,
-  onEdit,
-  onRefresh,
-  onCancelRefresh,
-  onNextPage,
-  onPreviousPage,
+    widget,
+    onDelete,
+    onEdit,
+    onRefresh,
+    onCancelRefresh,
+    onNextPage,
+    onPreviousPage,
 }: DashboardWidgetCardProps) {
-  const [showMenu, setShowMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [, setTick] = useState(0);
-  // Table date format: column key → true = human-readable, false = ISO
-  const [dateFormats, setDateFormats] = useState<Record<string, boolean>>({});
-  // Info tooltip
-  const [showInfo, setShowInfo] = useState(false);
-  // Table cell expand state for Read more / Less
-  const [expandedCells, setExpandedCells] = useState<Record<string, boolean>>({});
-  // Table sorting: column key and direction
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
-  // Sort tooltip hover state
-  const [hoveredSortColumn, setHoveredSortColumn] = useState<string | null>(null);
-  // In-memory page for non-cursor table widgets
-  const [localPage, setLocalPage] = useState(1);
+    const [showMenu, setShowMenu] = useState(false);
+    const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [, setTick] = useState(0);
+    const [showInfo, setShowInfo] = useState(false);
 
-  // Ref to store previous data so we can show it while loading (Grafana-style)
-  const prevDataRef = useRef<Record<string, unknown>[] | undefined>(undefined);
-  if (widget.data && widget.data.length > 0) {
-    prevDataRef.current = widget.data;
-  }
+    // Ref to store previous data so we can show it while loading (Grafana-style)
+    const prevDataRef = useRef<Record<string, unknown>[] | undefined>(undefined);
+    if (widget.data && widget.data.length > 0) {
+        prevDataRef.current = widget.data;
+    }
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (showMenu) {
-        const target = e.target as HTMLElement;
-        if (!target.closest('.widget-menu-dropdown') && !target.closest('.widget-menu-btn')) {
-          setShowMenu(false);
-          setMenuPosition(null);
+    // Close menu on outside click
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (showMenu) {
+                const target = e.target as HTMLElement;
+                if (!target.closest('.widget-menu-dropdown') && !target.closest('.widget-menu-btn')) {
+                    setShowMenu(false);
+                    setMenuPosition(null);
+                }
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showMenu]);
+
+    // Live timer — re-render every 30s to update relative time
+    useEffect(() => {
+        if (!widget.last_refreshed_at) return;
+        const interval = setInterval(() => setTick((t) => t + 1), 30_000);
+        return () => clearInterval(interval);
+    }, [widget.last_refreshed_at]);
+
+    const handleToggleMenu = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (showMenu) {
+            setShowMenu(false);
+            setMenuPosition(null);
+            return;
         }
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMenu]);
+        const rect = e.currentTarget.getBoundingClientRect();
+        setMenuPosition({ top: rect.bottom + 8, left: rect.right - 208 });
+        setShowMenu(true);
+    }, [showMenu]);
 
-  // Live timer — re-render every 30s to update relative time
-  useEffect(() => {
-    if (!widget.last_refreshed_at) return;
-    const interval = setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => clearInterval(interval);
-  }, [widget.last_refreshed_at]);
+    // Use current data or previous data for Grafana-style "show stale data while loading"
+    const displayData = widget.data && widget.data.length > 0 ? widget.data : prevDataRef.current;
 
-  const handleToggleMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (showMenu) {
-      setShowMenu(false);
-      setMenuPosition(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPosition({
-      top: rect.bottom + 8,
-      left: rect.right - 208,
-    });
-    setShowMenu(true);
-  }, [showMenu]);
+    // Memoize chart keys & category detection from display data
+    const { numericKeys, categoryKey, chartData } = useMemo(() => {
+        const d = displayData || [];
+        if (d.length === 0) return { numericKeys: [] as string[], categoryKey: undefined as string | undefined, chartData: d };
+        const first = d[0];
+        const nk = Object.keys(first).filter((k) => typeof first[k] === 'number');
+        const ck = Object.keys(first).find((k) => typeof first[k] !== 'number');
+        return { numericKeys: nk, categoryKey: ck, chartData: d };
+    }, [displayData]);
 
-  // Detect date columns for table widget
-  useEffect(() => {
-    if (widget.widget_type !== 'table' || !widget.data || widget.data.length === 0) return;
-    const newDateCols: Record<string, boolean> = {};
-    const firstRow = widget.data[0];
-    for (const key of Object.keys(firstRow)) {
-      if (isDateString(firstRow[key])) newDateCols[key] = true;
-    }
-    if (Object.keys(newDateCols).length > 0) {
-      setDateFormats((prev) => {
-        const merged = { ...prev };
-        for (const k of Object.keys(newDateCols)) {
-          if (!(k in merged)) merged[k] = true;
-        }
-        return merged;
-      });
-    }
-  }, [widget.data, widget.widget_type]);
-
-  // Reset local page when data is refreshed
-  useEffect(() => {
-    setLocalPage(1);
-  }, [widget.data]);
-
-  // Use current data or previous data for Grafana-style "show stale data while loading"
-  const displayData = widget.data && widget.data.length > 0 ? widget.data : prevDataRef.current;
-
-  // Memoize chart keys & category detection from display data
-  const { numericKeys, categoryKey, chartData } = useMemo(() => {
-    const d = displayData || [];
-    if (d.length === 0) return { numericKeys: [] as string[], categoryKey: undefined as string | undefined, chartData: d };
-    const first = d[0];
-    const nk = Object.keys(first).filter((k) => typeof first[k] === 'number');
-    const ck = Object.keys(first).find((k) => typeof first[k] !== 'number');
-    return { numericKeys: nk, categoryKey: ck, chartData: d };
-  }, [displayData]);
-
-  const renderWidgetContent = () => {
-    // Error state — but still show previous data underneath if available
-    if (widget.error && !displayData) {
-      return (
-        <div className="flex items-center justify-center h-full min-h-[120px] p-4">
-          <div className="flex flex-col items-center gap-2 text-center">
-            <AlertTriangle className="w-5 h-5 text-red-400" />
-            <span className="text-base text-red-500 line-clamp-2">{widget.error.charAt(0).toUpperCase() + widget.error.slice(1)}</span>
-          </div>
-        </div>
-      );
-    }
-
-    // No data at all — never loaded
-    if (!displayData || displayData.length === 0) {
-      if (widget.is_loading) {
-        return (
-          <div className="flex items-center justify-center h-full min-h-[100px]">
-            <span className="text-base text-gray-400">Loading data...</span>
-          </div>
-        );
-      }
-      return (
-        <div className="flex items-center justify-center h-full min-h-[100px]">
-          <span className="text-center text-base text-gray-500">No data found</span>
-        </div>
-      );
-    }
-
-    // Has data (current or previous) — render chart/table normally
-    switch (widget.widget_type) {
-      case 'stat':
-        return renderStatWidget();
-      case 'line':
-        return renderLineChart();
-      case 'bar':
-        return renderBarChart();
-      case 'area':
-        return renderAreaChart();
-      case 'pie':
-        return renderPieChart();
-      case 'table':
-        return renderTableWidget();
-      case 'gauge':
-        return renderGaugeWidget();
-      case 'bar_gauge':
-        return renderBarGaugeWidget();
-      case 'heatmap':
-        return renderHeatmapWidget();
-      case 'histogram':
-        return renderHistogramWidget();
-      default:
-        return renderBarChart();
-    }
-  };
-
-  const renderStatWidget = () => {
-    const config = widget.stat_config;
-    const data = displayData;
-    if (!config || !data || data.length === 0) return null;
-
-    const firstRow = data[0];
-    const keys = Object.keys(firstRow);
-    const mainValue = firstRow[keys[0]] as number;
-
-    // Handle null or undefined values
-    if (mainValue === null || mainValue === undefined) {
-      return (
-        <div className="flex flex-col justify-center p-1">
-          <div className="text-4xl font-black text-gray-400">—</div>
-          <div className="text-sm font-semibold text-gray-500 mt-1">{widget.title}</div>
-        </div>
-      );
-    }
-
-    const formattedValue = formatStatValue(mainValue, config.format, config.prefix, config.suffix, config.decimal_places);
-
-    const changePercent = config.change_percentage;
-    const isPositive = changePercent !== undefined && changePercent >= 0;
-    const trendIsGood = config.trend_direction === 'up_is_good' ? isPositive : !isPositive;
-
-    return (
-      <div className="flex flex-col justify-center p-1">
-        <div className="text-4xl font-black text-black">{formattedValue}</div>
-        {changePercent !== undefined && (
-          <div className={`flex items-center gap-1 mt-2 text-base font-bold ${trendIsGood ? 'text-green-600' : 'text-red-600'}`}>
-            {isPositive ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
-            <span>{Math.abs(changePercent).toFixed(1)}%</span>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Chart axis date tick formatter
-  const axisTickFormatter = (value: string | number) => tryFormatDate(value);
-
-  const renderLineChart = () => {
-    const showBrush = chartData.length > 15;
-    return (
-      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
-        <div style={{ height: showBrush ? 340 : 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
-              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-              <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
-              {numericKeys.map((key, i) => (
-                <Line key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
-              ))}
-              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handler above to select a time range</p>}
-      </div>
-    );
-  };
-
-  const renderBarChart = () => {
-    const showBrush = chartData.length > 12;
-    const singleSeries = numericKeys.length === 1;
-    return (
-      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
-        <div style={{ height: showBrush ? 360 : 330 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
-              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-              {!singleSeries && <Legend wrapperStyle={{ fontSize: 14, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />}
-              {singleSeries ? (
-                <Bar key={numericKeys[0]} dataKey={numericKeys[0]} radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                  ))}
-                </Bar>
-              ) : (
-                numericKeys.map((key, i) => (
-                  <Bar key={key} dataKey={key} name={key} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
-                ))
-              )}
-              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 15)} />}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handle above to select a range</p>}
-      </div>
-    );
-  };
-
-  const renderAreaChart = () => {
-    const showBrush = chartData.length > 15;
-    return (
-      <div className="w-full outline-none focus:outline-none" tabIndex={-1}>
-        <div style={{ height: showBrush ? 340 : 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              {categoryKey && <XAxis dataKey={categoryKey} tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(val) => { const formatted = axisTickFormatter(val); return (!formatted || formatted.trim() === '') ? 'No Label' : formatted; }} />}
-              <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} />
-              <Tooltip {...TOOLTIP_STYLE} labelFormatter={tooltipLabelFormatter} formatter={(value: number | string, name: string) => [value, legendFormatter(name)]} />
-              <Legend wrapperStyle={{ fontSize: 14, paddingTop: 10, paddingLeft: 8, paddingRight: 8 }} iconSize={14} formatter={legendFormatter} />
-              {numericKeys.map((key, i) => (
-                <Area key={key} type="monotone" dataKey={key} name={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} fill={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={0.15} strokeWidth={2.5} activeDot={{ r: 5, strokeWidth: 2, stroke: '#000' }} />
-              ))}
-              {showBrush && <Brush dataKey={categoryKey} height={28} stroke="#047857" fill="#f9fafb" travellerWidth={10} tickFormatter={() => ''} startIndex={Math.max(0, chartData.length - 20)} />}
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        {showBrush && <p className="text-xs text-gray-400 text-center mt-1">Drag the handler above to select a range</p>}
-      </div>
-    );
-  };
-
-  const renderPieChart = () => {
-    const data = displayData || [];
-    const nameKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] !== 'number') : 'name';
-    const valueKey = data.length > 0 ? Object.keys(data[0]).find((k) => typeof data[0][k] === 'number') : 'value';
-
-    return (
-      <div className={`${data.length >= 10 ? 'h-[580px] md:h-[380px]' : data.length >= 8 ? 'h-[360px] md:h-[310px]' : data.length >= 6 ? 'h-[320px] md:h-[290px]' : data.length >= 3 ? 'h-[260px]' : 'h-[250px]'} w-full outline-none focus:outline-none`} tabIndex={-1}>
-        <ResponsiveContainer width="100%" height="100%">
-          <RechartsPieChart>
-            <Pie
-              data={data}
-              dataKey={valueKey || 'value'}
-              nameKey={nameKey || 'name'}
-              cx="50%"
-              cy="48%"
-              outerRadius={75}
-              innerRadius={38}
-              strokeWidth={2}
-              stroke="#000"
-            //   label={(entry) => {
-            //     const name = entry[nameKey || 'name'];
-            //     return (!name || name.length === 0 || String(name).trim() === '') ? 'No Label' : String(name);
-            //   }}
-            >
-              {data.map((_entry, index) => (
-                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={TOOLTIP_STYLE.contentStyle}
-              labelStyle={TOOLTIP_STYLE.labelStyle}
-              itemStyle={TOOLTIP_STYLE.itemStyle}
-              formatter={(value: number | string, name: string) => [value, legendFormatter(name)]}
-            />
-            <Legend wrapperStyle={{ fontSize: 14, paddingBottom: 12, paddingTop: 12, paddingLeft: 12, paddingRight: 12 }} iconSize={14} formatter={legendFormatter} />
-          </RechartsPieChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  };
-
-  const renderGaugeWidget = () => {
-    const config = widget.gauge_config;
-    const data = displayData;
-    if (!config || !data || data.length === 0) return null;
-
-    const firstRow = data[0];
-    const keys = Object.keys(firstRow);
-    const value = firstRow[keys[0]] as number;
-
-    if (value === null || value === undefined) {
-      return (
-        <div className="flex items-center justify-center h-full min-h-[120px]">
-          <div className="text-4xl font-black text-gray-400">—</div>
-        </div>
-      );
-    }
-
-    const min = config.min ?? 0;
-    const max = config.max ?? 100;
-    const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
-    
-    // Get color based on thresholds
-    const getColor = () => {
-      if (!config.thresholds || config.thresholds.length === 0) return '#047857';
-      const sorted = [...config.thresholds].sort((a, b) => b.value - a.value);
-      for (const threshold of sorted) {
-        if (value >= threshold.value) return threshold.color;
-      }
-      return config.thresholds[0]?.color || '#047857';
-    };
-
-    const color = getColor();
-    const displayValue = value.toFixed(config.decimal_places ?? 0);
-
-    return (
-      <div className="min-h-[240px] w-full flex flex-col items-center justify-center py-4 outline-none focus:outline-none" tabIndex={-1}>
-        <div className="relative w-full max-w-[190px] aspect-square">
-          {/* Background arc */}
-          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-            <circle
-              cx="50"
-              cy="50"
-              r="40"
-              fill="none"
-              stroke="#e5e7eb"
-              strokeWidth="8"
-              strokeDasharray="251.2"
-              strokeDashoffset="62.8"
-            />
-            {/* Value arc */}
-            <circle
-              cx="50"
-              cy="50"
-              r="40"
-              fill="none"
-              stroke={color}
-              strokeWidth="8"
-              strokeDasharray="251.2"
-              strokeDashoffset={62.8 + ((100 - percentage) / 100) * 188.4}
-              strokeLinecap="round"
-              style={{ transition: 'stroke-dashoffset 0.5s ease' }}
-            />
-          </svg>
-          {/* Center value */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-3xl font-black text-black">
-              {displayValue}{config.unit || ''}
-            </div>
-            <div className="text-sm text-gray-500 mt-1">
-              {min} - {max}
-            </div>
-          </div>
-        </div>
-        {config.show_threshold && config.thresholds && config.thresholds.length > 0 && (
-          <div className="flex gap-3 mt-3 flex-wrap justify-center px-2">
-            {config.thresholds.map((t, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-xs">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
-                <span className="text-gray-600 font-medium">{t.value}{config.unit || ''}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderBarGaugeWidget = () => {
-    const config = widget.bar_gauge_config;
-    const data = displayData;
-    if (!config || !data || data.length === 0) return null;
-
-    const min = config.min ?? 0;
-    const max = config.max ?? 100;
-
-    // Get color for value based on thresholds
-    const getColor = (value: number) => {
-      if (!config.thresholds || config.thresholds.length === 0) return '#047857';
-      const sorted = [...config.thresholds].sort((a, b) => b.value - a.value);
-      for (const threshold of sorted) {
-        if (value >= threshold.value) return threshold.color;
-      }
-      return config.thresholds[0]?.color || '#047857';
-    };
-
-    return (
-      <div className="min-h-[260px] w-full flex items-center py-4 outline-none focus:outline-none" tabIndex={-1}>
-        <div className="w-full space-y-3 px-2">
-          {data.slice(0, 8).map((row, idx) => {
-            const keys = Object.keys(row);
-            const label = keys.find(k => typeof row[k] !== 'number');
-            const valueKey = keys.find(k => typeof row[k] === 'number');
-            const value = valueKey ? (row[valueKey] as number) : 0;
-            const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
-            const color = getColor(value);
-            const displayValue = value.toFixed(config.decimal_places ?? 0);
-
+    const renderWidgetContent = () => {
+        // Error state — but still show previous data underneath if available
+        if (widget.error && !displayData) {
             return (
-              <div key={idx} className="space-y-2">
-                <div className="flex items-center justify-between text-base">
-                  <span className="font-semibold text-gray-700">
-                    {label ? String(row[label]) : `Series ${idx + 1}`}
-                  </span>
-                  <span className="font-bold text-black">
-                    {displayValue}{config.unit || ''}
-                  </span>
-                </div>
-                <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-                    style={{
-                      width: `${percentage}%`,
-                      background: config.display_mode === 'gradient'
-                        ? `linear-gradient(to right, ${color}cc, ${color})`
-                        : color,
-                    }}
-                  />
-                  {config.display_mode === 'lcd' && (
-                    <div className="absolute inset-0 flex">
-                      {Array.from({ length: 20 }).map((_, i) => (
-                        <div key={i} className="flex-1 border-r border-white/30" />
-                      ))}
+                <div className="flex items-center justify-center h-full min-h-[120px] p-4">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                        <AlertTriangle className="w-5 h-5 text-red-400" />
+                        <span className="text-base text-red-500 line-clamp-2">
+                            {widget.error.charAt(0).toUpperCase() + widget.error.slice(1)}
+                        </span>
                     </div>
-                  )}
                 </div>
-              </div>
             );
-          })}
-        </div>
-      </div>
-    );
-  };
+        }
 
-  const renderHeatmapWidget = () => {
-    const config = widget.heatmap_config;
-    const data = displayData;
-    if (!config || !data || data.length === 0) return null;
-
-    // Get unique x and y values
-    const xValues = Array.from(new Set(data.map(row => String(row[config.x_axis_column]))));
-    const yValues = Array.from(new Set(data.map(row => String(row[config.y_axis_column]))));
-
-    // Get min/max for color scaling
-    const values = data.map(row => row[config.value_column] as number).filter(v => typeof v === 'number');
-    const minValue = Math.min(...values);
-    const maxValue = Math.max(...values);
-
-    // Color scheme mapping
-    const getColorForValue = (value: number) => {
-      const normalized = (value - minValue) / (maxValue - minValue);
-      
-      if (config.color_scheme === 'green-red') {
-        const r = Math.round(255 * normalized);
-        const g = Math.round(255 * (1 - normalized));
-        return `rgb(${r}, ${g}, 0)`;
-      } else if (config.color_scheme === 'blue-yellow') {
-        return normalized > 0.5
-          ? `rgb(255, 255, ${Math.round(255 * (1 - normalized) * 2)})`
-          : `rgb(${Math.round(255 * normalized * 2)}, ${Math.round(255 * normalized * 2)}, 255)`;
-      } else {
-        const gray = Math.round(255 * normalized);
-        return `rgb(${gray}, ${gray}, ${gray})`;
-      }
-    };
-
-    // Create grid matrix
-    const getValueForCell = (x: string, y: string): number | null => {
-      const row = data.find(
-        r => String(r[config.x_axis_column]) === x && String(r[config.y_axis_column]) === y
-      );
-      return row ? (row[config.value_column] as number) : null;
-    };
-
-    return (
-      <div className="min-h-[280px] w-full flex flex-col justify-center py-4 outline-none focus:outline-none" tabIndex={-1}>
-        <div className="overflow-x-auto px-2">
-          <div className="inline-block min-w-full">
-            <div className="flex">
-              {/* Y-axis labels */}
-              <div className="flex flex-col justify-around pr-2 text-sm font-semibold text-gray-600">
-                <div className="h-6" />
-                {yValues.map((y, i) => (
-                  <div key={i} className="h-10 flex items-center text-sm">{y}</div>
-                ))}
-              </div>
-              {/* Grid */}
-              <div className="flex-1">
-                {/* X-axis labels */}
-                <div className="flex mb-1">
-                  {xValues.map((x, i) => (
-                    <div key={i} className="flex-1 text-center text-sm font-semibold text-gray-600 px-1">
-                      {x.length > 8 ? x.slice(0, 8) + '...' : x}
+        // No data at all — never loaded
+        if (!displayData || displayData.length === 0) {
+            if (widget.is_loading) {
+                return (
+                    <div className="flex items-center justify-center h-full min-h-[100px]">
+                        <span className="text-base text-gray-400">Loading data...</span>
                     </div>
-                  ))}
+                );
+            }
+            return (
+                <div className="flex items-center justify-center h-full min-h-[100px]">
+                    <span className="text-center text-base text-gray-500">No data found</span>
                 </div>
-                {/* Cells */}
-                {yValues.map((y, yIdx) => (
-                  <div key={yIdx} className="flex gap-1 mb-1">
-                    {xValues.map((x, xIdx) => {
-                      const value = getValueForCell(x, y);
-                      return (
-                        <div
-                          key={xIdx}
-                          className="flex-1 h-10 rounded border border-gray-300 flex items-center justify-center text-base font-semibold"
-                          style={{
-                            backgroundColor: value !== null ? getColorForValue(value) : '#f3f4f6',
-                            color: value !== null && value > (maxValue - minValue) / 2 ? '#fff' : '#000',
-                          }}
-                          title={value !== null ? `${x}, ${y}: ${value}` : 'No data'}
-                        >
-                          {config.show_values && value !== null ? value.toFixed(0) : ''}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-        {config.show_legend && (
-          <div className="mt-6 flex items-center justify-center gap-2 px-2">
-            <span className="text-sm text-gray-600 font-medium">Low</span>
-            <div className="flex h-4 w-32 rounded">{Array.from({ length: 10 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="flex-1"
-                  style={{ backgroundColor: getColorForValue(minValue + (maxValue - minValue) * (i / 9)) }}
-                />
-              ))}
-            </div>
-            <span className="text-sm text-gray-600 font-medium">High</span>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderHistogramWidget = () => {
-    const config = widget.histogram_config;
-    const data = displayData;
-    if (!config || !data || data.length === 0) return null;
-
-    // Extract values from the specified column
-    const values = data
-      .map(row => row[config.value_column] as number)
-      .filter(v => typeof v === 'number' && !isNaN(v));
-
-    if (values.length === 0) {
-      return (
-        <div className="flex items-center justify-center h-64">
-          <span className="text-gray-500">No numeric data for histogram</span>
-        </div>
-      );
-    }
-
-    const minVal = Math.min(...values);
-    const maxVal = Math.max(...values);
-    const range = maxVal - minVal;
-
-    // Calculate buckets
-    const bucketCount = config.bucket_count || 10;
-    const bucketSize = config.bucket_size || range / bucketCount;
-    const buckets: { range: string; count: number; start: number; end: number }[] = [];
-
-    for (let i = 0; i < bucketCount; i++) {
-      const start = minVal + i * bucketSize;
-      const end = start + bucketSize;
-      const count = values.filter(v => v >= start && (i === bucketCount - 1 ? v <= end : v < end)).length;
-      buckets.push({
-        range: `${start.toFixed(config.decimal_places ?? 0)}-${end.toFixed(config.decimal_places ?? 0)}`,
-        count,
-        start,
-        end,
-      });
-    }
-
-    // Calculate mean and median if needed
-    const mean = config.show_mean ? values.reduce((a, b) => a + b, 0) / values.length : undefined;
-    const median = config.show_median
-      ? (() => {
-          const sorted = [...values].sort((a, b) => a - b);
-          const mid = Math.floor(sorted.length / 2);
-          return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-        })()
-      : undefined;
-
-    // Dynamic height based on bucket count and whether statistics are shown
-    const showStats = mean !== undefined || median !== undefined;
-    const chartHeight = bucketCount <= 6 ? 280 : bucketCount <= 10 ? 360 : 390;
-
-    return (
-      <div className="w-full min-h-[320px] outline-none focus:outline-none" tabIndex={-1}>
-        <div style={{ height: chartHeight }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={buckets} margin={{ top: 24, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis
-                dataKey="range"
-                tick={{ fontSize: 12, fill: '#6b7280' }}
-                tickLine={false}
-                axisLine={{ stroke: '#d1d5db' }}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis
-                label={{ value: 'Frequency', angle: -90, position: 'insideLeft', style: { fontSize: 13, fill: '#6b7280' } }}
-                tick={{ fontSize: 13, fill: '#6b7280' }}
-                tickLine={false}
-                axisLine={{ stroke: '#d1d5db' }}
-              />
-              <Tooltip {...TOOLTIP_STYLE} formatter={(value: number) => [value, 'Count']} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                {buckets.map((_entry, index) => (
-                  <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        {showStats && (
-          <div className="flex gap-4 justify-center mt-4 mb-3 text-sm">
-            {mean !== undefined && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-gray-600 font-medium">Mean: <span className="font-bold text-black">{mean.toFixed(config.decimal_places ?? 1)}</span></span>
-              </div>
-            )}
-            {median !== undefined && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-purple-500" />
-                <span className="text-gray-600 font-medium">Median: <span className="font-bold text-black">{median.toFixed(config.decimal_places ?? 1)}</span></span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderTableWidget = () => {
-    const data = displayData || [];
-    if (data.length === 0) return null;
-
-    // Helper: Get nested value using dot-notation path (e.g., "careerIntent.intents")
-    const getNestedValue = (obj: any, path: string): any => {
-      // First try direct access (for simple keys)
-      if (path in obj) return obj[path];
-      
-      // Then try dot-notation path traversal
-      const parts = path.split('.');
-      let value = obj;
-      for (const part of parts) {
-        if (value == null) return undefined;
-        value = value[part];
-      }
-      return value;
-    };
-
-    const columns = widget.table_config?.columns;
-    const columnKeys = columns
-      ? columns.map((c) => c.key)
-      : Object.keys(data[0]).slice(0, 10);
-
-    const columnLabels = columns
-      ? columns.reduce((acc, c) => ({ ...acc, [c.key]: c.label }), {} as Record<string, string>)
-      : columnKeys.reduce((acc, k) => ({ ...acc, [k]: k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }), {} as Record<string, string>);
-
-    const pageSize = widget.table_config?.page_size || 25;
-    
-    // Apply sorting if configured
-    let sortedData = [...data];
-    if (sortConfig) {
-      sortedData.sort((a, b) => {
-        const aVal = getNestedValue(a, sortConfig.key);
-        const bVal = getNestedValue(b, sortConfig.key);
-        
-        // Handle null/undefined
-        if (aVal == null && bVal == null) return 0;
-        if (aVal == null) return sortConfig.direction === 'asc' ? 1 : -1;
-        if (bVal == null) return sortConfig.direction === 'asc' ? -1 : 1;
-        
-        // Compare values
-        let comparison = 0;
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          comparison = aVal - bVal;
-        } else if (typeof aVal === 'string' && typeof bVal === 'string') {
-          comparison = aVal.localeCompare(bVal);
-        } else {
-          comparison = String(aVal).localeCompare(String(bVal));
-        }
-        
-        return sortConfig.direction === 'asc' ? comparison : -comparison;
-      });
-    }
-
-    const totalPages = Math.ceil(sortedData.length / pageSize);
-    // For cursor-based pagination the backend delivers exactly one page; for in-memory, slice by localPage
-    const isCursorWidget = !!widget.table_config?.cursor_field;
-    const effectivePage = isCursorWidget ? 1 : Math.min(localPage, Math.max(1, totalPages));
-    const displayRows = sortedData.slice((effectivePage - 1) * pageSize, effectivePage * pageSize);
-    
-    // Handle sort toggle
-    const handleSort = (columnKey: string) => {
-      setLocalPage(1); // Reset to first page on sort
-      setSortConfig((current) => {
-        if (current?.key === columnKey) {
-          // Toggle direction or clear
-          if (current.direction === 'asc') {
-            return { key: columnKey, direction: 'desc' };
-          } else {
-            return null; // Clear sorting
-          }
-        } else {
-          // New column, start with ascending
-          return { key: columnKey, direction: 'asc' };
-        }
-      });
-    };
-    
-    // Get sort icon for column
-    const getSortIcon = (columnKey: string) => {
-      if (sortConfig?.key === columnKey) {
-        // Active column - black icon with direction indicator
-        return (
-          <div className="flex items-center gap-1">
-            {sortConfig.direction === 'asc' ? (
-              <ArrowUp className="w-4 h-4 text-black" />
-            ) : (
-              <ArrowDown className="w-4 h-4 text-black" />
-            )}
-            <span className="text-[10px] font-semibold text-black uppercase">
-              {sortConfig.direction === 'asc' ? 'Asc' : 'Desc'}
-            </span>
-          </div>
-        );
-      } else {
-        // Inactive column - gray icon
-        return <ArrowUpDown className="w-4 h-4 text-gray-400" />;
-      }
-    };
-    
-    // Get sort tooltip
-    const getSortTooltip = (columnKey: string) => {
-      if (sortConfig?.key === columnKey) {
-        return sortConfig.direction === 'asc' 
-          ? 'Sort descending' 
-          : 'Clear sorting';
-      } else {
-        return 'Sort ascending';
-      }
-    };
-
-    // Detect date columns - use getNestedValue to handle dot paths
-    const dateColumnSet = new Set<string>();
-    for (const key of columnKeys) {
-      if (data.some((row) => isDateString(getNestedValue(row, key)))) dateColumnSet.add(key);
-    }
-
-    // Dynamic min-width per column based on column count
-    const colWidth = columnKeys.length <= 3 ? 'min-w-[180px]' : columnKeys.length <= 5 ? 'min-w-[140px]' : 'min-w-[120px]';
-
-    const renderCellContent = (value: unknown, column: string, rowIndex: number) => {
-      const cellId = `${rowIndex}-${column}`;
-      const isExpanded = expandedCells[cellId];
-
-      // Handle null/undefined
-      if (value === null || value === undefined) {
-        return <span className="text-gray-400">—</span>;
-      }
-
-      // Handle dates
-      if (dateColumnSet.has(column) && typeof value === 'string') {
-        return <span>{formatDateValue(value, dateFormats[column] ?? true)}</span>;
-      }
-
-      // Handle arrays
-      if (Array.isArray(value)) {
-        if (value.length === 0) {
-          return <span className="text-gray-400 text-sm">Empty list</span>;
-        }
-        
-        return (
-          <div className="flex flex-col gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
-              className="text-left text-sm text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
-            >
-              {isExpanded ? '▼' : '▶'} List ({value.length} {value.length === 1 ? 'item' : 'items'})
-            </button>
-            {isExpanded && (
-              <div className="pl-4 space-y-1 text-sm">
-                {value.map((item, idx) => (
-                  <div key={idx} className="py-1 border-l-2 border-gray-200 pl-2">
-                    {typeof item === 'object' && item !== null ? (
-                      <div className="text-base text-gray-700 bg-gray-100 p-3 rounded space-y-0.5">
-                        {Object.entries(item).map(([key, val]) => (
-                          <div key={key} className="flex gap-2">
-                            <span className="font-semibold text-gray-600">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
-                            <span className="text-gray-800">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span>{String(item)}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      // Handle objects
-      if (typeof value === 'object') {
-        const keys = Object.keys(value as object);
-        if (keys.length === 0) {
-          return <span className="text-gray-400 text-sm">Empty object</span>;
+            );
         }
 
-        return (
-          <div className="flex flex-col gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
-              className="text-left text-sm text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
-            >
-              {isExpanded ? '▼' : '▶'} Object ({keys.length} {keys.length === 1 ? 'property' : 'properties'})
-            </button>
-            {isExpanded && (
-              <div className="text-sm text-gray-700 bg-gray-100 p-2 rounded space-y-0.5">
-                {Object.entries(value as object).map(([key, val]) => (
-                  <div key={key} className="flex gap-2">
-                    <span className="font-semibold text-gray-600">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
-                    <span className="text-gray-800">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      // Handle strings (with long text support)
-      if (typeof value === 'string') {
-        if (value.length > 56) {
-          return (
-            <div className={isExpanded ? 'whitespace-normal break-words' : ''}>
-              <span>{isExpanded ? value : value.slice(0, 56) + '...'}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); setExpandedCells((prev) => ({ ...prev, [cellId]: !prev[cellId] })); }}
-                className="ml-1 text-sm text-green-600 hover:text-green-800 font-medium"
-              >
-                {isExpanded ? 'Less' : 'Read more'}
-              </button>
-            </div>
-          );
+        // Has data — delegate to the appropriate widget component
+        const widgetType: WidgetType = widget.widget_type;
+        switch (widgetType) {
+            case 'stat':
+                return <StatWidget widget={widget} data={displayData} />;
+            case 'line':
+                return <LineChartWidget chartData={chartData} numericKeys={numericKeys} categoryKey={categoryKey} />;
+            case 'bar':
+                return <BarChartWidget chartData={chartData} numericKeys={numericKeys} categoryKey={categoryKey} />;
+            case 'area':
+                return <AreaChartWidget chartData={chartData} numericKeys={numericKeys} categoryKey={categoryKey} />;
+            case 'pie':
+                return <PieChartWidget data={displayData} />;
+            case 'table':
+                return <TableWidget widget={widget} data={displayData} onNextPage={onNextPage} onPreviousPage={onPreviousPage} />;
+            case 'gauge':
+                return <GaugeWidget widget={widget} data={displayData} />;
+            case 'bar_gauge':
+                return <BarGaugeWidget widget={widget} data={displayData} />;
+            case 'heatmap':
+                return <HeatmapWidget widget={widget} data={displayData} />;
+            case 'histogram':
+                return <HistogramWidget widget={widget} data={displayData} />;
+            default:
+                return <BarChartWidget chartData={chartData} numericKeys={numericKeys} categoryKey={categoryKey} />;
         }
-        return <span>{value}</span>;
-      }
-
-      // Handle numbers and booleans
-      return <span>{String(value)}</span>;
     };
 
     return (
-      <div className="overflow-auto max-h-[420px]">
-        <table className="w-full text-base leading-relaxed border-collapse min-w-max">
-          <thead className="sticky top-0 z-10 bg-white">
-            <tr className="border-b-2 border-black/10">
-              {columnKeys.map((key) => (
-                <th key={key} className={`text-left py-2.5 px-3 font-bold text-black whitespace-nowrap ${colWidth}`}>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1">
-                      <span>{columnLabels[key] || key}</span>
-                      {dateColumnSet.has(key) && (
-                        <button
-                          onClick={(ev) => { ev.stopPropagation(); setDateFormats((prev) => ({ ...prev, [key]: !prev[key] })); }}
-                          className="inline-flex text-[10px] px-1.5 py-0.5 ml-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-600 font-medium transition-colors focus:outline-none"
-                          title="Toggle date format"
-                        >
-                          {dateFormats[key] !== false ? 'ISO' : 'Human'}
-                        </button>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <button
-                        onClick={(ev) => { ev.stopPropagation(); handleSort(key); }}
-                        onMouseEnter={() => setHoveredSortColumn(key)}
-                        onMouseLeave={() => setHoveredSortColumn(null)}
-                        className="p-0.5 hover:bg-gray-100 rounded transition-colors focus:outline-none"
-                      >
-                        {getSortIcon(key)}
-                      </button>
-                      {hoveredSortColumn === key && (
-                        <div className="absolute z-[100] top-full mt-1 left-1/2 -translate-x-1/2 whitespace-nowrap bg-black text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none">
-                          {getSortTooltip(key)}
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-black" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {displayRows.map((row, i) => (
-              <tr key={i} className="border-b border-gray-100 hover:bg-[#FFDB58]/20 transition-colors">
-                {columnKeys.map((key) => {
-                  const value = getNestedValue(row, key);
-                  const cellId = `${i}-${key}`;
-                  const isExpanded = expandedCells[cellId];
-                  // Only show title tooltip for simple text values, not for objects/arrays
-                  const showTitle = !isExpanded && value !== null && value !== undefined && 
-                                   typeof value !== 'object' && typeof value === 'string' && value.length > 56;
-                  
-                  return (
-                    <td 
-                      key={key} 
-                      className={`py-2.5 px-3 pr-6 text-gray-700 max-w-[540px] ${isExpanded ? 'whitespace-normal' : 'whitespace-nowrap truncate'} ${colWidth}`}
-                      title={showTitle ? String(value) : undefined}
-                    >
-                      {renderCellContent(value, key, i)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        {/* Pagination UI */}
-        {(isCursorWidget ? (widget.current_page && widget.current_page > 1) || widget.has_more || (widget.cursor_stack?.length ?? 0) > 0 : totalPages > 1) && (
-          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-2 py-2">
-            <div className="flex items-center justify-between text-sm">
-              <div className="text-gray-500">
-                {isCursorWidget ? (
-                  widget.current_page ? (
-                    <span>Page <span className='text-gray-700'>{widget.current_page}</span>, <span>Showing <span className='text-gray-700'>{Math.min(pageSize, data.length)} rows</span></span></span>
-                  ) : (
-                    <span>Showing <span className='text-gray-700'>{Math.min(pageSize, data.length)} rows</span></span>
-                  )
-                ) : (
-                  <span>Page <span className='text-gray-700'>{effectivePage}</span> of <span className='text-gray-700'>{totalPages}</span></span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => isCursorWidget ? onPreviousPage?.() : setLocalPage(p => Math.max(1, p - 1))}
-                  disabled={isCursorWidget ? (widget.cursor_stack?.length ?? 0) <= 1 || widget.is_loading : effectivePage <= 1 || widget.is_loading}
-                  className="
-                    flex items-center gap-1 px-3 py-1.5 rounded-lg
-                    text-sm font-medium
-                    transition-colors
-                    disabled:opacity-40 disabled:cursor-not-allowed
-                    enabled:hover:bg-gray-200 enabled:text-black
-                    text-gray-600
-                  "
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  Previous
-                </button>
-
-                <button
-                  onClick={() => isCursorWidget ? onNextPage?.() : setLocalPage(p => Math.min(totalPages, p + 1))}
-                  disabled={isCursorWidget ? !widget.has_more || widget.is_loading : effectivePage >= totalPages || widget.is_loading}
-                  className="
-                    flex items-center gap-1 px-3 py-1.5 rounded-lg
-                    text-sm font-medium
-                    transition-colors
-                    disabled:opacity-40 disabled:cursor-not-allowed
-                    enabled:hover:bg-gray-200 enabled:text-black
-                    text-gray-600
-                  "
-                >
-                  Next
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <>
-      <style>{GRAFANA_LOADING_STYLE}</style>
-      <div
-        className={`
+        <>
+            <style>{GRAFANA_LOADING_STYLE}</style>
+            <div
+                className={`
           bg-white border-2 border-black rounded-xl
           shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]
           overflow-hidden relative
@@ -1188,217 +180,160 @@ export default function DashboardWidgetCard({
           outline-none
           ${widget.is_loading ? 'opacity-90' : ''}
         `}
-        tabIndex={-1}
-      >
-        {/* Widget Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-gray-500 flex-shrink-0">
-              {WIDGET_TYPE_ICONS[widget.widget_type]}
-            </span>
-            <h3 className="text-base font-bold text-black truncate">{widget.title}</h3>
-            {widget.description && (
-              <div className="relative flex-shrink-0">
-                <button
-                  onMouseEnter={() => setShowInfo(true)}
-                  onMouseLeave={() => setShowInfo(false)}
-                  className="p-0.5 text-gray-500 hover:text-gray-700 transition-colors"
-                >
-                  <Info className="w-4 h-4 mt-0.5 -ml-0.5" />
-                </button>
-                {showInfo && (
-                  <div className="fixed z-[200] w-56 bg-black text-white text-sm rounded-lg px-3 py-2 shadow-lg leading-relaxed pointer-events-none"
-                    style={{
-                      // Position relative to viewport, above the button
-                      top: 'auto',
-                      left: 'auto',
-                    }}
-                    ref={(el) => {
-                      if (el) {
-                        const parent = el.parentElement?.querySelector('button');
-                        if (parent) {
-                          const rect = parent.getBoundingClientRect();
-                          el.style.top = `${rect.top - el.offsetHeight - 8}px`;
-                          el.style.left = `${rect.left + rect.width / 2 - el.offsetWidth / 2}px`;
-                        }
-                      }
-                    }}
-                  >
-                    {widget.description}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-black" />
-                  </div>
+                tabIndex={-1}
+            >
+                {/* Widget Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-gray-500 flex-shrink-0">
+                            {WIDGET_TYPE_ICONS[widget.widget_type]}
+                        </span>
+                        <h3 className="text-base font-bold text-black truncate">{widget.title}</h3>
+                        {widget.description && (
+                            <div className="relative flex-shrink-0">
+                                <button
+                                    onMouseEnter={() => setShowInfo(true)}
+                                    onMouseLeave={() => setShowInfo(false)}
+                                    className="p-0.5 text-gray-500 hover:text-gray-700 transition-colors"
+                                >
+                                    <Info className="w-4 h-4 mt-0.5 -ml-0.5" />
+                                </button>
+                                {showInfo && (
+                                    <div
+                                        className="fixed z-[200] w-56 bg-black text-white text-sm rounded-lg px-3 py-2 shadow-lg leading-relaxed pointer-events-none"
+                                        style={{ top: 'auto', left: 'auto' }}
+                                        ref={(el) => {
+                                            if (el) {
+                                                const parent = el.parentElement?.querySelector('button');
+                                                if (parent) {
+                                                    const rect = parent.getBoundingClientRect();
+                                                    el.style.top = `${rect.top - el.offsetHeight - 8}px`;
+                                                    el.style.left = `${rect.left + rect.width / 2 - el.offsetWidth / 2}px`;
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        {widget.description}
+                                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-black" />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                        {onRefresh && !widget.is_loading && (
+                            <button
+                                onClick={onRefresh}
+                                className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
+                                title="Refresh widget data"
+                            >
+                                <RefreshCcw className="w-4 h-4 text-gray-500" />
+                            </button>
+                        )}
+                        {widget.is_loading && onCancelRefresh && (
+                            <button
+                                onClick={onCancelRefresh}
+                                className="p-2 rounded-lg hover:bg-red-100 transition-colors"
+                                title="Cancel loading"
+                            >
+                                <X className="w-4 h-4 text-red-500" />
+                            </button>
+                        )}
+                        {widget.is_loading && !onCancelRefresh && onRefresh && (
+                            <button
+                                disabled
+                                className="p-2 rounded-lg opacity-50 cursor-not-allowed hover:bg-gray-200 transition-colors"
+                                title="Loading..."
+                            >
+                                <RefreshCcw className="w-4 h-4 text-gray-500 animate-spin" />
+                            </button>
+                        )}
+                        <button
+                            onClick={handleToggleMenu}
+                            className="widget-menu-btn p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+                        >
+                            <MoreHorizontal className="w-5 h-5 text-gray-500" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Widget Content */}
+                <div className={`px-4 py-3 ${widget.widget_type === 'table' ? 'px-0 py-0' : ''}`}>
+                    {renderWidgetContent()}
+                    {/* Error overlay on top of stale data */}
+                    {widget.error && displayData && displayData.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border-t border-red-200 text-sm text-red-500">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">{widget.error}</span>
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer: Last refreshed */}
+                {widget.last_refreshed_at && (
+                    <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-1.5">
+                        <span className="text-xs text-gray-400">
+                            Last refreshed:{' '}
+                            <span className="text-gray-600">{formatRelativeTime(widget.last_refreshed_at)}</span>
+                        </span>
+                    </div>
                 )}
-              </div>
-            )}
-          </div>
 
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {onRefresh && !widget.is_loading && (
-              <button
-                onClick={onRefresh}
-                className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
-                title="Refresh widget data"
-              >
-                <RefreshCcw className="w-4 h-4 text-gray-500" />
-              </button>
-            )}
-            {widget.is_loading && onCancelRefresh && (
-              <button
-                onClick={onCancelRefresh}
-                className="p-2 rounded-lg hover:bg-red-100 transition-colors"
-                title="Cancel loading"
-              >
-                <X className="w-4 h-4 text-red-500" />
-              </button>
-            )}
-            {widget.is_loading && !onCancelRefresh && onRefresh && (
-              <button
-                disabled
-                className="p-2 rounded-lg opacity-50 cursor-not-allowed hover:bg-gray-200 transition-colors"
-                title="Loading..."
-              >
-                <RefreshCcw className="w-4 h-4 text-gray-500 animate-spin" />
-              </button>
-            )}
-            <button
-              onClick={handleToggleMenu}
-              className="widget-menu-btn p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              <MoreHorizontal className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
-        </div>
-
-        {/* Widget Content */}
-        <div className={`px-4 py-3 ${widget.widget_type === 'table' ? 'px-0 py-0' : ''}`}>
-          {renderWidgetContent()}
-          {/* Error overlay on top of stale data */}
-          {widget.error && displayData && displayData.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border-t border-red-200 text-sm text-red-500">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">{widget.error}</span>
+                {/* Loading bar at BOTTOM of card */}
+                {widget.is_loading && (
+                    <div className="absolute bottom-0 left-0 right-0 h-[4px] overflow-hidden z-10">
+                        <div
+                            className="h-full w-2/3 bg-gradient-to-r from-transparent via-emerald-500 to-emerald-200"
+                            style={{ animation: 'grafana-loading-bar 2s ease-in-out infinite' }}
+                        />
+                    </div>
+                )}
             </div>
-          )}
-        </div>
 
-        {/* Footer: Last refreshed */}
-        {widget.last_refreshed_at && (
-          <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-1.5">
-            <span className="text-xs text-gray-400">
-              Last refreshed: <span className="text-gray-600">{formatRelativeTime(widget.last_refreshed_at)}</span>
-            </span>
-          </div>
-        )}
-
-        {/* Loading bar at BOTTOM of card */}
-        {widget.is_loading && (
-          <div className="absolute bottom-0 left-0 right-0 h-[4px] overflow-hidden z-10">
-            <div
-              className="h-full w-2/3 bg-gradient-to-r from-transparent via-emerald-500 to-emerald-200"
-              style={{ animation: 'grafana-loading-bar 2s ease-in-out infinite' }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Widget menu dropdown — fixed positioned, matching ChatHeader style */}
-      {showMenu && menuPosition && (
-        <div
-          className="widget-menu-dropdown fixed w-52 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100]"
-          style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="py-1">
-            {onEdit && (
-              <>
-                <button
-                  onClick={() => {
-                    setShowMenu(false);
-                    setMenuPosition(null);
-                    onEdit();
-                  }}
-                  className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
+            {/* Widget menu dropdown — fixed positioned */}
+            {showMenu && menuPosition && (
+                <div
+                    className="widget-menu-dropdown fixed w-52 bg-white border-4 border-black rounded-lg shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] z-[100]"
+                    style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
+                    onClick={(e) => e.stopPropagation()}
                 >
-                  <Pencil className="w-4 h-4 mr-2 text-black" />
-                  Edit Widget
-                </button>
-                <div className="h-px bg-gray-200 mx-2" />
-              </>
+                    <div className="py-1">
+                        {onEdit && (
+                            <>
+                                <button
+                                    onClick={() => { setShowMenu(false); setMenuPosition(null); onEdit(); }}
+                                    className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 transition-colors"
+                                >
+                                    <Pencil className="w-4 h-4 mr-2 text-black" />
+                                    Edit Widget
+                                </button>
+                                <div className="h-px bg-gray-200 mx-2" />
+                            </>
+                        )}
+                        <button
+                            onClick={() => { setShowMenu(false); setMenuPosition(null); setShowDeleteConfirm(true); }}
+                            className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
+                        >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Remove Widget
+                        </button>
+                    </div>
+                </div>
             )}
-            <button
-              onClick={() => {
-                setShowMenu(false);
-                setMenuPosition(null);
-                setShowDeleteConfirm(true);
-              }}
-              className="flex items-center w-full text-left px-4 py-2 text-sm font-semibold text-red-500 hover:bg-neo-error hover:text-white transition-colors"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Remove Widget
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Delete Confirmation Modal — uses ConfirmationModal */}
-      {showDeleteConfirm && (
-        <ConfirmationModal
-          icon={<Trash2 className="w-6 h-6 text-neo-error" />}
-          title="Remove Widget"
-          message={`Are you sure you want to remove "${widget.title}"? This action cannot be undone.`}
-          buttonText="Remove"
-          onConfirm={async () => {
-            setShowDeleteConfirm(false);
-            onDelete();
-          }}
-          onCancel={() => setShowDeleteConfirm(false)}
-          zIndex="z-[120]"
-        />
-      )}
-    </>
-  );
-}
-
-// Helper: format stat values
-function formatStatValue(
-  value: number,
-  format?: string,
-  prefix?: string,
-  suffix?: string,
-  decimalPlaces?: number
-): string {
-  const dp = decimalPlaces ?? 0;
-  let formatted: string;
-
-  switch (format) {
-    case 'currency':
-      formatted = value.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
-      return `${prefix || '$'}${formatted}${suffix || ''}`;
-    case 'percentage':
-      formatted = value.toFixed(dp);
-      return `${prefix || ''}${formatted}%${suffix || ''}`;
-    case 'duration':
-      if (value >= 3600) return `${(value / 3600).toFixed(1)}h`;
-      if (value >= 60) return `${(value / 60).toFixed(1)}m`;
-      return `${value.toFixed(0)}s`;
-    default:
-      // Smart number formatting
-      if (value >= 1_000_000) formatted = `${(value / 1_000_000).toFixed(1)}M`;
-      else if (value >= 1_000) formatted = `${(value / 1_000).toFixed(1)}K`;
-      else formatted = value.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
-      return `${prefix || ''}${formatted}${suffix || ''}`;
-  }
-}
-
-// Helper: relative time
-function formatRelativeTime(dateString: string): string {
-  const now = Date.now();
-  const then = new Date(dateString).getTime();
-  const diff = Math.floor((now - then) / 1000);
-
-  if (diff < 10) return 'Just now';
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+            {/* Delete Confirmation Modal */}
+            {showDeleteConfirm && (
+                <ConfirmationModal
+                    icon={<Trash2 className="w-6 h-6 text-neo-error" />}
+                    title="Remove Widget"
+                    message={`Are you sure you want to remove "${widget.title}"? This action cannot be undone.`}
+                    buttonText="Remove"
+                    onConfirm={async () => { setShowDeleteConfirm(false); onDelete(); }}
+                    onCancel={() => setShowDeleteConfirm(false)}
+                    zIndex="z-[120]"
+                />
+            )}
+        </>
+    );
 }
