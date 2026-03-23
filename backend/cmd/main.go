@@ -7,6 +7,7 @@ import (
 	"neobase-ai/config"
 	"neobase-ai/internal/apis/routes"
 	"neobase-ai/internal/di"
+	"neobase-ai/internal/logger"
 	"neobase-ai/internal/middleware"
 	"net/http"
 	"os"
@@ -24,6 +25,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load environment variables: %v", err)
 	}
+
+	// Initialize centralized logging (go-logcastle)
+	if err := logger.InitLogger(); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.CloseLogger()
 
 	// Initialize dependencies
 	di.Initialize()
