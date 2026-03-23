@@ -6,7 +6,6 @@ import {
   Trash2, 
   Download, 
   Copy, 
-  RefreshCw,
   ChevronLeft,
   ChevronRight as ChevronRightIcon,
   ChevronsLeft,
@@ -14,9 +13,9 @@ import {
   AlertCircle
 } from 'lucide-react';
 import ConfirmationModal from '../../modals/ConfirmationModal';
-import Tooltip from '../../ui/Tooltip';
 import toast from 'react-hot-toast';
 import chatService from '../../../services/chatService';
+import uploadService from '../../../services/uploadService';
 
 interface DataStructureTabProps {
   chatId: string;
@@ -25,7 +24,6 @@ interface DataStructureTabProps {
   onDownloadData?: (tableName: string) => void;
   onRefreshData?: () => void;
 }
-
 
 interface TableData {
   name: string;
@@ -49,8 +47,6 @@ export default function DataStructureTab({
   chatId,
   isLoadingData = false,
   onDeleteTable,
-  onDownloadData,
-  onRefreshData
 }: DataStructureTabProps) {
   const [tables, setTables] = useState<TableData[]>([]);
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
@@ -77,7 +73,6 @@ export default function DataStructureTab({
     setLoading(true);
     setError(null);
     try {
-      console.log('DataStructureTab: About to call chatService.getTables for chatId:', chatId);
       const tablesResponse = await chatService.getTables(chatId);
       
       if (tablesResponse.tables && tablesResponse.tables.length > 0) {
@@ -148,33 +143,21 @@ export default function DataStructureTab({
     setLoadingPreview(prev => ({ ...prev, [tableName]: true }));
     
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}?page=${page}&pageSize=${pageSize}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+      const responseData = await uploadService.getTablePreviewData(chatId, tableName, page, pageSize);
+      setTables(prev => prev.map(table => 
+        table.name === tableName 
+          ? { ...table, previewData: responseData.rows || [] }
+          : table
+      ));
+      // Update pagination total if provided
+      if (responseData.total_rows !== undefined) {
+        setPagination(prev => ({
+          ...prev,
+          [tableName]: {
+            ...prev[tableName],
+            totalRows: responseData.total_rows
           }
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        // Handle both wrapped and unwrapped responses
-        const responseData = data.data || data;
-        setTables(prev => prev.map(table => 
-          table.name === tableName 
-            ? { ...table, previewData: responseData.rows || [] }
-            : table
-        ));
-        // Update pagination total if provided
-        if (responseData.total_rows !== undefined) {
-          setPagination(prev => ({
-            ...prev,
-            [tableName]: {
-              ...prev[tableName],
-              totalRows: responseData.total_rows
-            }
-          }));
-        }
+        }));
       }
     } catch (error) {
       console.error('Failed to load preview data:', error);
@@ -373,39 +356,20 @@ export default function DataStructureTab({
           document.body.removeChild(a);
         } else {
           // For full table downloads (CSV or XLSX) or selected XLSX, use server endpoint
-          let url = `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${downloadMenu.tableName}/download?format=${format}`;
-          
-          // Add selected row IDs to the URL if downloading selected rows
+          let rowIds: string[] | undefined;
           if (isSelectedDownload && format === 'xlsx') {
             if (table.previewData && table.previewData.length > 0) {
               const selectedRowIds = table.previewData
                 .filter((_, index) => selectedRowIndices.has(index))
                 .map(row => row._id || '')
                 .filter(id => id !== '');
-              
               if (selectedRowIds.length > 0) {
-                url += `&rowIds=${selectedRowIds.join(',')}`;
+                rowIds = selectedRowIds;
               }
             }
           }
-          
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`,
-              'Accept': format === 'xlsx' 
-                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                : 'text/csv'
-            }
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Download failed:', errorText);
-            throw new Error('Download failed');
-          }
 
-          const blob = await response.blob();
+          const blob = await uploadService.downloadTableData(chatId, downloadMenu.tableName, format, rowIds);
           const blobUrl = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = blobUrl;
@@ -466,17 +430,9 @@ export default function DataStructureTab({
     });
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}/rows/${rowId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }
-      );
+      const ok = await uploadService.deleteTableRow(chatId, tableName, rowId);
 
-      if (response.ok) {
+      if (ok) {
         toast.dismiss(loadingToast);
         toast.success('Row deleted successfully', {
           duration: 2000,
@@ -561,17 +517,8 @@ export default function DataStructureTab({
         // Delete each row
         for (const rowId of rowsToDelete) {
           try {
-            const response = await fetch(
-              `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}/rows/${rowId}`,
-              {
-                method: 'DELETE',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-              }
-            );
-            
-            if (response.ok) {
+            const ok = await uploadService.deleteTableRow(chatId, tableName, rowId);
+            if (ok) {
               successCount++;
             } else {
               errorCount++;
@@ -625,16 +572,8 @@ export default function DataStructureTab({
         await loadTablePreviewData(tableName, currentPagination.page, currentPagination.pageSize);
       } else {
         // Delete entire table
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/upload/${chatId}/tables/${tableName}`,
-          {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
-          }
-        );
-        if (response.ok) {
+        const ok = await uploadService.deleteTable(chatId, tableName);
+        if (ok) {
           setTables(prev => prev.filter(t => t.name !== tableName));
           onDeleteTable?.(tableName);
         }
