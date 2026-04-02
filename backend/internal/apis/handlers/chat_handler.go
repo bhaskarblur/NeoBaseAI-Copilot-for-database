@@ -966,7 +966,9 @@ func (h *ChatHandler) GetQueryResults(c *gin.Context) {
 		return
 	}
 
-	response, status, err := h.chatService.GetQueryResults(c.Request.Context(), userID, chatID, req.MessageID, req.QueryID, req.StreamID, req.Offset)
+	// Support both cursor and offset for backward compatibility
+	// Cursor takes precedence if both are provided
+	response, status, err := h.chatService.GetQueryResults(c.Request.Context(), userID, chatID, req.MessageID, req.QueryID, req.StreamID, req.Offset, req.Cursor)
 	if err != nil {
 		c.JSON(int(status), dtos.Response{
 			Success: false,

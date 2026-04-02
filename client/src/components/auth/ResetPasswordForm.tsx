@@ -1,6 +1,7 @@
 import { AlertCircle, Boxes, Mail, KeyRound, Loader } from 'lucide-react';
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
+import authService from '../../services/authService';
 
 interface ResetPasswordFormProps {
     initialEmail: string;
@@ -76,27 +77,10 @@ export default function ResetPasswordForm({ initialEmail, onSwitchToLogin, onPas
 
         setIsLoading(true);
         try {
-            const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/reset-password`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    email: formData.email,
-                    otp: formData.otp,
-                    new_password: formData.newPassword
-                }),
-            });
-
-            const data = await response.json();
-
-            if (data.success) { 
-                onPasswordResetSuccess();
-            } else {
-                setFormError(data.error || 'Failed to reset password');
-            }
+            await authService.resetPassword(formData.email, formData.otp, formData.newPassword);
+            onPasswordResetSuccess();
         } catch (error: any) {
-            setFormError('Network error. Please try again.');
+            setFormError(error.message || 'Failed to reset password');
         } finally {
             setIsLoading(false);
         }

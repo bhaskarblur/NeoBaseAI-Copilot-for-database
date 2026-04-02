@@ -3,19 +3,20 @@ package constants
 import "github.com/google/generative-ai-go/genai"
 
 var GeminiLLMModels = []LLMModel{
+	// Gemini 3 Series (Latest & Most Powerful)
 	{
-		ID:                  "gemini-3.1-pro-preview",
+		ID:                  "gemini-3-pro",
 		Provider:            Gemini,
-		DisplayName:         "Gemini 3.1 Pro (Most Intelligent)",
+		DisplayName:         "Gemini 3 Pro (Most Intelligent)",
 		IsEnabled:           true,
 		APIVersion:          "v1beta",
 		MaxCompletionTokens: 65536,
 		Temperature:         1,
 		InputTokenLimit:     1048576,
-		Description:         "Refined Gemini 3 Pro with better thinking, improved token efficiency, and factual consistency. Optimized for coding and agentic workflows",
+		Description:         "Most intelligent Gemini model with breakthrough reasoning capabilities. Best for complex coding, analysis, and agentic workflows",
 	},
 	{
-		ID:                  "gemini-3-flash-preview",
+		ID:                  "gemini-3-flash",
 		Provider:            Gemini,
 		DisplayName:         "Gemini 3 Flash (Frontier Speed)",
 		IsEnabled:           true,
@@ -23,7 +24,29 @@ var GeminiLLMModels = []LLMModel{
 		MaxCompletionTokens: 65536,
 		Temperature:         1,
 		InputTokenLimit:     1048576,
-		Description:         "Best model in the world for multimodal understanding with state-of-the-art reasoning and agentic capabilities",
+		Description:         "Fastest Gemini 3 model with exceptional multimodal understanding. Best for high-throughput tasks requiring speed and intelligence",
+	},
+	{
+		ID:                  "gemini-3.1-pro-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3.1 Pro Preview (Experimental)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 65536,
+		Temperature:         1,
+		InputTokenLimit:     1048576,
+		Description:         "Experimental preview of Gemini 3.1 with improved thinking and token efficiency. Early access to next-generation features",
+	},
+	{
+		ID:                  "gemini-3-flash-preview",
+		Provider:            Gemini,
+		DisplayName:         "Gemini 3 Flash Preview (Experimental)",
+		IsEnabled:           true,
+		APIVersion:          "v1beta",
+		MaxCompletionTokens: 65536,
+		Temperature:         1,
+		InputTokenLimit:     1048576,
+		Description:         "Preview version of Gemini 3 Flash with latest experimental features and performance optimizations",
 	},
 	// Gemini 2.5 Series (Advanced)
 	{
@@ -114,7 +137,16 @@ var GeminiLLMResponseSchema = &genai.Schema{
 						Required: []string{"paginatedQuery", "countQuery"},
 						Properties: map[string]*genai.Schema{
 							"paginatedQuery": &genai.Schema{
-								Type: genai.TypeString,
+								Type:        genai.TypeString,
+								Description: "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}} or offset_size. CURSOR-BASED (preferred for SELECT/find on large data): use '{{cursor_value}}' placeholder. cursor_field MUST appear in SELECT/projection. SQL: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB find: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). OFFSET-BASED (for aggregations without a natural cursor): use 'offset_size' as placeholder. SQL: OFFSET offset_size LIMIT 50. MongoDB find: .skip(offset_size).limit(50). MongoDB aggregate: db.col.aggregate([..., {$skip: offset_size}, {$limit: 50}]). IMPORTANT: use 'offset_size' NOT '{{cursor_value}}' for $skip/$offset pagination. Set cursor_field empty for offset. EMPTY STRING when user requests < 50 records. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset/skip condition.",
+							},
+							"cursor_field": &genai.Schema{
+								Type:        genai.TypeString,
+								Description: "Field/column used as the pagination cursor (e.g. 'id', 'created_at', 'createdAt'). Must be present in SELECT/projection result. Leave EMPTY STRING for offset-based pagination.",
+							},
+							"page_size": &genai.Schema{
+								Type:        genai.TypeNumber,
+								Description: "Number of records per page. Use 50.",
 							},
 							"countQuery": &genai.Schema{
 								Type:        genai.TypeString,
@@ -149,7 +181,7 @@ var GeminiLLMResponseSchema = &genai.Schema{
 		},
 		"actionButtons": &genai.Schema{
 			Type:        genai.TypeArray,
-			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected.",
+			Description: "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected. NEVER generate action buttons for pagination (e.g., Show next N records, Load more, Next page) — pagination is handled automatically by the system.",
 			Items: &genai.Schema{
 				Type:     genai.TypeObject,
 				Enum:     []string{},

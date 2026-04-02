@@ -41,9 +41,10 @@ type Widget struct {
 	WidgetType  string             `bson:"widget_type" json:"widget_type"` // "stat", "line", "bar", "area", "pie", "table", "combo", "gauge", "bar_gauge", "heatmap", "histogram"
 
 	// Query Configuration
-	Query     string `bson:"query" json:"query"`                               // The SQL/MongoDB query to execute
-	QueryType string `bson:"query_type,omitempty" json:"query_type,omitempty"` // "SELECT", "AGGREGATE", etc.
-	Tables    string `bson:"tables,omitempty" json:"tables,omitempty"`         // Comma-separated table names referenced
+	Query          string `bson:"query" json:"query"`                                         // The SQL/MongoDB query for first page (no cursor placeholder)
+	PaginatedQuery string `bson:"paginated_query,omitempty" json:"paginated_query,omitempty"` // Query for subsequent pages with {{cursor_value}} placeholder
+	QueryType      string `bson:"query_type,omitempty" json:"query_type,omitempty"`           // "SELECT", "AGGREGATE", etc.
+	Tables         string `bson:"tables,omitempty" json:"tables,omitempty"`                   // Comma-separated table names referenced
 
 	// Visualization Configuration (reuses existing ChartConfiguration structure)
 	ChartConfigJSON string `bson:"chart_config_json,omitempty" json:"chart_config_json,omitempty"` // Full chart config as JSON string
@@ -82,6 +83,10 @@ type TableWidgetConfig struct {
 	SortBy        string              `bson:"sort_by,omitempty" json:"sort_by,omitempty"`
 	SortDirection string              `bson:"sort_direction,omitempty" json:"sort_direction,omitempty"` // "asc", "desc"
 	PageSize      int                 `bson:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// Cursor-based pagination fields (more efficient for large datasets)
+	CursorField     *string `bson:"cursor_field,omitempty" json:"cursor_field,omitempty"`         // Field used for cursor (e.g., "id", "created_at")
+	CursorDirection *string `bson:"cursor_direction,omitempty" json:"cursor_direction,omitempty"` // "ASC" or "DESC"
 }
 
 // TableWidgetColumn defines a column in a table widget

@@ -16,6 +16,9 @@ import {
   BarChart,
   LineChart,
   Bot,
+  PercentCircle,
+  LucideSparkles,
+  BarChart3Icon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { DashboardBlueprint, WidgetType } from '../../types/dashboard';
@@ -29,6 +32,10 @@ const WIDGET_TYPE_ICONS: Record<WidgetType, React.ElementType> = {
   pie: PieChart,
   table: Table2,
   combo: BarChart3,
+  gauge: PercentCircle,
+  bar_gauge: PercentCircle,
+  heatmap: LucideSparkles,
+  histogram: BarChart3Icon,
 };
 
 // ============================================================================

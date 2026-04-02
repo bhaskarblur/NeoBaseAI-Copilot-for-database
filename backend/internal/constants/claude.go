@@ -142,7 +142,7 @@ const ClaudeLLMResponseSchemaJSON = `{
 		},
 		"actionButtons": {
 			"type": "array",
-			"description": "Array of action buttons to suggest to the user",
+			"description": "Array of action buttons to suggest to the user. NEVER generate action buttons for pagination (e.g., Show next N records, Load more, Next page) — pagination is handled automatically by the system.",
 			"items": {
 				"type": "object",
 				"properties": {
@@ -182,7 +182,15 @@ const ClaudeLLMResponseSchemaJSON = `{
 						"properties": {
 							"paginatedQuery": {
 								"type": "string",
-								"description": "Paginated version of the query with LIMIT/OFFSET or equivalent"
+								"description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}} or offset_size. CURSOR-BASED (preferred for SELECT/find queries on large data): use '{{cursor_value}}' placeholder. SQL example: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB find example: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). OFFSET-BASED (for aggregations without natural cursor): use 'offset_size' placeholder. SQL: OFFSET offset_size LIMIT 50. MongoDB find: .skip(offset_size).limit(50). MongoDB aggregate: db.col.aggregate([..., {$skip: offset_size}, {$limit: 50}]). IMPORTANT: use 'offset_size' NOT '{{cursor_value}}' for $skip/$offset pagination. EMPTY STRING when user requests < 50 records. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset/skip condition."
+							},
+							"cursor_field": {
+								"type": "string",
+								"description": "Field/column used as the pagination cursor (e.g. 'id', 'created_at', 'createdAt'). Must be present in the SELECT/projection result. Leave EMPTY STRING for offset-based pagination."
+							},
+							"page_size": {
+								"type": "number",
+								"description": "Number of records per page. Use 50."
 							},
 							"countQuery": {
 								"type": "string",

@@ -132,7 +132,20 @@ RULES:
 - If a query fails, FIX IT and test again — do not include broken queries
 - For stat cards, provide separate value_query and comparison_query
 - For chart widgets, ensure queries return data suitable for the chart type
-- For table widgets, LIMIT results to PageSize (default 10)
+- For table widgets:
+  * Use CURSOR-BASED pagination (more efficient than OFFSET for large datasets)
+  * Identify a suitable cursor field: primary key (id, uuid) or timestamp (created_at, updated_at)
+  * Order results by the cursor field for consistent pagination
+  * Set page_size (default 25, max 100)
+  * The 'query' field MUST be a clean first-page query WITHOUT any {{cursor_value}} placeholder — it fetches the first page of results
+  * The 'paginated_query' field is the query for subsequent pages (page 2, 3, etc) WITH the {{cursor_value}} placeholder
+  * Example PostgreSQL query: "SELECT * FROM users ORDER BY id ASC LIMIT 25"
+  * Example PostgreSQL paginated_query: "SELECT * FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 25"
+  * Example MongoDB query: db.users.find({}, {name:1,email:1,createdAt:1}).sort({createdAt: 1}).limit(25)
+  * Example MongoDB paginated_query: db.users.find({createdAt: {$gt: '{{cursor_value}}'}}, {name:1,email:1,createdAt:1}).sort({createdAt: 1}).limit(25)
+  * Example MySQL query: "SELECT * FROM orders ORDER BY created_at ASC LIMIT 25"
+  * Example MySQL paginated_query: "SELECT * FROM orders WHERE created_at > '{{cursor_value}}' ORDER BY created_at ASC LIMIT 25"
+  * The {{cursor_value}} placeholder in paginated_query will be replaced at runtime for pagination
 
 LAYOUT GUIDELINES:
 - Stat cards: w=3, h=2 (4 cards in a row on 12-column grid)
@@ -163,6 +176,17 @@ RULES:
 - The response should contain exactly ONE widget (the updated one)
 - ALWAYS test the new query with "execute_dashboard_query"
 - All queries must be READ-ONLY
+- For table widgets, ALWAYS use cursor-based pagination:
+  * The 'query' field MUST be a clean first-page query WITHOUT any {{cursor_value}} placeholder
+  * The 'paginated_query' field MUST contain the {{cursor_value}} placeholder for subsequent pages
+  * Set table_config.cursor_field to the cursor column (e.g. "_id", "id", "created_at")
+  * Set table_config.page_size to 25
+  * PostgreSQL query: SELECT * FROM users ORDER BY id ASC LIMIT 25
+  * PostgreSQL paginated_query: SELECT * FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 25
+  * MongoDB query: db.users.find({}).sort({_id: 1}).limit(25)
+  * MongoDB paginated_query: db.users.find({_id: {$gt: ObjectId("{{cursor_value}}")}}).sort({_id: 1}).limit(25)
+  * MySQL query: SELECT * FROM orders ORDER BY created_at ASC LIMIT 25
+  * MySQL paginated_query: SELECT * FROM orders WHERE created_at > '{{cursor_value}}' ORDER BY created_at ASC LIMIT 25
 ===== END WIDGET EDIT MODE =====
 `
 
@@ -188,6 +212,17 @@ RULES:
 - ALWAYS test the query with "execute_dashboard_query"
 - All queries must be READ-ONLY
 - The widget should complement the existing dashboard, not duplicate
+- For table widgets, ALWAYS use cursor-based pagination:
+  * The 'query' field MUST be a clean first-page query WITHOUT any {{cursor_value}} placeholder
+  * The 'paginated_query' field MUST contain the {{cursor_value}} placeholder for subsequent pages
+  * Set table_config.cursor_field to the cursor column (e.g. "_id", "id", "created_at")
+  * Set table_config.page_size to 25
+  * PostgreSQL query: SELECT * FROM users ORDER BY id ASC LIMIT 25
+  * PostgreSQL paginated_query: SELECT * FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 25
+  * MongoDB query: db.users.find({}).sort({_id: 1}).limit(25)
+  * MongoDB paginated_query: db.users.find({_id: {$gt: ObjectId("{{cursor_value}}")}}).sort({_id: 1}).limit(25)
+  * MySQL query: SELECT * FROM orders ORDER BY created_at ASC LIMIT 25
+  * MySQL paginated_query: SELECT * FROM orders WHERE created_at > '{{cursor_value}}' ORDER BY created_at ASC LIMIT 25
 ===== END ADD WIDGET MODE =====
 `
 
@@ -275,7 +310,11 @@ var DashboardFinalResponseSchema = map[string]interface{}{
 					},
 					"query": map[string]interface{}{
 						"type":        "string",
-						"description": "The SQL/MongoDB query for this widget's data",
+						"description": "The SQL/MongoDB query for this widget's data. For table widgets, this MUST be the first-page query WITHOUT any {{cursor_value}} placeholder.",
+					},
+					"paginated_query": map[string]interface{}{
+						"type":        "string",
+						"description": "For table widgets: the query for subsequent pages (page 2, 3, etc) WITH the {{cursor_value}} placeholder. For non-table widgets, leave empty.",
 					},
 					"tables": map[string]interface{}{
 						"type":        "string",
@@ -388,7 +427,8 @@ var DashboardFinalResponseSchema = map[string]interface{}{
 							},
 							"sort_by":        map[string]interface{}{"type": "string"},
 							"sort_direction": map[string]interface{}{"type": "string", "enum": []interface{}{"asc", "desc"}},
-							"page_size":      map[string]interface{}{"type": "integer"},
+							"page_size":      map[string]interface{}{"type": "integer", "description": "Rows per page. MUST be 25 for table widgets."},
+							"cursor_field":   map[string]interface{}{"type": "string", "description": "REQUIRED for table widgets: the column used as the pagination cursor (e.g. '_id', 'id', 'created_at'). The paginated_query field MUST contain a '{{cursor_value}}' placeholder filtered on this field."},
 						},
 					},
 					"layout": map[string]interface{}{

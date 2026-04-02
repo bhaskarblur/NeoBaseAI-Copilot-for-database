@@ -97,6 +97,7 @@ type WidgetResponse struct {
 	Description     string                `json:"description,omitempty"`
 	WidgetType      string                `json:"widget_type"`
 	Query           string                `json:"query"`
+	PaginatedQuery  string                `json:"paginated_query,omitempty"`
 	QueryType       string                `json:"query_type,omitempty"`
 	Tables          string                `json:"tables,omitempty"`
 	ChartConfigJSON string                `json:"chart_config_json,omitempty"`
@@ -121,10 +122,12 @@ type StatWidgetConfigDTO struct {
 
 // TableWidgetConfigDTO for tabular data widgets
 type TableWidgetConfigDTO struct {
-	Columns       []TableWidgetColumnDTO `json:"columns"`
-	SortBy        string                 `json:"sort_by,omitempty"`
-	SortDirection string                 `json:"sort_direction,omitempty"`
-	PageSize      int                    `json:"page_size,omitempty"`
+	Columns         []TableWidgetColumnDTO `json:"columns"`
+	SortBy          string                 `json:"sort_by,omitempty"`
+	SortDirection   string                 `json:"sort_direction,omitempty"`
+	PageSize        int                    `json:"page_size,omitempty"`
+	CursorField     *string                `json:"cursor_field,omitempty"`
+	CursorDirection *string                `json:"cursor_direction,omitempty"`
 }
 
 // TableWidgetColumnDTO defines a column in a table widget
@@ -178,6 +181,9 @@ type DashboardWidgetDataEvent struct {
 	RowCount        int                      `json:"row_count"`
 	ExecutionTimeMs float64                  `json:"execution_time_ms"`
 	Error           string                   `json:"error,omitempty"`
+	// Cursor-based pagination fields
+	NextCursor *string `json:"next_cursor,omitempty"` // Cursor for next page
+	HasMore    bool    `json:"has_more"`              // Whether more results exist
 }
 
 // === Import/Export DTOs ===

@@ -39,7 +39,7 @@ type DashboardService interface {
 
 	// Data refresh
 	RefreshDashboard(ctx context.Context, userID, chatID, dashboardID, streamID string) (uint32, error)
-	RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string) (uint32, error)
+	RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string, cursor *string) (uint32, error)
 
 	// Stream handler for SSE
 	SetStreamHandler(handler StreamHandler)
@@ -948,7 +948,7 @@ func (s *dashboardService) RefreshDashboard(ctx context.Context, userID, chatID,
 	return 200, nil
 }
 
-func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string) (uint32, error) {
+func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, dashboardID, widgetID, streamID string, cursor *string) (uint32, error) {
 	// Check if database connection exists
 	if !s.dbManager.IsConnected(chatID) {
 		return 400, fmt.Errorf("database connection not found for this chat - please connect to database first")
@@ -973,7 +973,7 @@ func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, da
 		return 403, fmt.Errorf("unauthorized access to widget")
 	}
 
-	s.refreshSingleWidget(ctx, userID, chatID, streamID, widget)
+	s.refreshSingleWidgetWithCursor(ctx, userID, chatID, streamID, widget, cursor)
 
 	// Update chat timestamp for last activity
 	chatObjID, _ := primitive.ObjectIDFromHex(chatID)
@@ -984,30 +984,131 @@ func (s *dashboardService) RefreshWidget(ctx context.Context, userID, chatID, da
 
 // refreshSingleWidget executes a widget's query and sends the result via SSE
 func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chatID, streamID string, widget *models.Widget) {
+	s.refreshSingleWidgetWithCursor(ctx, userID, chatID, streamID, widget, nil)
+}
+
+// refreshSingleWidgetWithCursor executes a widget's query with cursor-based pagination support
+func (s *dashboardService) refreshSingleWidgetWithCursor(ctx context.Context, userID, chatID, streamID string, widget *models.Widget, cursor *string) {
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(constants.WidgetQueryTimeoutSeconds)*time.Second)
 	defer cancel()
 
 	widgetID := widget.ID.Hex()
 	startTime := time.Now()
 
+	// Prepare query with cursor-based pagination if applicable.
+	// Page 1 (no cursor): use widget.Query (clean first-page query from AI).
+	// Pages 2+ (cursor present): use widget.PaginatedQuery with {{cursor_value}} replaced.
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	dbType := ""
+	if connInfo, exists := s.dbManager.GetConnectionInfo(chatID); exists {
+		dbType = connInfo.Config.Type
+	}
+
+	cursorField := ""
+	cursorDirection := ""
+	if widget.TableConfig != nil {
+		if widget.TableConfig.CursorField != nil {
+			cursorField = *widget.TableConfig.CursorField
+		}
+		if widget.TableConfig.CursorDirection != nil {
+			cursorDirection = *widget.TableConfig.CursorDirection
+		}
+	}
+
+	// Use PaginatedQuery (with {{cursor_value}}) for pages 2+; fall back to Query for page 1
+	paginatedQuery := widget.PaginatedQuery
+	if paginatedQuery == "" {
+		// Backward compat: old widgets don't have PaginatedQuery; use Query as both
+		paginatedQuery = widget.Query
+	}
+
+	queryToExecute := dbmanager.BuildCursorQuery(
+		dbType,
+		widget.Query,   // baseQuery (page 1 — clean, no cursor)
+		paginatedQuery, // paginatedQuery (pages 2+ — has {{cursor_value}})
+		cursorField,
+		cursorDirection,
+		cursorVal,
+	)
+	if queryToExecute != widget.Query {
+		log.Printf("[DASHBOARD] Cursor injection for widget %s (cursor=%q): %s", widgetID, cursorVal, queryToExecute)
+	}
+
 	// Execute the widget query
-	result, queryErr := s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", widget.Query, "SELECT", false, false)
+	result, queryErr := s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", queryToExecute, "SELECT", false, false)
 
 	executionTimeMs := float64(time.Since(startTime).Milliseconds())
 
 	if queryErr != nil {
 		log.Printf("[DASHBOARD] Widget query failed - WidgetID: %s, Error: %s", widgetID, queryErr.Message)
-		if s.streamHandler != nil {
-			s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
-				Event: constants.SSEEventDashboardWidgetError,
-				Data: dtos.DashboardWidgetDataEvent{
-					WidgetID:        widgetID,
-					Error:           queryErr.Message,
-					ExecutionTimeMs: executionTimeMs,
-				},
-			})
+
+		// Auto-fix: when the paginatedQuery template is broken, ask the LLM to fix it.
+		// Only triggered when a cursor is in use (page 2+) and the widget has a paginatedQuery.
+		if cursorVal != "" && widget.PaginatedQuery != "" && dbType != "" {
+			log.Printf("[QUERY_FIX] Attempting auto-fix of widget paginatedQuery for widgetID: %s", widgetID)
+
+			// Get LLM client — use chat preferences if available, otherwise first enabled provider.
+			var fixClient llm.Client
+			chatObjID, chatErr := primitive.ObjectIDFromHex(chatID)
+			if chatErr == nil {
+				if chat, chatFetchErr := s.chatRepo.FindByID(chatObjID); chatFetchErr == nil {
+					if c, _, err := s.getLLMClient(chat); err == nil {
+						fixClient = c
+					}
+				}
+			}
+
+			if fixClient != nil {
+				if fixedQuery, fixErr := autoFixPaginatedQuery(
+					queryCtx, fixClient, s.dbManager,
+					chatID, dbType, "SELECT",
+					widget.PaginatedQuery, // original template with {{cursor_value}}
+					cursorVal,             // sample cursor for test-only substitution
+					queryErr.Message,
+				); fixErr == nil {
+					// Inject the actual cursor value into the fixed template before retrying.
+					fixedInjected := dbmanager.BuildCursorQuery(dbType, widget.Query, fixedQuery, cursorField, cursorDirection, cursorVal)
+					result, queryErr = s.dbManager.ExecuteQuery(queryCtx, chatID, "", "", "", fixedInjected, "SELECT", false, false)
+					executionTimeMs = float64(time.Since(startTime).Milliseconds())
+					if queryErr == nil {
+						log.Printf("[QUERY_FIX] Widget retry succeeded with auto-fixed paginatedQuery")
+						// Persist the fixed paginatedQuery on the widget asynchronously.
+						widget.PaginatedQuery = fixedQuery
+						go func() {
+							saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							defer cancel()
+							if saveErr := s.dashboardRepo.UpdateWidget(saveCtx, widget.ID, widget); saveErr != nil {
+								log.Printf("[QUERY_FIX] Failed to persist fixed widget paginatedQuery: %v", saveErr)
+							} else {
+								log.Printf("[QUERY_FIX] Persisted fixed widget paginatedQuery for widgetID: %s", widgetID)
+							}
+						}()
+					} else {
+						log.Printf("[QUERY_FIX] Widget retry still failed after auto-fix: %s", queryErr.Message)
+					}
+				} else {
+					log.Printf("[QUERY_FIX] Widget auto-fix failed: %v", fixErr)
+				}
+			}
 		}
-		return
+
+		if queryErr != nil {
+			if s.streamHandler != nil {
+				s.streamHandler.HandleStreamEvent(userID, chatID, streamID, dtos.StreamResponse{
+					Event: constants.SSEEventDashboardWidgetError,
+					Data: dtos.DashboardWidgetDataEvent{
+						WidgetID:        widgetID,
+						Error:           queryErr.Message,
+						ExecutionTimeMs: executionTimeMs,
+					},
+				})
+			}
+			return
+		}
 	}
 
 	// Parse result data
@@ -1035,6 +1136,31 @@ func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chat
 		}
 	}
 
+	// Extract next cursor if cursor-based pagination is used
+	var nextCursor *string
+	hasMore := false
+
+	if widget.TableConfig != nil && widget.TableConfig.CursorField != nil {
+		pageSize := widget.TableConfig.PageSize
+		if pageSize == 0 {
+			pageSize = 25 // Default page size
+		}
+
+		// Check if we got a full page of results
+		if len(data) == pageSize {
+			hasMore = true
+			// Extract cursor value from last record
+			if len(data) > 0 {
+				lastRecord := data[len(data)-1]
+				if cursorValue, exists := lastRecord[*widget.TableConfig.CursorField]; exists {
+					cursorStr := fmt.Sprintf("%v", cursorValue)
+					nextCursor = &cursorStr
+					log.Printf("[DASHBOARD] Extracted next_cursor for widget %s: %s", widgetID, cursorStr)
+				}
+			}
+		}
+	}
+
 	// Send via SSE
 	if s.streamHandler != nil {
 		rowCount := 0
@@ -1048,6 +1174,8 @@ func (s *dashboardService) refreshSingleWidget(ctx context.Context, userID, chat
 				Data:            data,
 				RowCount:        rowCount,
 				ExecutionTimeMs: executionTimeMs,
+				NextCursor:      nextCursor,
+				HasMore:         hasMore,
 			},
 		})
 	}
@@ -1098,6 +1226,7 @@ func (s *dashboardService) widgetToResponse(widget *models.Widget) *dtos.WidgetR
 		Description:     widget.Description,
 		WidgetType:      widget.WidgetType,
 		Query:           widget.Query,
+		PaginatedQuery:  widget.PaginatedQuery,
 		QueryType:       widget.QueryType,
 		Tables:          widget.Tables,
 		ChartConfigJSON: widget.ChartConfigJSON,
@@ -1134,10 +1263,12 @@ func (s *dashboardService) widgetToResponse(widget *models.Widget) *dtos.WidgetR
 			}
 		}
 		resp.TableConfig = &dtos.TableWidgetConfigDTO{
-			Columns:       columns,
-			SortBy:        widget.TableConfig.SortBy,
-			SortDirection: widget.TableConfig.SortDirection,
-			PageSize:      widget.TableConfig.PageSize,
+			Columns:         columns,
+			SortBy:          widget.TableConfig.SortBy,
+			SortDirection:   widget.TableConfig.SortDirection,
+			PageSize:        widget.TableConfig.PageSize,
+			CursorField:     widget.TableConfig.CursorField,
+			CursorDirection: widget.TableConfig.CursorDirection,
 		}
 	}
 
@@ -1459,6 +1590,7 @@ func (s *dashboardService) createWidgetFromConfig(
 	widget.Description = getStringVal(wConfig, "description")
 	widget.Tables = getStringVal(wConfig, "tables")
 	widget.LLMModel = selectedModel
+	widget.PaginatedQuery = getStringVal(wConfig, "paginated_query")
 
 	// Parse stat_config
 	if statRaw, ok := wConfig["stat_config"].(map[string]interface{}); ok && widgetType == "stat" {
@@ -1494,6 +1626,12 @@ func (s *dashboardService) createWidgetFromConfig(
 		}
 		if ps, ok := tableRaw["page_size"].(float64); ok {
 			widget.TableConfig.PageSize = int(ps)
+		}
+		if cf := getStringVal(tableRaw, "cursor_field"); cf != "" {
+			widget.TableConfig.CursorField = &cf
+		}
+		if cd := getStringVal(tableRaw, "cursor_direction"); cd != "" {
+			widget.TableConfig.CursorDirection = &cd
 		}
 		if colsRaw, ok := tableRaw["columns"].([]interface{}); ok {
 			for _, cRaw := range colsRaw {
@@ -1630,6 +1768,9 @@ func (s *dashboardService) applyWidgetConfigUpdates(widget *models.Widget, wConf
 	if query := getStringVal(wConfig, "query"); query != "" {
 		widget.Query = query
 	}
+	if pq := getStringVal(wConfig, "paginated_query"); pq != "" {
+		widget.PaginatedQuery = pq
+	}
 	if tables := getStringVal(wConfig, "tables"); tables != "" {
 		widget.Tables = tables
 	}
@@ -1664,6 +1805,12 @@ func (s *dashboardService) applyWidgetConfigUpdates(widget *models.Widget, wConf
 		}
 		if ps, ok := tableRaw["page_size"].(float64); ok {
 			widget.TableConfig.PageSize = int(ps)
+		}
+		if cf := getStringVal(tableRaw, "cursor_field"); cf != "" {
+			widget.TableConfig.CursorField = &cf
+		}
+		if cd := getStringVal(tableRaw, "cursor_direction"); cd != "" {
+			widget.TableConfig.CursorDirection = &cd
 		}
 		if colsRaw, ok := tableRaw["columns"].([]interface{}); ok {
 			for _, cRaw := range colsRaw {

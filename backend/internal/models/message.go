@@ -67,6 +67,11 @@ type Pagination struct {
 	TotalRecordsCount *int    `bson:"total_records_count" json:"total_records_count"` // Total number of records available for the query
 	PaginatedQuery    *string `bson:"paginated_query" json:"paginated_query"`         // The modified query string that includes pagination (e.g., LIMIT, OFFSET) to fetch a subset of results
 	CountQuery        *string `bson:"count_query" json:"count_query"`                 // The query string to get the total count of records (e.g., SELECT COUNT(*) FROM ...)
+	
+	// Cursor-based pagination fields (more efficient for large datasets)
+	CursorField     *string `bson:"cursor_field,omitempty" json:"cursor_field,omitempty"`         // Field used for cursor (e.g., "id", "created_at")
+	CursorDirection *string `bson:"cursor_direction,omitempty" json:"cursor_direction,omitempty"` // "ASC" or "DESC"
+	PageSize        *int    `bson:"page_size,omitempty" json:"page_size,omitempty"`               // Number of records per page
 }
 
 func NewMessage(userID, chatID primitive.ObjectID, msgType, content string, queries *[]Query, userMessageId *primitive.ObjectID) *Message {

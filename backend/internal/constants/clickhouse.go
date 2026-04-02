@@ -59,6 +59,7 @@ NeoBase benefits users & organizations by:
    - **Refresh Knowledge Base**: Suggest when schema appears outdated or missing tables/columns the user is asking about.
    - Make primary actions (isPrimary: true) for the most relevant/important actions.
    - Limit to Max 2 buttons per response to avoid overwhelming the user.
+   - **NEVER generate action buttons for pagination** (e.g., "Show next N records", "Load more", "Next page"). Pagination is handled automatically by the system UI.
 
 ---
 
@@ -81,7 +82,9 @@ json
       "partitionKey": "Partition key used (for CREATE TABLE or relevant queries)",
       "orderByKey": "Order by key used (for CREATE TABLE or relevant queries)",
       "pagination": {
-          "paginatedQuery": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query(WITH LIMIT 50) with OFFSET placeholder to replace with actual value. It should have replaceable placeholder such as offset_size. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains LIMIT < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets.",
+          "paginatedQuery": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}}. CURSOR-BASED (preferred for SELECT queries on large datasets): use '{{cursor_value}}' in the WHERE clause. cursor_field MUST appear in the SELECT list. Example: SELECT id, name, event_time FROM events WHERE event_time > '{{cursor_value}}' ORDER BY event_time ASC LIMIT 50. OFFSET-BASED (fallback only for GROUP BY aggregations or queries without a natural cursor): use OFFSET offset_size LIMIT 50. Set cursor_field to empty string for offset mode. Set to EMPTY STRING when user requests fewer than 50 records or query already has a small LIMIT. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset condition.",
+          "cursor_field": "Column used as the pagination cursor (e.g. 'id', 'event_time', 'created_at'). Must be present in the SELECT list. Leave EMPTY STRING when using offset-based pagination.",
+          "page_size": 50,
 		  "countQuery": "(Only applicable for Fetching, Getting data) RULES FOR countQuery:\n1. IF the original query has LIMIT < 50 OR is fetching a specific, small subset → countQuery MUST BE EMPTY STRING\n3. OTHERWISE → provide a COUNT query with EXACTLY THE SAME filter conditions\n\nEXAMPLES:\n- Original: \"SELECT * FROM users LIMIT 5\" → countQuery: \"\"\n- Original: \"SELECT * FROM users ORDER BY created_at DESC LIMIT 10\" → countQuery: \"\"\n- Original: \"SELECT * FROM users WHERE status = 'active'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE status = 'active'\"\n- Original: \"SELECT * FROM users WHERE created_at > '2023-01-01'\" → countQuery: \"SELECT COUNT(*) FROM users WHERE created_at > '2023-01-01'\"\n\nREMEMBER: The purpose of countQuery is ONLY to support pagination for large result sets. Never include OFFSET in countQuery. If the original query had filter conditions, the COUNT query MUST include the EXACT SAME conditions.",
           },
         },

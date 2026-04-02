@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, CheckCircle, Loader2, ExternalLink, RefreshCw, Info } from 'lucide-react';
 import { Connection } from '../../../types/chat';
+import googleService from '../../../services/googleService';
 
 interface GoogleSheetsTabProps {
   formData: Connection;
@@ -58,20 +59,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
     if (!refresh) return false;
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/google/refresh-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ refresh_token: refresh })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to refresh token');
-      }
-      
-      const data = await response.json();
+      const data = await googleService.refreshGoogleToken(refresh);
       localStorage.setItem('google_access_token', data.access_token);
       if (data.refresh_token) {
         localStorage.setItem('google_refresh_token', data.refresh_token);
@@ -79,7 +67,6 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
       if (data.expiry) {
         localStorage.setItem('google_token_expiry', data.expiry);
       }
-      
       return true;
     } catch (error) {
       console.error('Failed to refresh token:', error);
@@ -201,42 +188,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
             // Exchange the code for tokens using the backend endpoint
             const redirectURI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/google/callback';
             
-            const tokenResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/google/callback`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-              },
-              body: JSON.stringify({
-                code: code,
-                redirect_uri: redirectURI,
-                purpose: 'spreadsheet'
-              })
-            });
-            
-            if (!tokenResponse.ok) {
-              const errorText = await tokenResponse.text();
-              console.error('Token exchange error response status:', tokenResponse.status);
-              console.error('Token exchange error response text:', errorText);
-              try {
-                const error = JSON.parse(errorText);
-                throw new Error(error.error || error.Error || 'Failed to exchange authorization code');
-              } catch (parseError) {
-                throw new Error(`Token exchange failed with status ${tokenResponse.status}: ${errorText}`);
-              }
-            }
-            
-            const responseText = await tokenResponse.text();
-            console.log('Token exchange response status:', tokenResponse.status);
-            console.log('Token exchange response text:', responseText);
-            console.log('Token exchange response type:', tokenResponse.headers.get('content-type'));
-            
-            if (!responseText) {
-              throw new Error('Empty response from token exchange');
-            }
-            
-            const tokenData = JSON.parse(responseText);
-            console.log('Parsed token data:', tokenData);
+            const tokenData = await googleService.exchangeAuthCode(code, redirectURI);
             
             // Extract email from user object
             const userEmail = tokenData.user?.email || tokenData.user_email;
@@ -330,25 +282,7 @@ const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({
       setIsValidating(true);
       setAuthError(null);
       
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/google/validate-sheet`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          access_token: accessToken,
-          refresh_token: googleRefreshToken,
-          sheet_id: sheetId
-        })
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to validate sheet access');
-      }
-      
-      const data = await response.json();
+      const data = await googleService.validateSheet(accessToken, googleRefreshToken, sheetId);
       setSheetInfo(data);
       
       // Update form data with Google Sheets info

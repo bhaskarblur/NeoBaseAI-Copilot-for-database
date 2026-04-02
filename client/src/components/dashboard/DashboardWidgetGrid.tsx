@@ -9,6 +9,8 @@ interface DashboardWidgetGridProps {
   onEditWidget: (widgetId: string) => void;
   onRefreshWidget: (widgetId: string) => void;
   onCancelWidgetRefresh?: (widgetId: string) => void;
+  onWidgetNextPage?: (widgetId: string) => void;
+  onWidgetPreviousPage?: (widgetId: string) => void;
   individuallyRefreshingWidgets?: Set<string>;
   onAddWidget: () => void;
 }
@@ -25,6 +27,8 @@ export default function DashboardWidgetGrid({
   onEditWidget,
   onRefreshWidget,
   onCancelWidgetRefresh,
+  onWidgetNextPage,
+  onWidgetPreviousPage,
   individuallyRefreshingWidgets,
   onAddWidget,
 }: Readonly<DashboardWidgetGridProps>) {
@@ -40,6 +44,8 @@ export default function DashboardWidgetGrid({
         onEdit={() => onEditWidget(widget.id)}
         onRefresh={() => onRefreshWidget(widget.id)}
         onCancelRefresh={isIndividuallyRefreshing && onCancelWidgetRefresh ? () => onCancelWidgetRefresh(widget.id) : undefined}
+        onNextPage={onWidgetNextPage ? () => onWidgetNextPage(widget.id) : undefined}
+        onPreviousPage={onWidgetPreviousPage ? () => onWidgetPreviousPage(widget.id) : undefined}
       />
     );
   };

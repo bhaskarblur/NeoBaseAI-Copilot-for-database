@@ -230,7 +230,15 @@ const OpenAILLMResponseSchema = `{
                        "properties": {
                            "paginatedQuery": {
                                "type": "string",
-                               "description": "(Empty \"\" if the original query is to find count or already includes COUNT function) A paginated query of the original query with OFFSET placeholder to replace with actual value. For SQL, use OFFSET offset_size LIMIT 50. If the original query contains some LIMIT which is less than 50, then this paginatedQuery should be empty. IMPORTANT: If the user is asking for fewer than 50 records (e.g., 'show latest 5 users') or the original query contains LIMIT < 50, then paginatedQuery MUST BE EMPTY STRING. Only generate paginatedQuery for queries that might return large result sets."
+                               "description": "This is the query for SUBSEQUENT PAGES (page 2, 3, etc) — NOT for the first page. The 'query' field above is used for the first page and MUST NOT contain {{cursor_value}} or offset_size. CURSOR-BASED (preferred for SELECT/find queries on large data): use '{{cursor_value}}' placeholder in the WHERE/filter condition. SQL example: SELECT id,name FROM users WHERE id > '{{cursor_value}}' ORDER BY id ASC LIMIT 50. MongoDB find example: db.users.find({createdAt:{$gt:'{{cursor_value}}'}},{name:1,createdAt:1}).sort({createdAt:1}).limit(50). cursor_field MUST be in SELECT/projection. OFFSET-BASED (for aggregations without natural cursor): use 'offset_size' placeholder. SQL: OFFSET offset_size LIMIT 50. MongoDB find: .skip(offset_size).limit(50). MongoDB aggregate: db.col.aggregate([..., {$skip: offset_size}, {$limit: 50}]). IMPORTANT: use 'offset_size' NOT '{{cursor_value}}' for $skip/$offset pagination. Set cursor_field empty for offset mode. EMPTY STRING when user requests < 50 records. IMPORTANT: The 'query' field must be the SAME query but WITHOUT the cursor/offset/skip condition — it fetches the first page of results."
+                           },
+                           "cursor_field": {
+                               "type": "string",
+                               "description": "Field/column used as the pagination cursor (e.g. 'id', 'created_at', 'createdAt'). Must be present in the SELECT/projection result. Leave EMPTY STRING for offset-based pagination."
+                           },
+                           "page_size": {
+                               "type": "number",
+                               "description": "Number of records per page. Use 50."
                            },
                            "countQuery": {
                                "type": "string",
@@ -298,7 +306,7 @@ const OpenAILLMResponseSchema = `{
                    }
                }
            },
-           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected."
+           "description": "List of action buttons to display to the user. Use these to suggest helpful actions like refreshing schema when schema issues are detected. NEVER generate action buttons for pagination (e.g., Show next N records, Load more, Next page) — pagination is handled automatically by the system."
        },
        "assistantMessage": {
            "type": "string",

@@ -1,5 +1,6 @@
 import { AlertCircle, Boxes, Mail, Loader } from 'lucide-react';
 import React, { useState } from 'react';
+import authService from '../../services/authService';
 
 interface ForgotPasswordFormProps {
     onSwitchToLogin: () => void;
@@ -43,27 +44,14 @@ export default function ForgotPasswordForm({ onSwitchToLogin, onSwitchToResetPas
 
         setIsLoading(true);
         try {
-            const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/forgot-password`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ email }),
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                setSuccessMessage(data.data.message);
-                // Switch to reset password form after 2 seconds
-                setTimeout(() => {
-                    onSwitchToResetPassword(email);
-                }, 2000);
-            } else {
-                setFormError(data.error || 'Failed to send reset email');
-            }
+            const result = await authService.forgotPassword(email);
+            setSuccessMessage(result.message);
+            // Switch to reset password form after 2 seconds
+            setTimeout(() => {
+                onSwitchToResetPassword(email);
+            }, 2000);
         } catch (error: any) {
-            setFormError('Network error. Please try again.');
+            setFormError(error.message || 'Failed to send reset email');
         } finally {
             setIsLoading(false);
         }

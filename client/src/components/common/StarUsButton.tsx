@@ -1,5 +1,6 @@
 import { Github } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import githubService from '../../services/githubService';
 
 interface StarUsButtonProps {
     className?: string;
@@ -20,16 +21,12 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
         const fetchStarCount = async () => {
             isFetchingRef.current = true;
             try {
-                const response = await fetch(`${import.meta.env.VITE_API_URL}/github/stats`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch star count');
-                }
-                const data = await response.json();
-                setStarCount(data.data.star_count);
+                const data = await githubService.getGithubStats();
+                setStarCount(data.star_count);
                 hasFetchedRef.current = true;
             } catch (error) {
                 console.error('Error fetching star count:', error);
-                setStarCount(1); // I Starred it manually :)
+                setStarCount(100); // I Starred it manually :)
                 hasFetchedRef.current = true;
             } finally {
                 isFetchingRef.current = false;
@@ -79,7 +76,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                     rounded-full 
                     text-xs 
                     font-mono
-                ">{formatStarCount(starCount || 60)}</span>
+                ">{formatStarCount(starCount || 100)}</span>
             ) : (
                 <>
                     <span>Star Us</span>
@@ -90,7 +87,7 @@ export default function StarUsButton({ className = '', isMobile = false }: StarU
                         rounded-full 
                         text-xs 
                         font-mono
-                    ">{formatStarCount(starCount || 60)}</span>
+                    ">{formatStarCount(starCount || 100)}</span>
                 </>
             )}
         </a>

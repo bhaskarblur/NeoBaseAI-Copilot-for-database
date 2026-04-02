@@ -167,7 +167,28 @@ const authService = {
             }
             throw new Error(error.message || 'Google OAuth failed');
         }
-    }
+    },
+
+    async forgotPassword(email: string): Promise<{ message: string }> {
+        try {
+            const response = await axios.post(`${API_URL}/auth/forgot-password`, { email });
+            return { message: response.data.data.message };
+        } catch (error: any) {
+            throw new Error(error.response?.data?.error || 'Failed to send reset email');
+        }
+    },
+
+    async resetPassword(email: string, otp: string, newPassword: string): Promise<void> {
+        try {
+            await axios.post(`${API_URL}/auth/reset-password`, {
+                email,
+                otp,
+                new_password: newPassword,
+            });
+        } catch (error: any) {
+            throw new Error(error.response?.data?.error || 'Failed to reset password');
+        }
+    },
 };
 
 export default authService; 

@@ -34,10 +34,11 @@ type QueryExecutionResponse struct {
 }
 
 type QueryResultsRequest struct {
-	MessageID string `json:"message_id" binding:"required"`
-	QueryID   string `json:"query_id" binding:"required"`
-	StreamID  string `json:"stream_id" binding:"required"`
-	Offset    int    `json:"offset" binding:"required"`
+	MessageID string  `json:"message_id" binding:"required"`
+	QueryID   string  `json:"query_id" binding:"required"`
+	StreamID  string  `json:"stream_id" binding:"required"`
+	Offset    int     `json:"offset"` // Deprecated: Use Cursor instead
+	Cursor    *string `json:"cursor"` // Cursor value for cursor-based pagination
 }
 
 type QueryResultsResponse struct {
@@ -47,6 +48,8 @@ type QueryResultsResponse struct {
 	ExecutionResult   interface{}     `json:"execution_result"`
 	Error             *QueryError     `json:"error,omitempty"`
 	TotalRecordsCount *int            `json:"total_records_count"`
+	NextCursor        *string         `json:"next_cursor,omitempty"` // Cursor for next page (cursor-based pagination)
+	HasMore           bool            `json:"has_more"`              // Whether more results exist
 	ActionButtons     *[]ActionButton `json:"action_buttons,omitempty"`
 	ActionAt          *string         `json:"action_at,omitempty"`
 }
