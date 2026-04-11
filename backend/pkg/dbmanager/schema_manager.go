@@ -1662,8 +1662,18 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 		return &PostgresDriver{}
 	})
 
+	// Register TimescaleDB schema fetcher (TimescaleDB is a PostgreSQL extension)
+	sm.RegisterFetcher("timescaledb", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	// Register MySQL schema fetcher
 	sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// Register StarRocks schema fetcher (StarRocks uses MySQL wire protocol)
+	sm.RegisterFetcher("starrocks", func(db DBExecutor) SchemaFetcher {
 		return NewMySQLSchemaFetcher(db)
 	})
 

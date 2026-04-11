@@ -322,6 +322,42 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 receives. Getting this wrong means queries are routed to the wrong wrapper and may panic at
 runtime on type assertions.
 
+#### Step 1.4c — SchemaManager default fetchers (CRITICAL — easy to miss)
+
+**File:** `backend/pkg/dbmanager/schema_manager.go` — `registerDefaultFetchers`
+
+> ⚠️ **This is the most commonly missed step.** `manager_crud.go` (Step 1.4b) and `di/modules.go`
+> (Step 1.4a) are both needed, but at runtime the `SchemaManager` initialises its own fetcher
+> registry via `registerDefaultFetchers`. If your DB type is absent here, the app starts without
+> error but returns `"no schema fetcher registered for database type: mynewdb"` on every schema
+> fetch request, even though the driver connected successfully.
+
+Add your fetcher inside `registerDefaultFetchers`:
+
+```go
+func (sm *SchemaManager) registerDefaultFetchers() {
+    sm.RegisterFetcher("postgresql", ...)
+    sm.RegisterFetcher("yugabytedb", ...)
+
+    // Add AFTER yugabytedb (if Postgres-wire wrapper):
+    sm.RegisterFetcher("mynewdb", func(db DBExecutor) SchemaFetcher {
+        return &PostgresDriver{} // Postgres wire
+        // OR: return NewMySQLSchemaFetcher(db)  // MySQL wire
+        // OR: return &MyNewDBDriver{}            // native driver
+    })
+
+    sm.RegisterFetcher("mysql", ...)
+    // ...
+}
+```
+
+**Why three places?** `di/modules.go` runs at DI startup (production). `manager_crud.go`
+`registerDefaultDrivers` runs when a Manager is constructed outside DI (tests, scripts).
+`schema_manager.go` `registerDefaultFetchers` runs when the `SchemaManager` is constructed — this
+is the path used at request time for schema fetches and schema change tracking. All three must be
+kept in sync or you get the "no schema fetcher registered" error at runtime despite a successful
+connection.
+
 ---
 
 ### Step 1.5 — Write the driver (native DBs only)
@@ -1216,6 +1252,7 @@ Paste this into your PR description and tick each box before requesting review.
 - [ ] `constants/llms.go` — `getDatabasePrompt`, `getNonTechModeInstructions`, `GetVisualizationPrompt` updated
 - [ ] `di/modules.go` — driver + fetcher registered; `LLMDBConfig` added to all 4 LLM provider blocks (OpenAI, Gemini, Claude, Ollama)
 - [ ] `pkg/dbmanager/manager_crud.go` — `registerDefaultDrivers` + `RegisterFetcher` + `GetConnection` updated
+- [ ] `pkg/dbmanager/schema_manager.go` — `registerDefaultFetchers` updated (Step 1.4c)
 - [ ] `pkg/dbmanager/mynewdb_driver.go` — driver created (native DB only)
 - [ ] `pkg/dbmanager/mynewdb_wrapper.go` — wrapper created (native DB with custom wire protocol only)
 - [ ] `pkg/dbmanager/query_validator.go` — validator mapping added
@@ -1812,6 +1849,7 @@ Use this as a PR checklist. Check each item before opening for review.
 - [ ] `constants/llms.go` — `getDatabasePrompt`, `getNonTechModeInstructions`, `GetVisualizationPrompt` updated
 - [ ] `di/modules.go` — driver + fetcher registered; DBConfig added to all 4 LLM provider blocks
 - [ ] `pkg/dbmanager/manager_crud.go` — `registerDefaultDrivers` + `RegisterFetcher` + `GetConnection`
+- [ ] `pkg/dbmanager/schema_manager.go` — `registerDefaultFetchers` updated (Step 1.4c)
 - [ ] `pkg/dbmanager/mynewdb_driver.go` — driver created (native DB only)
 - [ ] `pkg/dbmanager/query_validator.go` — validator mapping added
 - [ ] `constants/query_classification.go` — classification map entry added

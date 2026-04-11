@@ -1,6 +1,9 @@
 package constants
 
-import "log"
+import (
+	"log"
+	"strings"
+)
 
 const (
 	OpenAI = "openai"
@@ -62,9 +65,17 @@ func getDatabasePrompt(dbType string) string {
 	case DatabaseTypeMongoDB:
 		return MongoDBPrompt
 	case DatabaseTypeTimescaleDB:
-		return PostgreSQLPrompt + TimescaleDBExtensions
+		// Replace the opening identity line so the LLM knows it is a TimescaleDB assistant,
+		// not a generic PostgreSQL assistant, while keeping all PostgreSQL rules intact.
+		return "You are NeoBase AI, a TimescaleDB database assistant. TimescaleDB is a PostgreSQL extension optimised for time-series data. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests." +
+			PostgreSQLPrompt[strings.Index(PostgreSQLPrompt, "\n"):] +
+			TimescaleDBExtensions
 	case DatabaseTypeStarRocks:
-		return MySQLPrompt + StarRocksExtensions
+		// Replace the opening identity line so the LLM knows it is a StarRocks assistant,
+		// not a generic MySQL assistant, while keeping all MySQL rules intact.
+		return "You are NeoBase AI, a StarRocks database assistant. StarRocks is a MySQL-wire-compatible MPP OLAP database optimised for large-scale real-time analytics. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests." +
+			MySQLPrompt[strings.Index(MySQLPrompt, "\n"):] +
+			StarRocksExtensions
 	case DatabaseTypeSpreadsheet:
 		return PostgreSQLPrompt // Use PostgreSQL schema since spreadsheet uses PostgreSQL internally
 	default:
