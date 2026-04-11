@@ -14,6 +14,33 @@ services:
     networks:
       - neobase-network
 
+  neobase-example-timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: neobase-example-timescaledb
+    restart: always
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    networks:
+      - neobase-network
+
+  neobase-example-starrocks:
+    image: starrocks/allin1-ubuntu:latest
+    container_name: neobase-example-starrocks
+    restart: always
+    ports:
+      - 9030:9030
+      - 8030:8030
+    volumes:
+      - starrocks-data:/data/starrocks
+    networks:
+      - neobase-network
+
   neobase-example-clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: neobase-example-clickhouse
@@ -143,6 +170,8 @@ services:
 
 volumes:
   postgres-data:
+  timescaledb-data:
+  starrocks-data:
   clickhouse-data:
   mysql-data:
   mongodb-data:
