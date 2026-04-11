@@ -1177,7 +1177,7 @@ func (s *chatService) wrapQueryWithLimit(originalQuery string, dbType string, li
 
 	// Handle different database types
 	switch strings.ToUpper(dbType) {
-	case "MYSQL", "POSTGRESQL", "YUGABYTEDB", "CLICKHOUSE":
+	case "MYSQL", "POSTGRESQL", "YUGABYTEDB", "CLICKHOUSE", "TIMESCALEDB", "STARROCKS":
 		// Standard SQL LIMIT syntax
 		return fmt.Sprintf("%s LIMIT %d", strings.TrimRight(originalQuery, ";"), limit)
 

@@ -1497,10 +1497,14 @@ func (s *chatService) ConnectDB(ctx context.Context, userID, chatID string, stre
 		switch chat.Connection.Type {
 		case constants.DatabaseTypePostgreSQL:
 			defaultPort = "5432"
+		case constants.DatabaseTypeTimescaleDB:
+			defaultPort = "5432" // TimescaleDB runs on standard PostgreSQL port
 		case constants.DatabaseTypeYugabyteDB:
 			defaultPort = "5433"
 		case constants.DatabaseTypeMySQL:
 			defaultPort = "3306"
+		case constants.DatabaseTypeStarRocks:
+			defaultPort = "9030" // StarRocks FE query port (MySQL protocol)
 		case constants.DatabaseTypeClickhouse:
 			defaultPort = "9000"
 		case constants.DatabaseTypeMongoDB:
