@@ -31,7 +31,7 @@ import { DemoModal } from '../modals/DemoModal';
 export interface Connection {
   id: string;
   name: string;
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets';
+  type: 'postgresql' | 'yugabytedb' | 'timescaledb' | 'mysql' | 'starrocks' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets';
 }
 
 interface SidebarProps {
@@ -478,7 +478,7 @@ export default function Sidebar({
                             >
                               <div className={`flex items-center h-full ${isExpanded ? 'gap-3' : 'justify-center'}`}>
                                 <DatabaseLogo
-                                  type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets'}
+                                  type={connection.connection.type as 'postgresql' | 'yugabytedb' | 'timescaledb' | 'mysql' | 'starrocks' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets'}
                                   size={28}
                                   className={`transition-transform ${selectedConnection?.id === connection.id ? 'scale-110' : ''}`}
                                 />
@@ -498,21 +498,25 @@ export default function Sidebar({
                                           ? 'PostgreSQL' 
                                           : connection.connection.type === 'yugabytedb' 
                                             ? 'YugabyteDB' 
-                                            : connection.connection.type === 'mysql' 
-                                              ? 'MySQL' 
-                                              : connection.connection.type === 'clickhouse' 
-                                                ? 'ClickHouse' 
-                                                : connection.connection.type === 'mongodb' 
-                                                  ? 'MongoDB' 
-                                                  : connection.connection.type === 'redis' 
-                                                    ? 'Redis' 
-                                                    : connection.connection.type === 'neo4j' 
-                                                      ? 'Neo4j' 
-                                                      : connection.connection.type === 'spreadsheet'
-                                                        ? 'Spreadsheet'
-                                                        : connection.connection.type === 'google_sheets'
-                                                          ? 'Google Sheets'
-                                                          : 'Unknown'}
+                                            : connection.connection.type === 'timescaledb'
+                                              ? 'TimescaleDB'
+                                              : connection.connection.type === 'mysql' 
+                                                ? 'MySQL' 
+                                                : connection.connection.type === 'starrocks'
+                                                  ? 'StarRocks'
+                                                  : connection.connection.type === 'clickhouse' 
+                                                    ? 'ClickHouse' 
+                                                    : connection.connection.type === 'mongodb' 
+                                                      ? 'MongoDB' 
+                                                      : connection.connection.type === 'redis' 
+                                                        ? 'Redis' 
+                                                        : connection.connection.type === 'neo4j' 
+                                                          ? 'Neo4j' 
+                                                          : connection.connection.type === 'spreadsheet'
+                                                            ? 'Spreadsheet'
+                                                            : connection.connection.type === 'google_sheets'
+                                                              ? 'Google Sheets'
+                                                              : 'Unknown'}
                                       </p>
                                       <div className="flex flex-row items-center gap-1.5 mt-1">
                                         <Clock className="w-3.5 h-3.5 text-gray-500" />

@@ -80,6 +80,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
   const getUriConfig = (dbType: string): { label: string; placeholder: string; description: string } | null => {
     switch (dbType) {
       case 'postgresql':
+      case 'timescaledb':
       case 'yugabytedb':
         return {
           label: 'PostgreSQL Connection URI',
@@ -87,6 +88,7 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
           description: 'Paste your PostgreSQL connection string to auto-fill fields'
         };
       case 'mysql':
+      case 'starrocks':
         return {
           label: 'MySQL Connection URI',
           placeholder: 'mysql://username:password@host:port/database',
@@ -123,10 +125,12 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
 
     switch (data.type) {
       case 'postgresql':
+      case 'timescaledb':
       case 'yugabytedb':
         uri = `postgresql://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
         break;
       case 'mysql':
+      case 'starrocks':
         uri = `mysql://${username}${username ? ':' + password : ''}@${host}${port ? ':' + port : ''}/${database}`;
         break;
       case 'clickhouse':
@@ -149,9 +153,11 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
   const getDefaultPort = (dbType: string): string => {
     switch (dbType) {
       case 'postgresql':
+      case 'timescaledb':
       case 'yugabytedb':
         return '5432';
       case 'mysql':
+      case 'starrocks':
         return '3306';
       case 'clickhouse':
         return '8123';
@@ -304,10 +310,12 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
 
       switch (dbType) {
         case 'postgresql':
+        case 'timescaledb':
         case 'yugabytedb':
           parsedData = parsePostgreSQLUri(uri);
           break;
         case 'mysql':
+        case 'starrocks':
           parsedData = parseMySQLUri(uri);
           break;
         case 'clickhouse':
@@ -555,8 +563,10 @@ const SSHConnectionTab: React.FC<SSHConnectionTabProps> = ({
                   Connection URI will be used to auto-fill the fields below. Replace &lt;password&gt; with your actual password.
                   {formData.type === 'mongodb' && ' Both standard and Atlas SRV formats supported.'}
                   {formData.type === 'postgresql' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
+                  {formData.type === 'timescaledb' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
                   {formData.type === 'yugabytedb' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
                   {formData.type === 'mysql' && ' Supports useSSL parameter (e.g., ?useSSL=true).'}
+                  {formData.type === 'starrocks' && ' Supports useSSL parameter (e.g., ?useSSL=true).'}
                   {formData.type === 'clickhouse' && ' Supports secure parameter (e.g., ?secure=true).'}
                 </p>
               </div>

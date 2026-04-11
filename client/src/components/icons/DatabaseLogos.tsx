@@ -1,5 +1,5 @@
 interface DatabaseLogoProps {
-  type: 'postgresql' | 'yugabytedb' | 'mysql' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra' | 'spreadsheet' | 'google_sheets';
+  type: 'postgresql' | 'yugabytedb' | 'timescaledb' | 'mysql' | 'starrocks' | 'mongodb' | 'redis' | 'clickhouse' | 'neo4j' | 'cassandra' | 'spreadsheet' | 'google_sheets';
   size?: number;
   className?: string;
 }
@@ -8,7 +8,9 @@ interface DatabaseLogoProps {
 const databaseLogos: Record<Exclude<DatabaseLogoProps['type'], 'spreadsheet' | 'google_sheets'>, string> = {
   postgresql: `${import.meta.env.VITE_FRONTEND_BASE_URL}postgresql-logo.png`,
   yugabytedb: `${import.meta.env.VITE_FRONTEND_BASE_URL}yugabytedb-logo.svg`,
+  timescaledb: `${import.meta.env.VITE_FRONTEND_BASE_URL}timescaledb-logo.png`,
   mysql: `${import.meta.env.VITE_FRONTEND_BASE_URL}mysql-logo.png`,
+  starrocks: `${import.meta.env.VITE_FRONTEND_BASE_URL}starrocks-logo.png`,
   mongodb: `${import.meta.env.VITE_FRONTEND_BASE_URL}mongodb-logo.svg`,
   redis: `${import.meta.env.VITE_FRONTEND_BASE_URL}redis-logo.svg`,
   clickhouse: `${import.meta.env.VITE_FRONTEND_BASE_URL}clickhouse-logo.svg`,

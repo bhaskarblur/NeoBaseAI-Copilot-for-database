@@ -77,8 +77,10 @@ export default function ConnectionModal(props: ConnectionModalProps) {
                 >
                   {[
                     { value: 'postgresql', label: 'PostgreSQL' },
+                    { value: 'timescaledb', label: 'TimescaleDB' },
                     { value: 'yugabytedb', label: 'YugabyteDB' },
                     { value: 'mysql', label: 'MySQL' },
+                    { value: 'starrocks', label: 'StarRocks' },
                     { value: 'clickhouse', label: 'ClickHouse' },
                     { value: 'mongodb', label: 'MongoDB' },
                     { value: 'spreadsheet', label: 'Spreadsheet Files (CSV, Excel)' },
