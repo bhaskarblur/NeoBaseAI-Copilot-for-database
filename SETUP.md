@@ -651,6 +651,13 @@ After deployment, follow these steps:
 - Ensure you use hosted url with domains for both Backend and Client in environment variables if hosting on a server
 - Verify your API keys are valid for OpenAI or Gemini
 
+## Contributing
+
+Want to extend NeoBase? See the contributor guides in the `docs/` folder:
+
+- **[How to Add a New Database](../docs/HOW-TO-IMPLEMENT-NEW-DB.md)** — Step-by-step guide covering backend driver, schema fetcher, DI registration, frontend connection modal, Docker Compose example service, landing page, and a full test checklist.
+- **[How to Add a New LLM Provider or Model](../docs/HOW-TO-IMPLEMENT-NEW-LLM.md)** — Step-by-step guide covering the `Client` interface implementation, model catalogue, response schemas, env vars, DI startup wiring, and a full test checklist. Also covers the fast path for adding a new model to an existing provider.
+
 ## Thank you for using NeoBase!
 
 For more information, visit [neobase.cloud](https://neobase.cloud) or check our [GitHub repository](https://github.com/bhaskarblur/neobase-ai-dba).
