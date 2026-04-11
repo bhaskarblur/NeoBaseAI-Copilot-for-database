@@ -114,8 +114,18 @@ func NewManager(redisRepo redis.IRedisRepositories, encryptionKey string) (*Mana
 		return &PostgresDriver{}
 	})
 
+	// TimescaleDB is a PostgreSQL extension — reuse PostgreSQL schema fetcher
+	m.RegisterFetcher("timescaledb", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	// Add MySQL schema fetcher registration
 	m.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// StarRocks uses MySQL wire protocol — reuse MySQL schema fetcher
+	m.RegisterFetcher("starrocks", func(db DBExecutor) SchemaFetcher {
 		return NewMySQLSchemaFetcher(db)
 	})
 
@@ -213,8 +223,14 @@ func (m *Manager) registerDefaultDrivers() {
 	// Register YugabyteDB driver (uses PostgreSQL driver)
 	m.RegisterDriver("yugabytedb", NewPostgresDriver())
 
+	// Register TimescaleDB driver (PostgreSQL extension — uses PostgreSQL driver)
+	m.RegisterDriver("timescaledb", NewPostgresDriver())
+
 	// Register MySQL driver
 	m.RegisterDriver("mysql", NewMySQLDriver())
+
+	// Register StarRocks driver (MySQL-wire-compatible — uses MySQL driver)
+	m.RegisterDriver("starrocks", NewMySQLDriver())
 
 	// Register ClickHouse driver
 	m.RegisterDriver("clickhouse", NewClickHouseDriver())
@@ -757,9 +773,9 @@ func (m *Manager) GetConnection(chatID string) (DBExecutor, error) {
 
 	// Create appropriate wrapper based on database type
 	switch conn.Config.Type {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeTimescaleDB:
 		return NewPostgresWrapper(conn.DB, m, chatID), nil
-	case constants.DatabaseTypeMySQL:
+	case constants.DatabaseTypeMySQL, constants.DatabaseTypeStarRocks:
 		return NewMySQLWrapper(conn.DB, m, chatID), nil
 	case constants.DatabaseTypeClickhouse:
 		return NewClickHouseWrapper(conn.DB, m, chatID), nil

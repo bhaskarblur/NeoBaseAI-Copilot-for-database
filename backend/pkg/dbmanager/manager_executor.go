@@ -225,13 +225,13 @@ func (m *Manager) ExecuteQuery(ctx context.Context, chatID, messageID, queryID, 
 			log.Println("Manager -> ExecuteQuery -> Checking if schema trigger is needed")
 			time.Sleep(2 * time.Second)
 			switch conn.Config.Type {
-			case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+			case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeTimescaleDB:
 				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
 					if conn.OnSchemaChange != nil {
 						conn.OnSchemaChange(conn.ChatID)
 					}
 				}
-			case constants.DatabaseTypeMySQL:
+			case constants.DatabaseTypeMySQL, constants.DatabaseTypeStarRocks:
 				if queryType == "DDL" || queryType == "ALTER" || queryType == "DROP" {
 					if conn.OnSchemaChange != nil {
 						conn.OnSchemaChange(conn.ChatID)
@@ -274,12 +274,13 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 	}
 
 	switch config.Type {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeTimescaleDB:
 		var dsn string
 		port := "5432" // Default port
 		if config.Type == constants.DatabaseTypeYugabyteDB {
-			port = "5433" // Default port
+			port = "5433" // Default port for YugabyteDB
 		}
+		// TimescaleDB always runs on the standard PostgreSQL port (5432)
 
 		if config.Port != nil && *config.Port != "" {
 			port = *config.Port
@@ -358,9 +359,12 @@ func (m *Manager) TestConnection(config *ConnectionConfig) error {
 
 		return nil
 
-	case constants.DatabaseTypeMySQL:
+	case constants.DatabaseTypeMySQL, constants.DatabaseTypeStarRocks:
 		var dsn string
-		port := "3306" // Default port for MySQL
+		port := "3306" // Default port for MySQL / StarRocks (MySQL FE query port)
+		if config.Type == constants.DatabaseTypeStarRocks {
+			port = "9030" // StarRocks FE MySQL query port
+		}
 
 		if config.Port != nil && *config.Port != "" {
 			port = *config.Port
