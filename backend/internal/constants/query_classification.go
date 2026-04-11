@@ -91,7 +91,9 @@ var MongoDBQueryClassification = QueryClassification{
 var queryClassificationMap = map[string]QueryClassification{
 	DatabaseTypePostgreSQL:   PostgreSQLQueryClassification,
 	DatabaseTypeYugabyteDB:   YugabyteDBQueryClassification,
+	DatabaseTypeTimescaleDB:  PostgreSQLQueryClassification, // TimescaleDB extends PostgreSQL
 	DatabaseTypeMySQL:        MySQLQueryClassification,
+	DatabaseTypeStarRocks:    MySQLQueryClassification, // StarRocks is MySQL-wire-compatible
 	DatabaseTypeClickhouse:   ClickHouseQueryClassification,
 	DatabaseTypeMongoDB:      MongoDBQueryClassification,
 	DatabaseTypeSpreadsheet:  SpreadsheetQueryClassification,

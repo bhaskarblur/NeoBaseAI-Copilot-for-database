@@ -529,6 +529,19 @@ DATABASE-SPECIFIC INSTRUCTIONS (PostgreSQL/YugabyteDB):
 - JOINs are preferred over subqueries for readability and performance.
 - All queries MUST be SELECT-only (read-only).
 `
+	case DatabaseTypeTimescaleDB:
+		return `
+DATABASE-SPECIFIC INSTRUCTIONS (TimescaleDB):
+- Write standard PostgreSQL SQL queries compatible with TimescaleDB extensions.
+- Use time_bucket() for time-series aggregations: SELECT time_bucket('1 hour', time) AS bucket, AVG(value) FROM measurements GROUP BY bucket ORDER BY bucket
+- Use first(), last() for value at first/last time point.
+- Use time_bucket_gapfill() with locf() or interpolate() to fill time gaps.
+- Use NOW() and INTERVAL for time-based filtering: WHERE time >= NOW() - INTERVAL '7 days'
+- Use LIMIT/OFFSET for pagination. Default LIMIT 50 for table widgets.
+- Use COUNT(*), SUM(), AVG(), MIN(), MAX() for aggregations.
+- JOINs are preferred over subqueries.
+- All queries MUST be SELECT-only (read-only).
+`
 	case DatabaseTypeMySQL:
 		return `
 DATABASE-SPECIFIC INSTRUCTIONS (MySQL):
@@ -543,6 +556,23 @@ DATABASE-SPECIFIC INSTRUCTIONS (MySQL):
 - Use IFNULL(col, default) or COALESCE(col, default) for null handling.
 - Use DATE(col) or DATE_FORMAT(col, '%Y-%m-%d') for grouping by date.
 - JOINs are preferred over subqueries.
+- All queries MUST be SELECT-only (read-only).
+`
+	case DatabaseTypeStarRocks:
+		return `
+DATABASE-SPECIFIC INSTRUCTIONS (StarRocks):
+- Write analytical SQL queries using StarRocks/MySQL-compatible syntax.
+- Use backtick-quoted identifiers for reserved words: ` + "`table`.`column`" + `
+- Use single quotes for string literals: 'value'
+- Use LIMIT for pagination. Default LIMIT 100 for table widgets.
+- Use NOW() and INTERVAL for time-based filtering: WHERE created_at >= NOW() - INTERVAL 7 DAY
+- Use DATE_TRUNC() or DATE_FORMAT() for date grouping.
+- Use APPROX_COUNT_DISTINCT() for fast approximate distinct counts on large datasets.
+- Use GROUP BY, ROLLUP, GROUPING SETS for multi-dimensional aggregations.
+- Window functions are supported: ROW_NUMBER(), RANK(), SUM() OVER(), LAG(), LEAD()
+- Count(*), SUM(), AVG(), MIN(), MAX() for aggregations.
+- JOINs are preferred over subqueries.
+- Specify columns explicitly — avoid SELECT * on wide columnar tables.
 - All queries MUST be SELECT-only (read-only).
 `
 	case DatabaseTypeMongoDB:

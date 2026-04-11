@@ -61,6 +61,10 @@ func getDatabasePrompt(dbType string) string {
 		return ClickhousePrompt
 	case DatabaseTypeMongoDB:
 		return MongoDBPrompt
+	case DatabaseTypeTimescaleDB:
+		return PostgreSQLPrompt + TimescaleDBExtensions
+	case DatabaseTypeStarRocks:
+		return MySQLPrompt + StarRocksExtensions
 	case DatabaseTypeSpreadsheet:
 		return PostgreSQLPrompt // Use PostgreSQL schema since spreadsheet uses PostgreSQL internally
 	default:
@@ -117,9 +121,9 @@ Examples of CORRECT assistantMessage:
 	switch dbType {
 	case DatabaseTypeMongoDB:
 		return baseInstructions + getMongoDBNonTechInstructions()
-	case DatabaseTypePostgreSQL, DatabaseTypeYugabyteDB:
+	case DatabaseTypePostgreSQL, DatabaseTypeYugabyteDB, DatabaseTypeTimescaleDB:
 		return baseInstructions + getPostgreSQLNonTechInstructions()
-	case DatabaseTypeMySQL:
+	case DatabaseTypeMySQL, DatabaseTypeStarRocks:
 		return baseInstructions + getMySQLNonTechInstructions()
 	case DatabaseTypeClickhouse:
 		return baseInstructions + getClickhouseNonTechInstructions()
@@ -161,6 +165,10 @@ func GetVisualizationPrompt(dbType string) string {
 		return ClickhouseVisualizationPrompt
 	case DatabaseTypeMongoDB:
 		return MongoDBVisualizationPrompt
+	case DatabaseTypeTimescaleDB:
+		return PostgreSQLVisualizationPrompt + TimescaleDBVisualizationExtensions
+	case DatabaseTypeStarRocks:
+		return MySQLVisualizationPrompt + StarRocksVisualizationExtensions
 	case DatabaseTypeSpreadsheet:
 		return PostgreSQLVisualizationPrompt // Use PostgreSQL prompt for spreadsheets
 	default:

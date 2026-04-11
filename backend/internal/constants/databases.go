@@ -11,4 +11,6 @@ const (
 	DatabaseTypeCassandra    = "cassandra"
 	DatabaseTypeSpreadsheet  = "spreadsheet"
 	DatabaseTypeGoogleSheets = "google_sheets"
+	DatabaseTypeTimescaleDB  = "timescaledb"
+	DatabaseTypeStarRocks    = "starrocks"
 )
