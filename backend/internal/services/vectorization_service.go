@@ -956,6 +956,20 @@ func getDBTerminology(dbType string) dbTerminology {
 			FieldLabel:  "Columns",
 			EngineNote:  "ClickHouse columnar OLAP database — optimised for analytical queries",
 		}
+	case constants.DatabaseTypeTimescaleDB:
+		return dbTerminology{
+			EntityLabel: "Table",
+			CountLabel:  "rows",
+			FieldLabel:  "Columns",
+			EngineNote:  "TimescaleDB — PostgreSQL extension optimised for time-series data; use time_bucket() for time aggregations",
+		}
+	case constants.DatabaseTypeStarRocks:
+		return dbTerminology{
+			EntityLabel: "Table",
+			CountLabel:  "rows",
+			FieldLabel:  "Columns",
+			EngineNote:  "StarRocks — MySQL-compatible MPP analytical database; use APPROX_COUNT_DISTINCT() for large cardinality estimates",
+		}
 	case constants.DatabaseTypeCassandra:
 		return dbTerminology{
 			EntityLabel: "Table",

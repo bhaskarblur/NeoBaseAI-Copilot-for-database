@@ -517,7 +517,7 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 	}
 
 	switch dbType {
-	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB:
+	case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeTimescaleDB:
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
 			log.Printf("getTableChecksums -> context cancelled: %v", err)
@@ -556,8 +556,8 @@ func (sm *SchemaManager) getTableChecksums(ctx context.Context, db DBExecutor, d
 			checksums[tableName] = checksum
 		}
 		return checksums, nil
-	case constants.DatabaseTypeMySQL:
-		// Implement MySQL checksum calculation
+	case constants.DatabaseTypeMySQL, constants.DatabaseTypeStarRocks:
+		// Implement MySQL / StarRocks checksum calculation
 		checksums := make(map[string]string)
 
 		// Get schema directly from the database
@@ -1662,8 +1662,18 @@ func (sm *SchemaManager) registerDefaultFetchers() {
 		return &PostgresDriver{}
 	})
 
+	// Register TimescaleDB schema fetcher (TimescaleDB is a PostgreSQL extension)
+	sm.RegisterFetcher("timescaledb", func(db DBExecutor) SchemaFetcher {
+		return &PostgresDriver{}
+	})
+
 	// Register MySQL schema fetcher
 	sm.RegisterFetcher("mysql", func(db DBExecutor) SchemaFetcher {
+		return NewMySQLSchemaFetcher(db)
+	})
+
+	// Register StarRocks schema fetcher (StarRocks uses MySQL wire protocol)
+	sm.RegisterFetcher("starrocks", func(db DBExecutor) SchemaFetcher {
 		return NewMySQLSchemaFetcher(db)
 	})
 

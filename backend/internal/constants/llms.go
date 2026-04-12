@@ -1,6 +1,9 @@
 package constants
 
-import "log"
+import (
+	"log"
+	"strings"
+)
 
 const (
 	OpenAI = "openai"
@@ -61,6 +64,18 @@ func getDatabasePrompt(dbType string) string {
 		return ClickhousePrompt
 	case DatabaseTypeMongoDB:
 		return MongoDBPrompt
+	case DatabaseTypeTimescaleDB:
+		// Replace the opening identity line so the LLM knows it is a TimescaleDB assistant,
+		// not a generic PostgreSQL assistant, while keeping all PostgreSQL rules intact.
+		return "You are NeoBase AI, a TimescaleDB database assistant. TimescaleDB is a PostgreSQL extension optimised for time-series data. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests." +
+			PostgreSQLPrompt[strings.Index(PostgreSQLPrompt, "\n"):] +
+			TimescaleDBExtensions
+	case DatabaseTypeStarRocks:
+		// Replace the opening identity line so the LLM knows it is a StarRocks assistant,
+		// not a generic MySQL assistant, while keeping all MySQL rules intact.
+		return "You are NeoBase AI, a StarRocks database assistant. StarRocks is a MySQL-wire-compatible MPP OLAP database optimised for large-scale real-time analytics. Your task is to generate & manage safe, efficient, and schema-aware SQL queries, results based on user requests." +
+			MySQLPrompt[strings.Index(MySQLPrompt, "\n"):] +
+			StarRocksExtensions
 	case DatabaseTypeSpreadsheet:
 		return PostgreSQLPrompt // Use PostgreSQL schema since spreadsheet uses PostgreSQL internally
 	default:
@@ -117,9 +132,9 @@ Examples of CORRECT assistantMessage:
 	switch dbType {
 	case DatabaseTypeMongoDB:
 		return baseInstructions + getMongoDBNonTechInstructions()
-	case DatabaseTypePostgreSQL, DatabaseTypeYugabyteDB:
+	case DatabaseTypePostgreSQL, DatabaseTypeYugabyteDB, DatabaseTypeTimescaleDB:
 		return baseInstructions + getPostgreSQLNonTechInstructions()
-	case DatabaseTypeMySQL:
+	case DatabaseTypeMySQL, DatabaseTypeStarRocks:
 		return baseInstructions + getMySQLNonTechInstructions()
 	case DatabaseTypeClickhouse:
 		return baseInstructions + getClickhouseNonTechInstructions()
@@ -161,6 +176,10 @@ func GetVisualizationPrompt(dbType string) string {
 		return ClickhouseVisualizationPrompt
 	case DatabaseTypeMongoDB:
 		return MongoDBVisualizationPrompt
+	case DatabaseTypeTimescaleDB:
+		return PostgreSQLVisualizationPrompt + TimescaleDBVisualizationExtensions
+	case DatabaseTypeStarRocks:
+		return MySQLVisualizationPrompt + StarRocksVisualizationExtensions
 	case DatabaseTypeSpreadsheet:
 		return PostgreSQLVisualizationPrompt // Use PostgreSQL prompt for spreadsheets
 	default:

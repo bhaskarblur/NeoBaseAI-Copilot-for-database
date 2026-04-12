@@ -172,6 +172,13 @@ We welcome contributions! Here's how you can help:
 
 See the list of contributors in [CONTRIBUTORS](CONTRIBUTORS) file.
 
+### Contributor Guides
+
+Detailed step-by-step guides for common contribution tasks:
+
+- **[How to Add a New Database](docs/HOW-TO-IMPLEMENT-NEW-DB.md)** — Full walkthrough for adding a new DB type (backend driver, schema fetcher, frontend UI, Docker Compose example, landing page, and testing checklist).
+- **[How to Add a New LLM Provider or Model](docs/HOW-TO-IMPLEMENT-NEW-LLM.md)** — Full walkthrough for adding a new LLM provider (client implementation, model catalogue, env vars, DI wiring) or adding a new model to an existing provider.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

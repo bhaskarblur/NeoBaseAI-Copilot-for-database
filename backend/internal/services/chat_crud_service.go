@@ -120,6 +120,8 @@ func isValidDBType(dbType string) bool {
 		constants.DatabaseTypeNeo4j,
 		constants.DatabaseTypeSpreadsheet,
 		constants.DatabaseTypeGoogleSheets,
+		constants.DatabaseTypeTimescaleDB,
+		constants.DatabaseTypeStarRocks,
 	}
 
 	for _, validType := range validTypes {

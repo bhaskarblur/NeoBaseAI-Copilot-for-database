@@ -92,8 +92,10 @@ func Initialize() {
 		}
 		// Register database drivers
 		manager.RegisterDriver(constants.DatabaseTypePostgreSQL, dbmanager.NewPostgresDriver())
-		manager.RegisterDriver(constants.DatabaseTypeYugabyteDB, dbmanager.NewPostgresDriver()) // Use same driver for both
+		manager.RegisterDriver(constants.DatabaseTypeYugabyteDB, dbmanager.NewPostgresDriver())  // Use same driver for both
+		manager.RegisterDriver(constants.DatabaseTypeTimescaleDB, dbmanager.NewPostgresDriver()) // TimescaleDB is a PostgreSQL extension
 		manager.RegisterDriver(constants.DatabaseTypeMySQL, dbmanager.NewMySQLDriver())
+		manager.RegisterDriver(constants.DatabaseTypeStarRocks, dbmanager.NewMySQLDriver()) // StarRocks uses MySQL wire protocol
 		manager.RegisterDriver(constants.DatabaseTypeClickhouse, dbmanager.NewClickHouseDriver())
 		manager.RegisterDriver(constants.DatabaseTypeMongoDB, dbmanager.NewMongoDBDriver())
 		manager.RegisterDriver(constants.DatabaseTypeSpreadsheet, dbmanager.NewSpreadsheetDriver())
@@ -105,8 +107,14 @@ func Initialize() {
 		manager.RegisterFetcher(constants.DatabaseTypeYugabyteDB, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
 			return &dbmanager.PostgresDriver{}
 		})
+		manager.RegisterFetcher(constants.DatabaseTypeTimescaleDB, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return &dbmanager.PostgresDriver{} // TimescaleDB is a PostgreSQL extension
+		})
 		manager.RegisterFetcher(constants.DatabaseTypeMySQL, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
 			return dbmanager.NewMySQLSchemaFetcher(db)
+		})
+		manager.RegisterFetcher(constants.DatabaseTypeStarRocks, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
+			return dbmanager.NewMySQLSchemaFetcher(db) // StarRocks is MySQL-wire-compatible
 		})
 		manager.RegisterFetcher(constants.DatabaseTypeClickhouse, func(db dbmanager.DBExecutor) dbmanager.SchemaFetcher {
 			return &dbmanager.ClickHouseDriver{}
@@ -211,9 +219,19 @@ func Initialize() {
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
+						DBType:       constants.DatabaseTypeTimescaleDB,
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeTimescaleDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeTimescaleDB, false),
+					},
+					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeStarRocks,
+						Schema:       constants.GetLLMResponseSchema(constants.OpenAI, constants.DatabaseTypeStarRocks),
+						SystemPrompt: constants.GetSystemPrompt(constants.OpenAI, constants.DatabaseTypeStarRocks, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,
@@ -269,9 +287,19 @@ func Initialize() {
 						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
+						DBType:       constants.DatabaseTypeTimescaleDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeTimescaleDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeTimescaleDB, false),
+					},
+					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeStarRocks,
+						Schema:       constants.GetLLMResponseSchema(constants.Gemini, constants.DatabaseTypeStarRocks),
+						SystemPrompt: constants.GetSystemPrompt(constants.Gemini, constants.DatabaseTypeStarRocks, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,
@@ -327,9 +355,19 @@ func Initialize() {
 						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
+						DBType:       constants.DatabaseTypeTimescaleDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeTimescaleDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeTimescaleDB, false),
+					},
+					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeStarRocks,
+						Schema:       constants.GetLLMResponseSchema(constants.Claude, constants.DatabaseTypeStarRocks),
+						SystemPrompt: constants.GetSystemPrompt(constants.Claude, constants.DatabaseTypeStarRocks, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,
@@ -385,9 +423,19 @@ func Initialize() {
 						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeYugabyteDB, false),
 					},
 					{
+						DBType:       constants.DatabaseTypeTimescaleDB,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeTimescaleDB),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeTimescaleDB, false),
+					},
+					{
 						DBType:       constants.DatabaseTypeMySQL,
 						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeMySQL),
 						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeMySQL, false),
+					},
+					{
+						DBType:       constants.DatabaseTypeStarRocks,
+						Schema:       constants.GetLLMResponseSchema(constants.Ollama, constants.DatabaseTypeStarRocks),
+						SystemPrompt: constants.GetSystemPrompt(constants.Ollama, constants.DatabaseTypeStarRocks, false),
 					},
 					{
 						DBType:       constants.DatabaseTypeClickhouse,

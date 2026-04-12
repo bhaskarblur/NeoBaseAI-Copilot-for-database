@@ -297,11 +297,23 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
           placeholder: 'postgresql://username:password@host:port/database',
           description: 'Paste your YugabyteDB connection string to auto-fill fields'
         };
+      case 'timescaledb':
+        return {
+          label: 'TimescaleDB Connection URI',
+          placeholder: 'postgresql://username:password@host:port/database',
+          description: 'Paste your TimescaleDB connection string to auto-fill fields'
+        };
       case 'mysql':
         return {
           label: 'MySQL Connection URI',
           placeholder: 'mysql://username:password@host:port/database',
           description: 'Paste your MySQL connection string to auto-fill fields'
+        };
+      case 'starrocks':
+        return {
+          label: 'StarRocks Connection URI',
+          placeholder: 'mysql://username:password@host:port/database',
+          description: 'Paste your StarRocks connection string to auto-fill fields'
         };
       case 'clickhouse':
         return {
@@ -369,9 +381,11 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
   const getDefaultPort = (dbType: string): string => {
     switch (dbType) {
       case 'postgresql':
+      case 'timescaledb':
       case 'yugabytedb':
         return '5432';
       case 'mysql':
+      case 'starrocks':
         return '3306';
       case 'clickhouse':
         return '8123';
@@ -450,8 +464,10 @@ const BasicConnectionTab: React.FC<BasicConnectionTabProps> = ({
             Connection URI will be used to auto-fill the fields below. Replace &lt;password&gt; with your actual password.
             {formData.type === 'mongodb' && ' Both standard and Atlas SRV formats supported.'}
             {formData.type === 'postgresql' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
+            {formData.type === 'timescaledb' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
             {formData.type === 'yugabytedb' && ' Supports sslmode parameter (e.g., ?sslmode=require).'}
             {formData.type === 'mysql' && ' Supports useSSL parameter (e.g., ?useSSL=true).'}
+            {formData.type === 'starrocks' && ' Supports useSSL parameter (e.g., ?useSSL=true).'}
             {formData.type === 'clickhouse' && ' Supports secure parameter (e.g., ?secure=true).'}
           </p>
         </div>

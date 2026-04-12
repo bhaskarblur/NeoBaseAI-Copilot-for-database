@@ -16,6 +16,8 @@ const SupportedTechnologiesSection: React.FC = () => {
     { name: 'Cassandra', src: '/cassandra-logo.png', alt: 'Cassandra Logo' },
     { name: 'ClickHouse', src: '/clickhouse-logo.svg', alt: 'ClickHouse Logo' },
     { name: 'YugabyteDB', src: '/yugabytedb-logo.svg', alt: 'YugabyteDB Logo' },
+    { name: 'TimescaleDB', src: '/timescaledb-logo.png', alt: 'TimescaleDB Logo' },
+    { name: 'StarRocks', src: '/starrocks-logo.png', alt: 'StarRocks Logo' },
     { name: 'Neo4j', src: '/neo4j-logo.png', alt: 'Neo4j Logo' },
     { name: 'Google Sheets', src: '/gsheets-logo.png', alt: 'Google Sheets Logo' },
     { name: 'Microsoft Excel', src: '/excel-logo.png', alt: 'Microsoft Excel Logo' },

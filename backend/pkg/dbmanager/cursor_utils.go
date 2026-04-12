@@ -30,7 +30,8 @@ func BuildCursorQuery(dbType, baseQuery, paginatedQuery, cursorField, cursorDire
 		log.Printf("[CURSOR] Replacing {{cursor_value}} in paginatedQuery for %s", dbType)
 		switch dbType {
 		case constants.DatabaseTypePostgreSQL, constants.DatabaseTypeMySQL,
-			constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeClickhouse:
+			constants.DatabaseTypeYugabyteDB, constants.DatabaseTypeTimescaleDB,
+			constants.DatabaseTypeStarRocks, constants.DatabaseTypeClickhouse:
 			return strings.ReplaceAll(paginatedQuery, placeholder, sqlFormatCursorValue(cursorValue))
 		default:
 			return mongoInjectTemplatedCursor(paginatedQuery, cursorValue)

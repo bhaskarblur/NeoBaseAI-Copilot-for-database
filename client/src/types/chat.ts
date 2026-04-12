@@ -31,7 +31,7 @@ export interface FileUpload {
 }
 
 export interface Connection {
-    type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets';
+    type: 'postgresql' | 'yugabytedb' | 'mysql' | 'clickhouse' | 'mongodb' | 'redis' | 'neo4j' | 'spreadsheet' | 'google_sheets' | 'timescaledb' | 'starrocks';
     host: string;
     port: string;
     username: string;

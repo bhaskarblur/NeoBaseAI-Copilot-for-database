@@ -90,7 +90,7 @@ export const formatDateValue = (dateStr: string, friendly: boolean): string => {
     } catch { return dateStr; }
 };
 
-// Helper: format stat values
+// Helper: format stat values — abbreviated (K/M/B) mode
 export function formatStatValue(
     value: number,
     format?: string,
@@ -112,9 +112,37 @@ export function formatStatValue(
             if (value >= 60) return `${(value / 60).toFixed(1)}m`;
             return `${value.toFixed(0)}s`;
         default:
-            if (value >= 1_000_000) formatted = `${(value / 1_000_000).toFixed(1)}M`;
+            if (value >= 1_000_000_000) formatted = `${(value / 1_000_000_000).toFixed(1)}B`;
+            else if (value >= 1_000_000) formatted = `${(value / 1_000_000).toFixed(1)}M`;
             else if (value >= 1_000) formatted = `${(value / 1_000).toFixed(1)}K`;
             else formatted = value.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+            return `${prefix || ''}${formatted}${suffix || ''}`;
+    }
+}
+
+// Helper: format stat values — full (no abbreviation) mode
+export function formatStatValueFull(
+    value: number,
+    format?: string,
+    prefix?: string,
+    suffix?: string,
+    decimalPlaces?: number,
+): string {
+    const dp = decimalPlaces ?? 0;
+    let formatted: string;
+    switch (format) {
+        case 'currency':
+            formatted = value.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+            return `${prefix || '$'}${formatted}${suffix || ''}`;
+        case 'percentage':
+            formatted = value.toFixed(dp);
+            return `${prefix || ''}${formatted}%${suffix || ''}`;
+        case 'duration':
+            if (value >= 3600) return `${(value / 3600).toFixed(1)}h`;
+            if (value >= 60) return `${(value / 60).toFixed(1)}m`;
+            return `${value.toFixed(0)}s`;
+        default:
+            formatted = value.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
             return `${prefix || ''}${formatted}${suffix || ''}`;
     }
 }

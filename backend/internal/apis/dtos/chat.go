@@ -14,7 +14,7 @@ type ChatSettingsResponse struct {
 	AutoGenerateVisualization bool `json:"auto_generate_visualization"`
 }
 type CreateConnectionRequest struct {
-	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb mysql clickhouse mongodb redis neo4j cassandra spreadsheet google_sheets"`
+	Type         string  `json:"type" binding:"required,oneof=postgresql yugabytedb timescaledb mysql starrocks clickhouse mongodb redis neo4j cassandra spreadsheet google_sheets"`
 	Host         string  `json:"host"`
 	Port         *string `json:"port"`
 	Username     string  `json:"username"`
