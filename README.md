@@ -42,8 +42,10 @@
 
 ## Supported DBs
 - PostgreSQL
+- Timescale
 - Yugabyte
 - MySQL
+- Starrocks
 - ClickHouse
 - MongoDB
 - Spreadsheet (CSV/Excel)
