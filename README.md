@@ -2,8 +2,9 @@
 <!-- <img width="1707" alt="Screenshot 2025-02-10 at 7 12 19 PM" src="https://github.com/user-attachments/assets/50c36c8b-52f4-49c8-8b2b-d7b98279aa52" /> -->
 
 <img width="1850" height="971" alt="neobase-banner" src="https://github.com/user-attachments/assets/1c88e3d2-6ae8-4398-a816-c5bf7224d08a" />
+<br><br>
 
-<div align="center" style="margin-top:12px;">
+<div align="center">
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/VT9NRub86D)
 [![Product Hunt](https://img.shields.io/badge/Product%20Hunt-Featured-DA552F?style=for-the-badge&logo=producthunt&logoColor=white)](https://www.producthunt.com/posts/neobase-2)
