@@ -8,6 +8,7 @@ Add core team members here with their GitHub profiles and roles -->
 - [Bhaskar Kaura](https://github.com/bhaskarblur) - Founder & Maintainer
 - [Ankit Srivastava](https://github.com/ankit-apk) - Founder & Maintainer
 - [Denis Perov](https://github.com/imajus) - Early Contributor
+- [Nishkarsh Saxena](https://github.com/nishkarsh800) - Product Manager
 
 
 ## Contributors
